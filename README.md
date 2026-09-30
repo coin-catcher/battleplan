@@ -1,2 +1,59 @@
 # warplan
-Strategy, tactics, design, and agent orchestration management dashboard
+
+Strategy, tactics, design, and agent orchestration management dashboard.
+
+Warplan is the planning surface for a project. A project starts as a prompt to a [Cursor cloud agent](https://cursor.com/docs/cloud-agent/api/endpoints). The conversation stays in the warplan UI. When the plan is settled, **Generate Tasks** asks the agent for an ordered task list. Each task is either a code change or a research write-up, can depend on other tasks, and is executed by its own cloud agent. Finished work comes back as a pull request for review. Approval tells the agent to merge the pull request.
+
+## Layout
+
+| Path | What it is |
+| --- | --- |
+| `infra/bootstrap` | One-time Terraform. Creates the S3 bucket that stores later `*.tfplan` files, plus a lock table for remote state. |
+| `infra` | Shared DynamoDB table, HTTP API, and Lambda role. State and plans live in the bootstrap bucket. |
+| `faas/projects` | Project create, list, rename, and delete. |
+| `faas/tasks` | Task list, edits, reorder, dependencies, and status changes. |
+| `faas/outputs` | Code and research pull-request records. |
+| `faas/chat` | Chat history and the question/answer loop with Cursor. |
+| `faas/agents` | Direct Cursor agent commands: status, follow-up runs, and cancel. |
+| `frontend` | Angular app. |
+
+Each of those folders has a `package.json` with `build`, `test:local`, `test:agent`, `deploy:local`, and `deploy:agent`.
+
+`deploy:local` uses `AWS_PROFILE` (default `default`) and asks before apply. `deploy:agent` is for a Cursor cloud agent: `TF_IN_AUTOMATION=1`, no profile prompt, and apply without a confirmation. Set `WARPLAN_AUTO_APPROVE=1` to apply from a local non-interactive shell.
+
+## Data
+
+Projects, tasks, outputs, and chat messages share one DynamoDB table.
+
+- **projects**: `project_id`, `title`, `initial_prompt`, `cursor_chat_link`, plus the Cursor agent id and repository.
+- **project_tasks**: `task_id`, `project_id`, `title`, `prompt`, `dependencies`, `status`, `output_type` (`code` or `research`).
+- **task_code_output**: `task_id`, `repo`, `branch`, `pr_message`, `pr_link`.
+- **task_research_output**: the same pull-request fields, plus `path` under `research/<project_id>/<task_id>/`.
+
+Guided status changes are `TODO → DOING → DONE` or `ABANDONED`. A task in `DOING` moves to `REVIEW` when a pull request is ready. Feedback returns it to `DOING`. Approval asks the Cursor agent to merge, then the task becomes `DONE`. The status dropdown can set any status directly.
+
+A task has one output type. If a generated task asks for both, the tasks Lambda splits it into a research task and a code task that depends on it.
+
+## Local development
+
+```bash
+npm install --prefix faas
+npm run dev:local --prefix faas
+npm start --prefix frontend
+```
+
+The faas dev server runs the Lambda handlers in-process on `http://localhost:8787`. Without `CURSOR_API_KEY` it uses a demo agent so the UI can create a project, generate tasks, open a pull request, and approve a merge. With `CURSOR_API_KEY` set, those same handlers call `https://api.cursor.com/v1`.
+
+## Deploy
+
+```bash
+cp .env.example .env
+# export the variables, including CURSOR_API_KEY
+
+npm run deploy:local --prefix infra/bootstrap   # once
+npm run deploy:local
+```
+
+Cloud agents run `npm run deploy:agent` instead. Bootstrap is idempotent. Every later `terraform plan -out=*.tfplan` is uploaded to `s3://<plan-bucket>/plans/...` before apply. Remote state is stored in the same bucket under `state/`.
+
+The frontend deploy builds the Angular app with the API endpoint from `infra/outputs.env` and syncs it to the frontend S3 website bucket.

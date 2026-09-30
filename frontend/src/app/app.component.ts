@@ -1,0 +1,171 @@
+import { NgTemplateOutlet } from '@angular/common';
+import { Component, effect, inject, OnInit } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import type { OutputType, ProjectTask, TaskStatus } from './core/models';
+import { TASK_STATUSES } from './core/models';
+import type { TaskNode } from './core/task-tree';
+import { WarplanStore } from './state/warplan-store.service';
+
+@Component({
+  selector: 'app-root',
+  imports: [FormsModule, NgTemplateOutlet],
+  templateUrl: './app.component.html',
+  styleUrl: './app.component.scss',
+})
+export class AppComponent implements OnInit {
+  readonly store = inject(WarplanStore);
+  readonly statuses = TASK_STATUSES;
+
+  title = '';
+  initialPrompt = '';
+  repoUrl = '';
+  startingRef = 'main';
+  chatDraft = '';
+  taskTitle = '';
+  taskPrompt = '';
+  outputType: OutputType = 'code';
+  dependencies: string[] = [];
+  codeRepo = '';
+  codeBranch = '';
+  codeMessage = '';
+  codeLink = '';
+  researchRepo = '';
+  researchBranch = '';
+  researchMessage = '';
+  researchLink = '';
+  researchPath = '';
+
+  private titleSignature = '';
+  private taskSignature = '';
+  private outputSignature = '';
+
+  constructor() {
+    effect(() => {
+      const project = this.store.project();
+      const signature = project ? `${project.project_id}:${project.title}` : '';
+      if (signature === this.titleSignature) return;
+      this.titleSignature = signature;
+      this.title = project?.title ?? '';
+    });
+
+    effect(() => {
+      const task = this.store.selectedTask();
+      if (!task || this.store.selection().kind !== 'task') return;
+      const signature = `${task.task_id}:${task.updated_at}:${task.status}:${task.dependencies.join(',')}`;
+      if (signature === this.taskSignature) return;
+      this.taskSignature = signature;
+      this.taskTitle = task.title;
+      this.taskPrompt = task.prompt;
+      this.outputType = task.output_type;
+      this.dependencies = [...task.dependencies];
+    });
+
+    effect(() => {
+      const task = this.store.selectedTask();
+      const selection = this.store.selection();
+      if (!task || (selection.kind !== 'code' && selection.kind !== 'research')) return;
+      const output = selection.kind === 'code'
+        ? this.store.codeOutput(task.task_id)
+        : this.store.researchOutput(task.task_id);
+      const signature = `${selection.kind}:${task.task_id}:${output?.pr_link ?? ''}:${output?.branch ?? ''}:${output && 'path' in output ? output.path : ''}`;
+      if (signature === this.outputSignature) return;
+      this.outputSignature = signature;
+      if (selection.kind === 'code') {
+        this.codeRepo = output?.repo ?? '';
+        this.codeBranch = output?.branch ?? '';
+        this.codeMessage = output?.pr_message ?? '';
+        this.codeLink = output?.pr_link ?? '';
+        return;
+      }
+      const research = this.store.researchOutput(task.task_id);
+      this.researchRepo = research?.repo ?? '';
+      this.researchBranch = research?.branch ?? '';
+      this.researchMessage = research?.pr_message ?? '';
+      this.researchLink = research?.pr_link ?? '';
+      this.researchPath = research?.path ?? `research/${task.project_id}/${task.task_id}/`;
+    });
+  }
+
+  ngOnInit(): void {
+    void this.store.loadProjects();
+  }
+
+  otherTasks(): ProjectTask[] {
+    const current = this.store.selectedTask();
+    return this.store.tasks().filter((task) => task.task_id !== current?.task_id);
+  }
+
+  isSelected(node: TaskNode): boolean {
+    const selection = this.store.selection();
+    return selection.kind === 'task' && selection.taskId === node.task.task_id;
+  }
+
+  isOutputSelected(taskId: string, kind: string): boolean {
+    const selection = this.store.selection();
+    return selection.kind === kind && 'taskId' in selection && selection.taskId === taskId;
+  }
+
+  openCode(taskId: string): void {
+    void this.store.openOutput(taskId, 'code');
+  }
+
+  openResearch(taskId: string): void {
+    void this.store.openOutput(taskId, 'research');
+  }
+
+  start(taskId: string): void {
+    void this.store.transition(taskId, 'DOING', false);
+  }
+
+  toggleDependency(taskId: string, event: Event): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.dependencies = checked
+      ? [...this.dependencies, taskId]
+      : this.dependencies.filter((id) => id !== taskId);
+  }
+
+  async onProjectChange(event: Event): Promise<void> {
+    const projectId = (event.target as HTMLSelectElement).value;
+    if (projectId) await this.store.selectProject(projectId);
+  }
+
+  async onStatusChange(taskId: string, event: Event): Promise<void> {
+    const status = (event.target as HTMLSelectElement).value as TaskStatus;
+    await this.store.transition(taskId, status, true);
+  }
+
+  async createProject(): Promise<void> {
+    await this.store.createProject({
+      initial_prompt: this.initialPrompt,
+      repo_url: this.repoUrl.trim() || undefined,
+      starting_ref: this.startingRef.trim() || undefined,
+    });
+    if (!this.store.error()) {
+      this.initialPrompt = '';
+    }
+  }
+
+  async sendChat(): Promise<void> {
+    const message = this.chatDraft.trim();
+    if (!message) return;
+    const selection = this.store.selection();
+    if (selection.kind === 'task') await this.store.sendTaskMessage(message);
+    else await this.store.sendProjectMessage(message);
+    if (!this.store.error()) this.chatDraft = '';
+  }
+
+  async saveTask(): Promise<void> {
+    await this.store.saveTask({
+      title: this.taskTitle,
+      prompt: this.taskPrompt,
+      output_type: this.outputType,
+      dependencies: this.dependencies,
+    });
+  }
+
+  deleteTask(task: ProjectTask): void {
+    if (confirm(`Delete "${task.title}"?`)) {
+      void this.store.deleteTask(task.task_id);
+    }
+  }
+}
