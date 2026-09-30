@@ -2,6 +2,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../environments/environment';
+import { RequestSigner } from './request-signer.service';
 import type {
   ChatMessage,
   Project,
@@ -15,6 +16,7 @@ import type {
 @Injectable({ providedIn: 'root' })
 export class WarplanApi {
   private readonly http = inject(HttpClient);
+  private readonly signer = inject(RequestSigner);
   private readonly base = environment.apiBaseUrl.replace(/\/$/, '');
 
   listProjects(): Promise<Project[]> {
@@ -99,15 +101,28 @@ export class WarplanApi {
   }
 
   private get<T>(path: string): Promise<T> {
-    return firstValueFrom(this.http.get<T>(`${this.base}${path}`)).catch((error: unknown) => {
-      throw new Error(readError(error));
-    });
+    return this.request<T>('GET', path);
   }
 
   private send<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
-    return firstValueFrom(this.http.request<T>(method, `${this.base}${path}`, { body })).catch((error: unknown) => {
+    return this.request<T>(method, path, body);
+  }
+
+  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const raw = body === undefined ? '' : JSON.stringify(body);
+    const signed = await this.signer.sign(method, path, raw);
+    try {
+      return await firstValueFrom(this.http.request<T>(method, `${this.base}${path}`, {
+        body: raw === '' ? null : raw,
+        headers: {
+          'content-type': 'application/json',
+          'x-warplan-timestamp': signed.timestamp,
+          'x-warplan-signature': signed.signature,
+        },
+      }));
+    } catch (error: unknown) {
       throw new Error(readError(error));
-    });
+    }
   }
 }
 

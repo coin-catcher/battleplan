@@ -1,9 +1,12 @@
-import type { APIGatewayProxyEventV2 } from 'aws-lambda';
+import { createPrivateKey, sign } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import type { APIGatewayProxyEventV2, APIGatewayProxyHandlerV2 } from 'aws-lambda';
 import { describe, expect, it } from 'vitest';
-import { createHandler as createProjectsHandler } from '../../projects/src/handler.js';
-import { createHandler as createTasksHandler } from '../../tasks/src/handler.js';
-import { createHandler as createChatHandler } from '../../chat/src/handler.js';
-import { createHandler as createOutputsHandler } from '../../outputs/src/handler.js';
+import { createHandler as createAgentsHandler, handler as agentsHandler } from '../../agents/src/handler.js';
+import { createHandler as createChatHandler, handler as chatHandler } from '../../chat/src/handler.js';
+import { createHandler as createOutputsHandler, handler as outputsHandler } from '../../outputs/src/handler.js';
+import { createHandler as createProjectsHandler, handler as projectsHandler } from '../../projects/src/handler.js';
+import { createHandler as createTasksHandler, handler as tasksHandler } from '../../tasks/src/handler.js';
 import type { CursorClient, CursorRun, CreateAgentInput, CreateRunInput } from './cursor-client.js';
 import { HttpCursorClient } from './cursor-client.js';
 import type { Clock } from './ids.js';
@@ -17,6 +20,10 @@ import { parseGeneratedTaskList } from './task-list.js';
 import { assertAcyclic } from './graph.js';
 import { HttpError } from './errors.js';
 import { GENERATE_TASKS_INSTRUCTION } from './prompts.js';
+import { WARPLAN_PUBLIC_KEY } from './public-key.js';
+import { canonicalRequest } from './signature.js';
+
+const privateKey = createPrivateKey(readFileSync(new URL('../../../keys/warplan-private.pem', import.meta.url)));
 
 function clock(): Clock {
   let id = 0;
@@ -123,13 +130,29 @@ function responseBody(result: Awaited<ReturnType<ReturnType<typeof createProject
   return { statusCode: result.statusCode ?? 200, body: result.body ?? '' };
 }
 
-function event(method: string, path: string, body?: unknown): APIGatewayProxyEventV2 {
+function event(
+  method: string,
+  path: string,
+  body?: unknown,
+  options?: { unsigned?: boolean; timestamp?: string; tamperBody?: string; query?: string },
+): APIGatewayProxyEventV2 {
+  const raw = body === undefined ? '' : JSON.stringify(body);
+  const timestamp = options?.timestamp ?? String(Date.now());
+  const query = options?.query ?? '';
+  const target = query ? `${path}?${query}` : path;
+  const signature = sign(null, Buffer.from(canonicalRequest(method, target, timestamp, raw)), privateKey).toString('base64');
+  const sent = options?.tamperBody ?? raw;
   return {
     version: '2.0',
     routeKey: `${method} ${path}`,
     rawPath: path,
-    rawQueryString: '',
-    headers: {},
+    rawQueryString: query,
+    headers: options?.unsigned
+      ? {}
+      : {
+          'x-warplan-timestamp': timestamp,
+          'x-warplan-signature': signature,
+        },
     requestContext: {
       accountId: '1',
       apiId: 'api',
@@ -143,7 +166,7 @@ function event(method: string, path: string, body?: unknown): APIGatewayProxyEve
       http: { method, path, protocol: 'HTTP/1.1', sourceIp: '127.0.0.1', userAgent: 'vitest' },
     },
     isBase64Encoded: false,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: sent ? sent : undefined,
   } as APIGatewayProxyEventV2;
 }
 
@@ -212,8 +235,8 @@ describe('warplan flow', () => {
     const reviewed = await chat.listTaskMessages(research.task_id);
     expect(reviewed.task.status).toBe('REVIEW');
     const researchOutput = await outputs.getResearch(research.task_id);
-    expect(researchOutput.path).toBe(`research/${project.project_id}/${research.task_id}/`);
-    expect(researchOutput.pr_link).toContain('/pull/7');
+    expect(researchOutput?.path).toBe(`research/${project.project_id}/${research.task_id}/`);
+    expect(researchOutput?.pr_link).toContain('/pull/7');
 
     const feedback = await chat.sendTaskMessage(research.task_id, 'Add a sequence diagram.');
     expect(feedback.intent).toBe('feedback');
@@ -233,6 +256,50 @@ describe('warplan flow', () => {
 
     await tasks.remove(project.project_id, created[2].task_id);
     expect(await repo.getTask(created[2].task_id)).toBeNull();
+  });
+});
+
+describe('request signatures', () => {
+  it('embeds the repository public key', () => {
+    const pem = readFileSync(new URL('../../../keys/warplan-public.pem', import.meta.url), 'utf8');
+    expect(WARPLAN_PUBLIC_KEY.trim()).toBe(pem.trim());
+  });
+
+  const handlers: Array<[string, APIGatewayProxyHandlerV2]> = [
+    ['projects', createProjectsHandler({ repo: new MemoryRepository(), cursor: new FakeCursor() })],
+    ['tasks', createTasksHandler({ repo: new MemoryRepository(), cursor: new FakeCursor() })],
+    ['outputs', createOutputsHandler({ repo: new MemoryRepository(), cursor: new FakeCursor() })],
+    ['chat', createChatHandler({ repo: new MemoryRepository(), cursor: new FakeCursor() })],
+    ['agents', createAgentsHandler({ repo: new MemoryRepository(), cursor: new FakeCursor() })],
+  ];
+
+  it.each(handlers)('rejects an unsigned %s request', async (_name, handle) => {
+    const result = responseBody(await handle(event('GET', '/projects', undefined, { unsigned: true }), {} as never, () => undefined));
+    expect(result.statusCode).toBe(401);
+    expect(JSON.parse(result.body).error).toBe('Request signature is required.');
+  });
+
+  it.each([projectsHandler, tasksHandler, outputsHandler, chatHandler, agentsHandler])(
+    'rejects an unsigned lambda entrypoint',
+    async (handle) => {
+      const result = responseBody(await handle(event('GET', '/projects', undefined, { unsigned: true })));
+      expect(result.statusCode).toBe(401);
+    },
+  );
+
+  it('rejects a tampered body and an expired timestamp', async () => {
+    const projects = createProjectsHandler({ repo: new MemoryRepository(), cursor: new FakeCursor() });
+    const tampered = responseBody(await projects(event('POST', '/projects', {
+      initial_prompt: 'Sketch the navigation.',
+    }, { tamperBody: '{"initial_prompt":"changed"}' }), {} as never, () => undefined));
+    expect(tampered.statusCode).toBe(401);
+    expect(JSON.parse(tampered.body).error).toBe('Request signature is invalid.');
+
+    const expired = responseBody(await projects(event('GET', '/projects', undefined, {
+      timestamp: String(Date.now() - 6 * 60 * 1000),
+    }), {} as never, () => undefined));
+    expect(expired.statusCode).toBe(401);
+    expect(JSON.parse(expired.body).error).toBe('Request signature has expired.');
   });
 });
 

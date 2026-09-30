@@ -54,7 +54,7 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
     routeKey: `${request.method} ${url.pathname}`,
     rawPath: url.pathname,
     rawQueryString: url.searchParams.toString(),
-    headers: { 'content-type': request.headers['content-type'] ?? 'application/json' },
+    headers: incomingHeaders(request),
     queryStringParameters: Object.fromEntries(url.searchParams.entries()),
     requestContext: {
       accountId: 'local',
@@ -94,11 +94,21 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
   response.end(JSON.stringify({ error: `No route for ${request.method} ${url.pathname}` }));
 }
 
+function incomingHeaders(request: IncomingMessage): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(request.headers)) {
+    if (value == null) continue;
+    headers[key.toLowerCase()] = Array.isArray(value) ? value.join(',') : value;
+  }
+  if (!headers['content-type']) headers['content-type'] = 'application/json';
+  return headers;
+}
+
 function corsHeaders(): Record<string, string> {
   return {
     'access-control-allow-origin': '*',
     'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-    'access-control-allow-headers': 'content-type,authorization',
+    'access-control-allow-headers': 'content-type,authorization,x-warplan-timestamp,x-warplan-signature',
   };
 }
 

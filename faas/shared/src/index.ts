@@ -13,6 +13,7 @@ export * from './projects-service.js';
 export * from './prompts.js';
 export * from './repository.js';
 export * from './runtime.js';
+export * from './signature.js';
 export * from './status.js';
 export * from './task-list.js';
 export * from './tasks-service.js';

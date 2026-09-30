@@ -4,7 +4,7 @@ resource "aws_apigatewayv2_api" "http" {
   description   = "HTTP API in front of the warplan Lambdas."
 
   cors_configuration {
-    allow_headers = ["content-type", "authorization"]
+    allow_headers = ["content-type", "authorization", "x-warplan-timestamp", "x-warplan-signature"]
     allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     allow_origins = ["*"]
     max_age       = 600
