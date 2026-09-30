@@ -18,6 +18,7 @@
       </select>
     </label>
     <button type="button" class="ghost" (click)="store.showCreate()">New project</button>
+    <button type="button" class="ghost" (click)="openSigning()">Signing key</button>
 
     @if (store.project()) {
       <button
@@ -108,7 +109,43 @@
       <p class="banner notice">{{ store.notice() }}</p>
     }
 
-    @switch (store.selection().kind) {
+    @if (showSigning()) {
+      <section class="panel">
+        <header class="panel-head">
+          <div>
+            <p class="eyebrow">Request signing</p>
+            <h2>Import signing key</h2>
+          </div>
+        </header>
+        <p>Paste the private key, or choose the PEM file. It stays in this browser’s local storage and signs every API request.</p>
+        @if (signer.ready() && !replacingKey) {
+          <p class="banner notice">A signing key is stored in this browser.</p>
+          <div class="composer-actions">
+            <button type="button" class="primary" (click)="closeSigning()">Continue</button>
+            <button type="button" class="ghost" (click)="replacingKey = true">Replace key</button>
+            <button type="button" class="danger" (click)="clearKey()">Remove key</button>
+          </div>
+        } @else {
+          <label class="field">
+            <span>Private key PEM</span>
+            <textarea rows="8" [(ngModel)]="keyPem" name="keyPem" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+          </label>
+          <label class="field">
+            <span>Or choose a file</span>
+            <input type="file" accept=".pem,text/plain" (change)="onKeyFile($event)" />
+          </label>
+          @if (keyError) {
+            <p class="banner error" role="alert">{{ keyError }}</p>
+          }
+          <div class="composer-actions">
+            <button type="button" class="primary" [disabled]="!keyPem.trim()" (click)="importKey()">Save to this browser</button>
+            @if (signer.ready()) {
+              <button type="button" class="ghost" (click)="replacingKey = false">Cancel</button>
+            }
+          </div>
+        }
+      </section>
+    } @else { @switch (store.selection().kind) {
       @case ('create') {
         <section class="panel">
           <header class="panel-head">
@@ -315,6 +352,6 @@
           <button type="button" class="primary" (click)="store.showCreate()">New project</button>
         </section>
       }
-    }
+    } }
   </main>
 </div>

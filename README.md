@@ -44,6 +44,8 @@ npm start --prefix frontend
 
 The faas dev server runs the Lambda handlers in-process on `http://localhost:8787`. Without `CURSOR_API_KEY` it uses a demo agent so the UI can create a project, generate tasks, open a pull request, and approve a merge. With `CURSOR_API_KEY` set, those same handlers call `https://api.cursor.com/v1`.
 
+Every API request is signed with the Ed25519 private key in `keys/warplan-private.pem`. Open **Signing key** in the app and import that file before calling the API; the PEM is stored in the browser’s local storage and is not bundled into the Angular app. Each Lambda verifies `x-warplan-timestamp` and `x-warplan-signature` with the public key in `keys/warplan-public.pem`.
+
 ## Deploy
 
 ```bash

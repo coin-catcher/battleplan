@@ -1,9 +1,10 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, effect, inject, OnInit } from '@angular/core';
+import { Component, effect, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { OutputType, ProjectTask, TaskStatus } from './core/models';
 import { TASK_STATUSES } from './core/models';
 import type { TaskNode } from './core/task-tree';
+import { RequestSigner } from './api/request-signer.service';
 import { WarplanStore } from './state/warplan-store.service';
 
 @Component({
@@ -14,7 +15,13 @@ import { WarplanStore } from './state/warplan-store.service';
 })
 export class AppComponent implements OnInit {
   readonly store = inject(WarplanStore);
+  readonly signer = inject(RequestSigner);
   readonly statuses = TASK_STATUSES;
+  readonly signingOpen = signal(false);
+
+  keyPem = '';
+  keyError = '';
+  replacingKey = false;
 
   title = '';
   initialPrompt = '';
@@ -86,8 +93,52 @@ export class AppComponent implements OnInit {
     });
   }
 
-  ngOnInit(): void {
-    void this.store.loadProjects();
+  async ngOnInit(): Promise<void> {
+    await this.signer.restore();
+    if (this.signer.ready()) await this.store.loadProjects();
+  }
+
+  showSigning(): boolean {
+    return !this.signer.ready() || this.signingOpen();
+  }
+
+  openSigning(): void {
+    this.keyError = '';
+    this.replacingKey = false;
+    this.signingOpen.set(true);
+  }
+
+  closeSigning(): void {
+    this.keyPem = '';
+    this.keyError = '';
+    this.replacingKey = false;
+    this.signingOpen.set(false);
+  }
+
+  async onKeyFile(event: Event): Promise<void> {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    this.keyPem = await file.text();
+  }
+
+  async importKey(): Promise<void> {
+    this.keyError = '';
+    try {
+      await this.signer.importPem(this.keyPem);
+      this.keyPem = '';
+      this.replacingKey = false;
+      this.signingOpen.set(false);
+      if (this.store.projects().length === 0) await this.store.loadProjects();
+    } catch (error) {
+      this.keyError = error instanceof Error ? error.message : 'Could not import that key.';
+    }
+  }
+
+  clearKey(): void {
+    this.signer.clear();
+    this.keyPem = '';
+    this.replacingKey = false;
+    this.signingOpen.set(true);
   }
 
   otherTasks(): ProjectTask[] {

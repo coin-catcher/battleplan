@@ -4,6 +4,7 @@ import {
   createDefaultDeps,
   dispatch,
   isOutputType,
+  rejectUnsigned,
   isTaskStatus,
   jsonBody,
   optionalString,
@@ -117,12 +118,18 @@ function stringArray(value: unknown, field: string): string[] {
 }
 
 export function createHandler(deps: ServiceDeps): APIGatewayProxyHandlerV2 {
-  return (event) => dispatch(event, routes(deps));
+  return async (event) => {
+    const rejected = rejectUnsigned(event);
+    if (rejected) return rejected;
+    return dispatch(event, routes(deps));
+  };
 }
 
 let defaultDeps: ServiceDeps | undefined;
 
 export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
+  const rejected = rejectUnsigned(event);
+  if (rejected) return rejected;
   defaultDeps ??= createDefaultDeps();
   return dispatch(event, routes(defaultDeps));
 };

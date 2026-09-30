@@ -1,5 +1,6 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { HttpError } from './errors.js';
+import { assertSignedRequest } from './signature.js';
 
 export interface HttpRequest {
   method: string;
@@ -69,8 +70,19 @@ export function matchPath(template: string, path: string): Record<string, string
   return params;
 }
 
+export function rejectUnsigned(event: APIGatewayProxyEventV2): APIGatewayProxyResultV2 | undefined {
+  try {
+    assertSignedRequest(event);
+    return undefined;
+  } catch (error) {
+    if (error instanceof HttpError) return respond(error.status, { error: error.message });
+    throw error;
+  }
+}
+
 export async function dispatch(event: APIGatewayProxyEventV2, routes: Route[]): Promise<APIGatewayProxyResultV2> {
   try {
+    assertSignedRequest(event);
     const request: HttpRequest = {
       method: event.requestContext.http.method.toUpperCase(),
       path: event.rawPath || '/',
