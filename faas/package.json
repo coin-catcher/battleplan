@@ -1,0 +1,37 @@
+{
+  "name": "@warplan/faas",
+  "private": true,
+  "version": "0.1.0",
+  "description": "TypeScript Lambdas for warplan projects, tasks, outputs, chat, and Cursor agents.",
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "projects",
+    "tasks",
+    "outputs",
+    "chat",
+    "agents"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "npm run test:local",
+    "test:local": "vitest run --reporter=verbose && node scripts/validate-terraform.mjs",
+    "test:agent": "vitest run --reporter=junit --outputFile=test-results/agent.xml && node scripts/validate-terraform.mjs",
+    "deploy": "npm run deploy:local",
+    "deploy:local": "node scripts/deploy-all.mjs local",
+    "deploy:agent": "node scripts/deploy-all.mjs agent",
+    "dev:local": "tsx scripts/local-server.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.864.0",
+    "@aws-sdk/lib-dynamodb": "^3.864.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.152",
+    "@types/node": "^22.17.2",
+    "esbuild": "^0.25.9",
+    "tsx": "^4.20.5",
+    "typescript": "^5.6.3",
+    "vitest": "^3.2.4"
+  }
+}

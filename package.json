@@ -1,0 +1,16 @@
+{
+  "name": "warplan",
+  "private": true,
+  "version": "0.1.0",
+  "description": "High-level planning, Cursor cloud agent orchestration, and AWS deployment for warplan projects.",
+  "scripts": {
+    "build": "npm run build --prefix faas && npm run build --prefix frontend",
+    "test": "npm run test:local",
+    "test:local": "npm run test:local --prefix infra && npm run test:local --prefix faas && npm run test:local --prefix frontend",
+    "test:agent": "npm run test:agent --prefix infra && npm run test:agent --prefix faas && npm run test:agent --prefix frontend",
+    "deploy": "npm run deploy:local",
+    "deploy:local": "npm run deploy:local --prefix infra && npm run deploy:local --prefix faas && npm run deploy:local --prefix frontend",
+    "deploy:agent": "npm run deploy:agent --prefix infra && npm run deploy:agent --prefix faas && npm run deploy:agent --prefix frontend",
+    "dev:local": "npm run dev:local --prefix faas"
+  }
+}

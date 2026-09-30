@@ -1,0 +1,16 @@
+{
+  "name": "@warplan/tasks",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Project task Lambda: ordered tasks, dependencies, and status transitions.",
+  "scripts": {
+    "build": "node ../scripts/build.mjs tasks",
+    "test": "npm run test:local",
+    "test:local": "vitest run --config ../vitest.config.ts --passWithNoTests --reporter=verbose tasks && terraform -chdir=terraform fmt -check -recursive && terraform -chdir=terraform init -backend=false -input=false && terraform -chdir=terraform validate",
+    "test:agent": "vitest run --config ../vitest.config.ts --passWithNoTests --reporter=junit --outputFile=../test-results/tasks-agent.xml tasks && terraform -chdir=terraform fmt -check -recursive && terraform -chdir=terraform init -backend=false -input=false && terraform -chdir=terraform validate",
+    "deploy": "npm run deploy:local",
+    "deploy:local": "bash ../scripts/deploy-lambda.sh local tasks",
+    "deploy:agent": "bash ../scripts/deploy-lambda.sh agent tasks"
+  }
+}
