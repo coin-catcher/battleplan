@@ -28,7 +28,7 @@ export interface MindmapLayout {
   edges: MindmapEdge[];
 }
 
-const PROJECT_RADIUS = 58;
+const PROJECT_RADIUS = 68;
 const TASK_WIDTH = 156;
 const TASK_HEIGHT = 64;
 
@@ -119,6 +119,24 @@ export function layoutMindmap(title: string, tasks: ProjectTask[]): MindmapLayou
     });
   }
 
+  const pad = 36;
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const node of nodes) {
+    minX = Math.min(minX, node.x - node.width / 2);
+    minY = Math.min(minY, node.y - node.height / 2);
+    maxX = Math.max(maxX, node.x + node.width / 2);
+    maxY = Math.max(maxY, node.y + node.height / 2);
+  }
+  const shiftX = pad - minX;
+  const shiftY = pad - minY;
+  for (const node of nodes) {
+    node.x += shiftX;
+    node.y += shiftY;
+  }
+
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const project = nodeById.get('project');
   const edges: MindmapEdge[] = [];
@@ -137,7 +155,12 @@ export function layoutMindmap(title: string, tasks: ProjectTask[]): MindmapLayou
       edges.push(drawEdge(source, target, true));
     }
   }
-  return { width: size, height: size, nodes, edges };
+  return {
+    width: Math.max(280, maxX - minX + pad * 2),
+    height: Math.max(280, maxY - minY + pad * 2),
+    nodes,
+    edges,
+  };
 }
 
 function drawEdge(from: MindmapNode, to: MindmapNode, dashed: boolean): MindmapEdge {

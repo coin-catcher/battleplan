@@ -31,11 +31,12 @@ describe('mindmap', () => {
     const dashed = layout.edges.filter((edge) => edge.dashed);
     expect(dashed).toEqual([expect.objectContaining({ from: 'survey', to: 'build', dashed: true })]);
     expect(layout.edges.some((edge) => edge.to === 'build' && !edge.dashed)).toBe(false);
+    const project = layout.nodes.find((node) => node.id === 'project');
     const survey = layout.nodes.find((node) => node.id === 'survey');
     const build = layout.nodes.find((node) => node.id === 'build');
-    expect(survey && build).toBeTruthy();
-    const surveyDistance = Math.hypot(survey!.x - layout.width / 2, survey!.y - layout.height / 2);
-    const buildDistance = Math.hypot(build!.x - layout.width / 2, build!.y - layout.height / 2);
+    expect(project && survey && build).toBeTruthy();
+    const surveyDistance = Math.hypot(survey!.x - project!.x, survey!.y - project!.y);
+    const buildDistance = Math.hypot(build!.x - project!.x, build!.y - project!.y);
     expect(buildDistance).toBeGreaterThan(surveyDistance);
   });
 });
