@@ -1,7 +1,9 @@
 import type {
+  ArtifactDownload,
   CreateAgentInput,
   CreateRunInput,
   CursorAgent,
+  CursorArtifact,
   CursorClient,
   CursorRun,
 } from '../shared/src/cursor-client.js';
@@ -35,6 +37,7 @@ const TASK_LIST = JSON.stringify([
  */
 export class DemoCursor implements CursorClient {
   private readonly agents = new Map<string, { agent: CursorAgent; runs: CursorRun[] }>();
+  private readonly files = new Map<string, Array<{ path: string; updatedAt: string; body: string }>>();
   private sequence = 0;
 
   async createAgent(input: CreateAgentInput): Promise<{ agent: CursorAgent; run: CursorRun }> {
@@ -82,6 +85,23 @@ export class DemoCursor implements CursorClient {
     run.status = 'CANCELLED';
   }
 
+  async listArtifacts(agentId: string): Promise<CursorArtifact[]> {
+    return (this.files.get(agentId) ?? []).map((file) => ({
+      path: file.path,
+      sizeBytes: Buffer.byteLength(file.body),
+      updatedAt: file.updatedAt,
+    }));
+  }
+
+  async downloadArtifact(agentId: string, path: string): Promise<ArtifactDownload> {
+    const file = this.files.get(agentId)?.find((item) => item.path === path);
+    if (!file) throw new HttpError(404, 'Artifact not found.');
+    return {
+      url: `data:text/plain,${encodeURIComponent(file.body)}`,
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    };
+  }
+
   private require(agentId: string): { agent: CursorAgent; runs: CursorRun[] } {
     const record = this.agents.get(agentId);
     if (!record) throw new HttpError(404, 'Agent not found.');
@@ -102,6 +122,14 @@ export class DemoCursor implements CursorClient {
             ? `Opened a pull request for ${name ?? 'the task'}.`
             : `Here is a first pass.\n\n${text.trim().slice(0, 280)}\n\nI would split this into research notes and a code change. Say when you want the task list.`,
     };
+    if (!withPullRequest && !merging && !text.includes(GENERATE_TASKS_INSTRUCTION.slice(0, 40))) {
+      const notes = `# Notes\n\n${text.trim().slice(0, 1200)}`;
+      this.files.set(agentId, [{
+        path: 'artifacts/notes.md',
+        updatedAt: new Date().toISOString(),
+        body: notes,
+      }]);
+    }
     if (withPullRequest && !merging) {
       run.git = {
         branches: [{

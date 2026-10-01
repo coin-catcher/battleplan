@@ -32,6 +32,16 @@ function routes(deps: ServiceDeps): Route[] {
       path: '/projects/{projectId}/tasks',
       handler: async (request, params) => {
         const body = jsonBody(request.body);
+        if (body.task && typeof body.task === 'object' && !Array.isArray(body.task)) {
+          const draft = body.task as Record<string, unknown>;
+          const task = await service.createOne(params.projectId, {
+            title: optionalString(draft, 'title'),
+            prompt: optionalString(draft, 'prompt'),
+            output_type: draft.output_type === undefined ? undefined : outputType(draft.output_type),
+            depends_on: optionalString(draft, 'depends_on'),
+          });
+          return { statusCode: 201, body: { task } };
+        }
         if (!Array.isArray(body.tasks)) throw new HttpError(400, 'tasks must be an array.');
         const tasks = await service.createBatch(params.projectId, body.tasks);
         return { statusCode: 201, body: { tasks } };

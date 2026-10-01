@@ -1,12 +1,23 @@
-import type { CursorClient, CursorRun } from './cursor-client.js';
+import type { ArtifactDownload, CursorArtifact, CursorClient, CursorRun } from './cursor-client.js';
 import { normalizeRepoUrl } from './cursor-client.js';
-import type { ChatMessage, MessageIntent, ProjectTask } from './domain.js';
+import type { ArtifactKind, ChatArtifact, ChatMessage, MessageIntent, ProjectTask } from './domain.js';
 import { researchPath } from './domain.js';
 import { HttpError } from './errors.js';
 import { systemClock, type Clock } from './ids.js';
 import { feedbackPrompt, GENERATE_TASKS_INSTRUCTION, mergeApprovalPrompt } from './prompts.js';
 import type { WarplanRepository } from './repository.js';
 import { assertCanTransition } from './status.js';
+
+const TERMINAL_RUN = new Set(['FINISHED', 'ERROR', 'CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED']);
+const TEXT_ARTIFACT = /\.(md|markdown|txt|json|csv|ya?ml|html|log|xml|tsv|rst)$/i;
+const IMAGE_ARTIFACT = /\.(png|jpe?g|gif|webp|svg)$/i;
+const MAX_TEXT_BYTES = 200_000;
+const MAX_TEXT_CHARS = 100_000;
+
+export interface ConversationPage {
+  messages: ChatMessage[];
+  artifacts: ChatArtifact[];
+}
 
 export class ChatService {
   constructor(
@@ -15,12 +26,16 @@ export class ChatService {
     private readonly clock: Clock = systemClock,
   ) {}
 
-  async listProjectMessages(projectId: string): Promise<ChatMessage[]> {
+  async listProjectMessages(projectId: string): Promise<ConversationPage> {
     const project = await this.requireProject(projectId);
     if (project.cursor_agent_id) {
       await this.importFinishedRuns(project.cursor_agent_id, { scope: 'project', projectId });
+      await this.syncArtifacts(project.cursor_agent_id, { scope: 'project', projectId });
     }
-    return this.repo.listProjectMessages(projectId);
+    return {
+      messages: await this.repo.listProjectMessages(projectId),
+      artifacts: await this.repo.listArtifacts('project', projectId),
+    };
   }
 
   async sendProjectMessage(projectId: string, text: string): Promise<ChatMessage> {
@@ -31,10 +46,15 @@ export class ChatService {
     return this.dispatchProject(projectId, GENERATE_TASKS_INSTRUCTION, 'generate_tasks');
   }
 
-  async listTaskMessages(taskId: string): Promise<{ messages: ChatMessage[]; task: ProjectTask }> {
+  async listTaskMessages(taskId: string): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }> {
     const task = await this.requireTask(taskId);
     if (task.cursor_agent_id) {
       await this.importFinishedRuns(task.cursor_agent_id, {
+        scope: 'task',
+        projectId: task.project_id,
+        taskId,
+      });
+      await this.syncArtifacts(task.cursor_agent_id, {
         scope: 'task',
         projectId: task.project_id,
         taskId,
@@ -44,6 +64,7 @@ export class ChatService {
     return {
       messages: await this.repo.listTaskMessages(taskId),
       task: updated ?? task,
+      artifacts: await this.repo.listArtifacts('task', taskId),
     };
   }
 
@@ -135,8 +156,10 @@ export class ChatService {
       : await this.repo.listTaskMessages(target.taskId);
     const runs = await this.cursor.listRuns(agentId);
     for (const summary of [...runs].reverse()) {
-      const run = summary.result ? summary : await this.cursor.getRun(agentId, summary.id);
-      if (run.status !== 'FINISHED' || !run.result) continue;
+      const run = summary.result || TERMINAL_RUN.has(summary.status)
+        ? summary
+        : await this.cursor.getRun(agentId, summary.id);
+      if (!TERMINAL_RUN.has(run.status)) continue;
       if (!existing.some((message) => message.run_id === run.id && message.role === 'assistant')) {
         const user = existing.find((message) => message.run_id === run.id && message.role === 'user');
         const saved = await this.record({
@@ -144,13 +167,60 @@ export class ChatService {
           project_id: target.projectId,
           task_id: target.scope === 'task' ? target.taskId : undefined,
           role: 'assistant',
-          content: run.result,
+          content: assistantText(run),
           run_id: run.id,
           intent: user?.intent ?? 'chat',
         });
         existing.push(saved);
       }
       if (target.scope === 'task') await this.applyTaskRun(target.taskId, run);
+    }
+  }
+
+  private async syncArtifacts(
+    agentId: string,
+    target: { scope: 'project'; projectId: string } | { scope: 'task'; projectId: string; taskId: string },
+  ): Promise<void> {
+    let remote: CursorArtifact[];
+    try {
+      remote = await this.cursor.listArtifacts(agentId);
+    } catch {
+      return;
+    }
+    const ownerId = target.scope === 'project' ? target.projectId : target.taskId;
+    const stored = await this.repo.listArtifacts(target.scope, ownerId);
+    for (const item of remote) {
+      const kind = artifactKind(item.path, item.sizeBytes);
+      const previous = stored.find((artifact) => artifact.path === item.path);
+      if (previous && previous.updated_at === item.updatedAt && previous.size_bytes === item.sizeBytes) {
+        if (kind === 'text' && previous.text) continue;
+        if (kind !== 'text' && urlFresh(previous.url_expires_at, this.clock.nowIso())) continue;
+      }
+      const artifact: ChatArtifact = {
+        scope: target.scope,
+        project_id: target.projectId,
+        task_id: target.scope === 'task' ? target.taskId : undefined,
+        path: item.path,
+        name: item.path.split('/').filter(Boolean).at(-1) || item.path,
+        size_bytes: item.sizeBytes,
+        updated_at: item.updatedAt,
+        content_type: kind,
+      };
+      try {
+        const download = await this.cursor.downloadArtifact(agentId, item.path);
+        if (kind === 'text') artifact.text = await readArtifactText(download);
+        else {
+          artifact.url = download.url;
+          artifact.url_expires_at = download.expiresAt;
+        }
+      } catch {
+        if (previous?.text) artifact.text = previous.text;
+        if (previous?.url) {
+          artifact.url = previous.url;
+          artifact.url_expires_at = previous.url_expires_at;
+        }
+      }
+      await this.repo.saveArtifact(artifact);
     }
   }
 
@@ -210,4 +280,32 @@ export class ChatService {
     if (!task) throw new HttpError(404, 'Task not found.');
     return task;
   }
+}
+
+function assistantText(run: CursorRun): string {
+  const result = run.result?.trim();
+  if (result) return result;
+  if (run.status === 'FINISHED') return 'The agent finished. Attached files are shown with this conversation.';
+  return `The agent run ended (${run.status}).`;
+}
+
+function artifactKind(path: string, sizeBytes: number): ArtifactKind {
+  if (IMAGE_ARTIFACT.test(path)) return 'image';
+  if (TEXT_ARTIFACT.test(path) && sizeBytes <= MAX_TEXT_BYTES) return 'text';
+  return 'file';
+}
+
+function urlFresh(expiresAt: string | undefined, nowIso: string): boolean {
+  if (!expiresAt) return false;
+  const expires = Date.parse(expiresAt);
+  const now = Date.parse(nowIso);
+  return Number.isFinite(expires) && Number.isFinite(now) && expires > now + 60_000;
+}
+
+async function readArtifactText(download: ArtifactDownload): Promise<string> {
+  const response = await fetch(download.url);
+  if (!response.ok) throw new Error(`Artifact download failed (${response.status}).`);
+  const text = await response.text();
+  if (text.length <= MAX_TEXT_CHARS) return text;
+  return `${text.slice(0, MAX_TEXT_CHARS)}\n\n…truncated…`;
 }

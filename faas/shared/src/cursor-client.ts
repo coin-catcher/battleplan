@@ -37,6 +37,17 @@ export interface CreateRunInput {
   mode?: 'agent' | 'plan';
 }
 
+export interface CursorArtifact {
+  path: string;
+  sizeBytes: number;
+  updatedAt: string;
+}
+
+export interface ArtifactDownload {
+  url: string;
+  expiresAt: string;
+}
+
 export interface CursorClient {
   createAgent(input: CreateAgentInput): Promise<{ agent: CursorAgent; run: CursorRun }>;
   getAgent(agentId: string): Promise<CursorAgent>;
@@ -45,6 +56,8 @@ export interface CursorClient {
   listRuns(agentId: string): Promise<CursorRun[]>;
   getRun(agentId: string, runId: string): Promise<CursorRun>;
   cancelRun(agentId: string, runId: string): Promise<void>;
+  listArtifacts(agentId: string): Promise<CursorArtifact[]>;
+  downloadArtifact(agentId: string, path: string): Promise<ArtifactDownload>;
 }
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -163,6 +176,33 @@ export class HttpCursorClient implements CursorClient {
       'POST',
       `/v1/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(runId)}/cancel`,
     );
+  }
+
+  async listArtifacts(agentId: string): Promise<CursorArtifact[]> {
+    const payload = await this.request<Record<string, unknown>>(
+      'GET',
+      `/v1/agents/${encodeURIComponent(agentId)}/artifacts`,
+    );
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    return items.map((item) => {
+      const record = asRecord(item);
+      return {
+        path: String(record.path ?? ''),
+        sizeBytes: Number(record.sizeBytes ?? 0),
+        updatedAt: String(record.updatedAt ?? ''),
+      };
+    }).filter((item) => item.path.startsWith('artifacts/'));
+  }
+
+  async downloadArtifact(agentId: string, path: string): Promise<ArtifactDownload> {
+    const payload = await this.request<Record<string, unknown>>(
+      'GET',
+      `/v1/agents/${encodeURIComponent(agentId)}/artifacts/download?path=${encodeURIComponent(path)}`,
+    );
+    return {
+      url: String(payload.url ?? ''),
+      expiresAt: String(payload.expiresAt ?? ''),
+    };
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {

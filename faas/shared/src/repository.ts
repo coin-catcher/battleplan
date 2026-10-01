@@ -1,4 +1,5 @@
 import type {
+  ChatArtifact,
   ChatMessage,
   Project,
   ProjectTask,
@@ -28,4 +29,7 @@ export interface WarplanRepository {
   listProjectMessages(projectId: string): Promise<ChatMessage[]>;
   listTaskMessages(taskId: string): Promise<ChatMessage[]>;
   saveMessage(message: ChatMessage): Promise<void>;
+
+  listArtifacts(scope: 'project' | 'task', ownerId: string): Promise<ChatArtifact[]>;
+  saveArtifact(artifact: ChatArtifact): Promise<void>;
 }

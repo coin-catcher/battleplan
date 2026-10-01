@@ -1,4 +1,5 @@
 import type {
+  ChatArtifact,
   ChatMessage,
   Project,
   ProjectTask,
@@ -18,6 +19,7 @@ export class MemoryRepository implements WarplanRepository {
   private readonly codeOutputs = new Map<string, TaskCodeOutput>();
   private readonly researchOutputs = new Map<string, TaskResearchOutput>();
   private messages: ChatMessage[] = [];
+  private artifacts: ChatArtifact[] = [];
 
   async saveProject(project: Project): Promise<void> {
     this.projects.set(project.project_id, clone(project));
@@ -43,6 +45,7 @@ export class MemoryRepository implements WarplanRepository {
     const tasks = await this.listTasks(projectId);
     this.projects.delete(projectId);
     this.messages = this.messages.filter((message) => message.project_id !== projectId);
+    this.artifacts = this.artifacts.filter((artifact) => artifact.project_id !== projectId);
     for (const task of tasks) {
       await this.deleteTask(task.task_id);
     }
@@ -82,6 +85,7 @@ export class MemoryRepository implements WarplanRepository {
     this.codeOutputs.delete(taskId);
     this.researchOutputs.delete(taskId);
     this.messages = this.messages.filter((message) => message.task_id !== taskId);
+    this.artifacts = this.artifacts.filter((artifact) => artifact.task_id !== taskId);
     for (const other of this.tasks.values()) {
       if (other.project_id === task.project_id && other.dependencies.includes(taskId)) {
         other.dependencies = other.dependencies.filter((dependency) => dependency !== taskId);
@@ -126,5 +130,20 @@ export class MemoryRepository implements WarplanRepository {
       throw new HttpError(500, 'Task messages require task_id.');
     }
     this.messages.push(clone(message));
+  }
+
+  async listArtifacts(scope: 'project' | 'task', ownerId: string): Promise<ChatArtifact[]> {
+    return this.artifacts
+      .filter((artifact) => artifact.scope === scope && (scope === 'project' ? artifact.project_id === ownerId : artifact.task_id === ownerId))
+      .sort((left, right) => left.path.localeCompare(right.path))
+      .map((artifact) => clone(artifact));
+  }
+
+  async saveArtifact(artifact: ChatArtifact): Promise<void> {
+    const index = this.artifacts.findIndex((item) => item.scope === artifact.scope
+      && item.path === artifact.path
+      && (artifact.scope === 'project' ? item.project_id === artifact.project_id : item.task_id === artifact.task_id));
+    if (index >= 0) this.artifacts[index] = clone(artifact);
+    else this.artifacts.push(clone(artifact));
   }
 }

@@ -36,6 +36,7 @@ function clock(): Clock {
 
 class FakeCursor implements CursorClient {
   readonly agents = new Map<string, { name: string; url: string; runs: CursorRun[] }>();
+  readonly files = new Map<string, Array<{ path: string; updatedAt: string; body: string }>>();
   archived: string[] = [];
   private sequence = 0;
 
@@ -81,6 +82,23 @@ class FakeCursor implements CursorClient {
 
   async cancelRun() {
     return undefined;
+  }
+
+  async listArtifacts(agentId: string) {
+    return (this.files.get(agentId) ?? []).map((file) => ({
+      path: file.path,
+      sizeBytes: Buffer.byteLength(file.body),
+      updatedAt: file.updatedAt,
+    }));
+  }
+
+  async downloadArtifact(agentId: string, path: string) {
+    const file = this.files.get(agentId)?.find((item) => item.path === path);
+    if (!file) throw new HttpError(404, 'missing artifact');
+    return {
+      url: `data:text/plain,${encodeURIComponent(file.body)}`,
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    };
   }
 
   private finish(agentId: string, text: string, withPullRequest: boolean): CursorRun {
@@ -213,7 +231,7 @@ describe('warplan flow', () => {
     expect(project.cursor_chat_link).toBe(`https://cursor.com/agents/${project.cursor_agent_id}`);
 
     const history = await chat.listProjectMessages(project.project_id);
-    expect(history.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(history.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
 
     await projects.updateTitle(project.project_id, 'Release warplan');
     expect((await projects.get(project.project_id)).title).toBe('Release warplan');
@@ -221,7 +239,7 @@ describe('warplan flow', () => {
     const instruction = await chat.generateTasks(project.project_id);
     expect(instruction.content).toBe(GENERATE_TASKS_INSTRUCTION);
     const afterGenerate = await chat.listProjectMessages(project.project_id);
-    const generated = afterGenerate.filter((message) => message.intent === 'generate_tasks' && message.role === 'assistant').at(-1);
+    const generated = afterGenerate.messages.filter((message) => message.intent === 'generate_tasks' && message.role === 'assistant').at(-1);
     expect(generated).toBeTruthy();
     const created = await tasks.createBatch(project.project_id, parseGeneratedTaskList(generated!.content));
     expect(created.map((task) => task.output_type)).toEqual(['research', 'research', 'code']);
@@ -254,8 +272,39 @@ describe('warplan flow', () => {
     const ordered = await tasks.reorder(project.project_id, [...created].reverse().map((task) => task.task_id));
     expect(ordered[0].task_id).toBe(created[2].task_id);
 
+    const added = await tasks.createOne(project.project_id, { depends_on: created[0].task_id });
+    expect(added.title).toBe('New task');
+    expect(added.dependencies).toEqual([created[0].task_id]);
+
     await tasks.remove(project.project_id, created[2].task_id);
     expect(await repo.getTask(created[2].task_id)).toBeNull();
+    expect((await tasks.get(project.project_id, added.task_id)).dependencies).toEqual([created[0].task_id]);
+  });
+
+  it('retrieves a markdown artifact written by the Cursor agent', async () => {
+    const repo = new MemoryRepository();
+    const cursor = new FakeCursor();
+    const chat = new ChatService(repo, cursor, clock());
+    const projects = new ProjectsService(repo, cursor, clock());
+    const project = await projects.create({ initial_prompt: 'Analyze the problem space.' });
+    const agentId = project.cursor_agent_id!;
+    const run = cursor.agents.get(agentId)!.runs[0];
+    run.result = '';
+    cursor.files.set(agentId, [{
+      path: 'artifacts/analysis.md',
+      updatedAt: '2026-09-30T12:00:00.000Z',
+      body: '# Analysis\n\nThe problem space is wider than the first prompt.',
+    }]);
+
+    const page = await chat.listProjectMessages(project.project_id);
+    expect(page.messages.some((message) => message.role === 'assistant' && message.run_id === run.id)).toBe(true);
+    expect(page.artifacts).toHaveLength(1);
+    expect(page.artifacts[0].name).toBe('analysis.md');
+    expect(page.artifacts[0].content_type).toBe('text');
+    expect(page.artifacts[0].text).toContain('problem space');
+
+    const again = await chat.listProjectMessages(project.project_id);
+    expect(again.artifacts[0].text).toContain('problem space');
   });
 });
 

@@ -34,6 +34,38 @@ export class TasksService {
     return this.requireTask(projectId, taskId);
   }
 
+  async createOne(
+    projectId: string,
+    input: { title?: string; prompt?: string; output_type?: OutputType; depends_on?: string },
+  ): Promise<ProjectTask> {
+    await this.requireProject(projectId);
+    const existing = await this.repo.listTasks(projectId);
+    const title = input.title?.trim() || 'New task';
+    const prompt = input.prompt?.trim() || 'Describe what this task should do.';
+    const outputType = input.output_type ?? 'code';
+    if (!isOutputType(outputType)) throw new HttpError(400, 'output_type must be code or research.');
+    const dependencies = input.depends_on ? [input.depends_on] : [];
+    if (dependencies.some((id) => !existing.some((task) => task.task_id === id))) {
+      throw new HttpError(400, 'depends_on must be a task in this project.');
+    }
+    const timestamp = this.clock.nowIso();
+    const task: ProjectTask = {
+      task_id: this.clock.newId(),
+      project_id: projectId,
+      title,
+      prompt,
+      dependencies,
+      status: 'TODO',
+      output_type: outputType,
+      order: existing.length,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    assertAcyclic([...existing, task]);
+    await this.repo.saveTask(task);
+    return task;
+  }
+
   async createBatch(projectId: string, drafts: unknown[]): Promise<ProjectTask[]> {
     await this.requireProject(projectId);
     const normalized = normalizeTaskDrafts(drafts);
