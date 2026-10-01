@@ -1,7 +1,9 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { WarplanApi } from '../api/warplan-api.service';
 import type {
+  ChatArtifact,
   ChatMessage,
+  ConversationPage,
   Project,
   ProjectTask,
   Selection,
@@ -11,6 +13,9 @@ import type {
 } from '../core/models';
 import { parseGeneratedTaskList } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
+
+const POLL_INTERVAL_MS = 3000;
+const POLL_ATTEMPTS = 300;
 
 @Injectable({ providedIn: 'root' })
 export class WarplanStore {
@@ -22,10 +27,12 @@ export class WarplanStore {
   readonly codeOutputs = signal<Record<string, TaskCodeOutput | null>>({});
   readonly researchOutputs = signal<Record<string, TaskResearchOutput | null>>({});
   readonly messages = signal<ChatMessage[]>([]);
+  readonly artifacts = signal<ChatArtifact[]>([]);
   readonly selection = signal<Selection>({ kind: 'empty' });
   readonly error = signal<string | null>(null);
   readonly notice = signal<string | null>(null);
   readonly busy = signal(false);
+  readonly pendingReply = signal(false);
 
   readonly project = computed(() => this.projects().find((item) => item.project_id === this.projectId()) ?? null);
   readonly forest = computed(() => buildTaskForest(this.tasks()));
@@ -34,6 +41,9 @@ export class WarplanStore {
     if (selection.kind !== 'task' && selection.kind !== 'code' && selection.kind !== 'research') return null;
     return this.tasks().find((task) => task.task_id === selection.taskId) ?? null;
   });
+
+  private watchGeneration = 0;
+  private watchTimer: ReturnType<typeof setTimeout> | undefined;
 
   async loadProjects(): Promise<void> {
     await this.run(async () => {
@@ -45,30 +55,38 @@ export class WarplanStore {
   }
 
   async selectProject(projectId: string): Promise<void> {
+    this.stopWatch();
     this.projectId.set(projectId);
     this.selection.set({ kind: 'project' });
     await this.run(async () => {
       await this.reloadTasks();
-      this.messages.set(await this.api.listProjectMessages(projectId));
+      this.applyConversation(await this.api.listProjectMessages(projectId));
     });
+    this.continueProjectWatch(projectId);
   }
 
   showCreate(): void {
+    this.stopWatch();
     this.error.set(null);
     this.selection.set({ kind: 'create' });
   }
 
   async createProject(input: { initial_prompt: string; repo_url?: string; starting_ref?: string }): Promise<void> {
+    this.stopWatch();
+    let projectId = '';
     await this.run(async () => {
       const project = await this.api.createProject(input);
+      projectId = project.project_id;
       this.projects.update((projects) => [project, ...projects.filter((item) => item.project_id !== project.project_id)]);
       this.projectId.set(project.project_id);
       this.tasks.set([]);
       this.codeOutputs.set({});
       this.researchOutputs.set({});
+      this.artifacts.set([]);
       this.selection.set({ kind: 'project' });
-      this.messages.set(await this.waitForAssistant(project.project_id, project.latest_run_id));
+      this.applyConversation(await this.api.listProjectMessages(project.project_id));
     });
+    if (projectId && !this.error()) this.continueProjectWatch(projectId);
   }
 
   async saveTitle(title: string): Promise<void> {
@@ -84,30 +102,43 @@ export class WarplanStore {
   async openProjectChat(): Promise<void> {
     const projectId = this.projectId();
     if (!projectId) return;
+    this.stopWatch();
     this.selection.set({ kind: 'project' });
     await this.run(async () => {
-      this.messages.set(await this.api.listProjectMessages(projectId));
+      this.applyConversation(await this.api.listProjectMessages(projectId));
     });
+    this.continueProjectWatch(projectId);
   }
 
   async sendProjectMessage(message: string): Promise<void> {
     const projectId = this.projectId();
     if (!projectId) return;
+    let runId: string | undefined;
     await this.run(async () => {
       const sent = await this.api.sendProjectMessage(projectId, message);
-      this.messages.set(await this.waitForAssistant(projectId, sent.run_id));
+      runId = sent.run_id;
+      this.rememberMessage(sent);
     });
+    if (runId && !this.error()) await this.watchProject(projectId, runId);
   }
 
   async generateTasks(): Promise<void> {
     const projectId = this.projectId();
     if (!projectId) return;
+    let runId: string | undefined;
     await this.run(async () => {
       const sent = await this.api.generateTasks(projectId);
-      const messages = await this.waitForAssistant(projectId, sent.run_id);
-      this.messages.set(messages);
-      const reply = messages.find((message) => message.run_id === sent.run_id && message.role === 'assistant');
-      if (!reply) throw new Error('The Cursor agent has not replied yet.');
+      runId = sent.run_id;
+      this.rememberMessage(sent);
+    });
+    if (!runId || this.error()) return;
+    await this.watchProject(projectId, runId);
+    const reply = this.messages().find((message) => message.run_id === runId && message.role === 'assistant');
+    if (!reply) {
+      this.error.set('The Cursor agent has not replied yet.');
+      return;
+    }
+    await this.run(async () => {
       const drafts = parseGeneratedTaskList(reply.content);
       await this.api.createTasks(projectId, drafts);
       await this.reloadTasks();
@@ -116,16 +147,35 @@ export class WarplanStore {
   }
 
   async openTask(taskId: string): Promise<void> {
+    this.stopWatch();
     this.selection.set({ kind: 'task', taskId });
     await this.run(async () => {
       const result = await this.api.listTaskMessages(taskId);
-      this.messages.set(result.messages);
-      this.replaceTask(result.task);
+      this.applyTaskConversation(result);
       await this.refreshOutput(result.task);
     });
+    this.continueTaskWatch(taskId);
+  }
+
+  async addTask(dependsOn?: string): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    this.stopWatch();
+    let taskId = '';
+    await this.run(async () => {
+      const task = await this.api.createTask(projectId, { depends_on: dependsOn });
+      taskId = task.task_id;
+      await this.reloadTasks();
+      this.selection.set({ kind: 'task', taskId: task.task_id });
+      const result = await this.api.listTaskMessages(task.task_id);
+      this.applyTaskConversation(result);
+      this.notice.set('Task added. Fill in the details.');
+    });
+    if (taskId) this.continueTaskWatch(taskId);
   }
 
   async openOutput(taskId: string, kind: 'code' | 'research'): Promise<void> {
+    this.stopWatch();
     this.selection.set({ kind, taskId });
     await this.run(async () => {
       const task = this.tasks().find((item) => item.task_id === taskId);
@@ -156,26 +206,23 @@ export class WarplanStore {
       this.replaceTask(updated);
       if (updated.cursor_agent_id) {
         const result = await this.api.listTaskMessages(taskId);
-        this.messages.set(result.messages);
-        this.replaceTask(result.task);
+        this.applyTaskConversation(result);
         await this.refreshOutput(result.task);
       }
     });
+    if (this.selection().kind === 'task') this.continueTaskWatch(taskId);
   }
 
   async sendTaskMessage(message: string): Promise<void> {
     const task = this.selectedTask();
     if (!task) return;
+    let runId: string | undefined;
     await this.run(async () => {
       const sent = await this.api.sendTaskMessage(task.task_id, message);
-      const result = await this.api.listTaskMessages(task.task_id);
-      const reply = result.messages.find((item) => item.run_id === sent.run_id && item.role === 'assistant');
-      this.messages.set(reply ? result.messages : await this.waitForTaskAssistant(task.task_id, sent.run_id));
-      const refreshed = await this.api.listTaskMessages(task.task_id);
-      this.messages.set(refreshed.messages);
-      this.replaceTask(refreshed.task);
-      await this.refreshOutput(refreshed.task);
+      runId = sent.run_id;
+      this.rememberMessage(sent);
     });
+    if (runId && !this.error()) await this.watchTask(task.task_id, runId);
   }
 
   async approve(): Promise<void> {
@@ -185,10 +232,10 @@ export class WarplanStore {
       const merging = await this.api.approve(task.task_id);
       this.replaceTask(merging);
       const refreshed = await this.api.listTaskMessages(task.task_id);
-      this.messages.set(refreshed.messages);
-      this.replaceTask(refreshed.task);
+      this.applyTaskConversation(refreshed);
       this.notice.set(refreshed.task.status === 'DONE' ? 'Pull request merged. Task is DONE.' : 'Merge requested.');
     });
+    this.continueTaskWatch(task.task_id);
   }
 
   async move(taskId: string, direction: -1 | 1): Promise<void> {
@@ -209,12 +256,22 @@ export class WarplanStore {
   async deleteTask(taskId: string): Promise<void> {
     const task = this.tasks().find((item) => item.task_id === taskId);
     if (!task) return;
+    this.stopWatch();
     await this.run(async () => {
       await this.api.deleteTask(task.project_id, taskId);
       await this.reloadTasks();
       this.selection.set({ kind: 'project' });
+      this.messages.set([]);
+      this.artifacts.set([]);
       this.notice.set('Task deleted.');
     });
+    const projectId = this.projectId();
+    if (projectId) {
+      await this.run(async () => {
+        this.applyConversation(await this.api.listProjectMessages(projectId));
+      });
+      this.continueProjectWatch(projectId);
+    }
   }
 
   async saveCodeOutput(output: Omit<TaskCodeOutput, 'task_id'>): Promise<void> {
@@ -245,6 +302,112 @@ export class WarplanStore {
 
   researchOutput(taskId: string): TaskResearchOutput | null {
     return this.researchOutputs()[taskId] ?? null;
+  }
+
+  private continueProjectWatch(projectId: string): void {
+    const runId = unansweredRun(this.messages());
+    if (runId) void this.watchProject(projectId, runId);
+  }
+
+  private continueTaskWatch(taskId: string): void {
+    const runId = unansweredRun(this.messages());
+    if (runId) void this.watchTask(taskId, runId);
+  }
+
+  private watchProject(projectId: string, runId: string): Promise<void> {
+    return this.poll(async (generation) => {
+      if (!this.stillWatching(generation) || this.projectId() !== projectId || this.selection().kind !== 'project') return true;
+      const page = await this.api.listProjectMessages(projectId);
+      if (!this.stillWatching(generation) || this.projectId() !== projectId || this.selection().kind !== 'project') return true;
+      this.applyConversation(page);
+      return hasAssistant(page.messages, runId);
+    });
+  }
+
+  private watchTask(taskId: string, runId: string): Promise<void> {
+    return this.poll(async (generation) => {
+      const selection = this.selection();
+      if (!this.stillWatching(generation) || selection.kind !== 'task' || selection.taskId !== taskId) return true;
+      const result = await this.api.listTaskMessages(taskId);
+      const current = this.selection();
+      if (!this.stillWatching(generation) || current.kind !== 'task' || current.taskId !== taskId) return true;
+      this.applyTaskConversation(result);
+      await this.refreshOutput(result.task);
+      return hasAssistant(result.messages, runId);
+    });
+  }
+
+  private poll(load: (generation: number) => Promise<boolean>): Promise<void> {
+    this.stopWatch();
+    const generation = ++this.watchGeneration;
+    this.pendingReply.set(true);
+    return new Promise((resolve) => {
+      const finish = (done: boolean, timedOut: boolean) => {
+        if (generation !== this.watchGeneration) {
+          resolve();
+          return;
+        }
+        this.pendingReply.set(false);
+        if (timedOut && !done) this.notice.set('Still waiting for Cursor. Reopen the chat to check again.');
+        resolve();
+      };
+      const tick = (attempt: number) => {
+        void (async () => {
+          if (!this.stillWatching(generation)) {
+            resolve();
+            return;
+          }
+          let done = false;
+          try {
+            done = await load(generation);
+          } catch (error) {
+            if (!this.stillWatching(generation)) {
+              resolve();
+              return;
+            }
+            this.error.set(error instanceof Error ? error.message : 'Request failed.');
+          }
+          if (!this.stillWatching(generation)) {
+            resolve();
+            return;
+          }
+          if (done || attempt + 1 >= POLL_ATTEMPTS) {
+            finish(done, !done);
+            return;
+          }
+          this.watchTimer = setTimeout(() => tick(attempt + 1), POLL_INTERVAL_MS);
+        })();
+      };
+      tick(0);
+    });
+  }
+
+  private stillWatching(generation: number): boolean {
+    return generation === this.watchGeneration;
+  }
+
+  private stopWatch(): void {
+    this.watchGeneration += 1;
+    if (this.watchTimer) clearTimeout(this.watchTimer);
+    this.watchTimer = undefined;
+    this.pendingReply.set(false);
+  }
+
+  private applyConversation(page: ConversationPage): void {
+    this.messages.set(page.messages);
+    this.artifacts.set(page.artifacts ?? []);
+  }
+
+  private applyTaskConversation(result: { messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }): void {
+    this.messages.set(result.messages);
+    this.artifacts.set(result.artifacts ?? []);
+    this.replaceTask(result.task);
+  }
+
+  private rememberMessage(message: ChatMessage): void {
+    this.messages.update((messages) => messages.some((item) => item.message_id === message.message_id)
+      ? messages
+      : [...messages, message]);
   }
 
   private async reloadTasks(): Promise<void> {
@@ -285,29 +448,6 @@ export class WarplanStore {
     });
   }
 
-  private async waitForAssistant(projectId: string, runId: string | undefined): Promise<ChatMessage[]> {
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const messages = await this.api.listProjectMessages(projectId);
-      if (!runId || messages.some((message) => message.run_id === runId && message.role === 'assistant')) {
-        return messages;
-      }
-      await delay(400);
-    }
-    return this.api.listProjectMessages(projectId);
-  }
-
-  private async waitForTaskAssistant(taskId: string, runId: string | undefined): Promise<ChatMessage[]> {
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const result = await this.api.listTaskMessages(taskId);
-      this.replaceTask(result.task);
-      if (!runId || result.messages.some((message) => message.run_id === runId && message.role === 'assistant')) {
-        return result.messages;
-      }
-      await delay(400);
-    }
-    return (await this.api.listTaskMessages(taskId)).messages;
-  }
-
   private async run(work: () => Promise<void>): Promise<void> {
     this.busy.set(true);
     this.error.set(null);
@@ -322,8 +462,13 @@ export class WarplanStore {
   }
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function unansweredRun(messages: ChatMessage[]): string | undefined {
+  const answered = new Set(messages.filter((message) => message.role === 'assistant' && message.run_id).map((message) => message.run_id));
+  return [...messages].reverse().find((message) => message.role === 'user' && message.run_id && !answered.has(message.run_id))?.run_id;
+}
+
+function hasAssistant(messages: ChatMessage[], runId: string): boolean {
+  return messages.some((message) => message.run_id === runId && message.role === 'assistant');
 }
 
 export type { TaskNode };

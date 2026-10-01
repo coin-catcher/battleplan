@@ -62,6 +62,22 @@ export interface ChatMessage {
   intent?: MessageIntent;
 }
 
+export type ArtifactKind = 'text' | 'image' | 'file';
+
+export interface ChatArtifact {
+  scope: 'project' | 'task';
+  project_id: string;
+  task_id?: string;
+  path: string;
+  name: string;
+  size_bytes: number;
+  updated_at: string;
+  content_type: ArtifactKind;
+  text?: string;
+  url?: string;
+  url_expires_at?: string;
+}
+
 export interface NormalizedTaskDraft {
   title: string;
   prompt: string;

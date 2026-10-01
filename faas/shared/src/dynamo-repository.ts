@@ -8,6 +8,7 @@ import {
   QueryCommand,
 } from '@aws-sdk/lib-dynamodb';
 import type {
+  ChatArtifact,
   ChatMessage,
   Project,
   ProjectTask,
@@ -171,6 +172,29 @@ export class DynamoRepository implements WarplanRepository {
   async listTaskMessages(taskId: string): Promise<ChatMessage[]> {
     const items = await this.queryPartition(`TASK#${taskId}`, 'MSG#');
     return items.map((item) => strip(item) as unknown as ChatMessage);
+  }
+
+  async listArtifacts(scope: 'project' | 'task', ownerId: string): Promise<ChatArtifact[]> {
+    const pk = scope === 'project' ? `PROJECT#${ownerId}` : `TASK#${ownerId}`;
+    const items = await this.queryPartition(pk, 'ARTIFACT#');
+    return items
+      .map((item) => strip(item) as unknown as ChatArtifact)
+      .sort((left, right) => left.path.localeCompare(right.path));
+  }
+
+  async saveArtifact(artifact: ChatArtifact): Promise<void> {
+    const pk = artifact.scope === 'project'
+      ? `PROJECT#${artifact.project_id}`
+      : `TASK#${artifact.task_id}`;
+    await this.documents.send(new PutCommand({
+      TableName: this.tableName,
+      Item: {
+        ...artifact,
+        pk,
+        sk: `ARTIFACT#${artifact.path}`,
+        entity: 'artifact',
+      },
+    }));
   }
 
   async saveMessage(message: ChatMessage): Promise<void> {

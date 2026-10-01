@@ -52,4 +52,24 @@ describe('request signer', () => {
     await expect(signer.importPem('not a key')).rejects.toThrow(/PKCS8/);
     expect(signer.ready()).toBe(false);
   });
+
+  it('signs when Web Crypto is unavailable', async () => {
+    const webcrypto = globalThis.crypto;
+    vi.stubGlobal('crypto', {});
+    try {
+      const signer = new RequestSigner();
+      await signer.importPem(privatePem);
+      const raw = JSON.stringify({ initial_prompt: 'Plan it' });
+      const signed = await signer.sign('post', '/projects', raw);
+      const ok = verify(
+        null,
+        Buffer.from(canonicalRequest('POST', '/projects', signed.timestamp, raw)),
+        publicKey,
+        Buffer.from(signed.signature, 'base64'),
+      );
+      expect(ok).toBe(true);
+    } finally {
+      vi.stubGlobal('crypto', webcrypto);
+    }
+  });
 });

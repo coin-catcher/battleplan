@@ -21,75 +21,54 @@
     <button type="button" class="ghost" (click)="openSigning()">Signing key</button>
 
     @if (store.project()) {
-      <button
-        type="button"
-        class="warplan-root"
-        [class.active]="store.selection().kind === 'project'"
-        (click)="store.openProjectChat()"
-      >
-        WARPLAN
-      </button>
-      <nav class="tree" aria-label="Project tasks">
-        <ng-template #branch let-node let-depth="depth">
-          <div class="tree-node" [style.padding-left.px]="depth * 14">
-            <button
-              type="button"
-              class="tree-item"
-              [class.active]="isSelected(node)"
-              [attr.data-status]="node.task.status"
-              (click)="store.openTask(node.task.task_id)"
+      <div class="map-stage" aria-label="Project mindmap">
+        <div class="map-canvas" [style.width.px]="map().width" [style.height.px]="map().height">
+          <svg [attr.viewBox]="'0 0 ' + map().width + ' ' + map().height" [attr.width]="map().width" [attr.height]="map().height">
+            <defs>
+              <marker id="arrow-solid" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L10,4 L0,8 Z" />
+              </marker>
+              <marker id="arrow-dashed" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L10,4 L0,8 Z" />
+              </marker>
+            </defs>
+            @for (edge of map().edges; track edge.from + '>' + edge.to) {
+              <line
+                [attr.x1]="edge.x1"
+                [attr.y1]="edge.y1"
+                [attr.x2]="edge.x2"
+                [attr.y2]="edge.y2"
+                [class.dashed]="edge.dashed"
+                [attr.marker-end]="edge.dashed ? 'url(#arrow-dashed)' : 'url(#arrow-solid)'"
+              />
+            }
+          </svg>
+          @for (node of map().nodes; track node.id) {
+            <div
+              class="map-node"
+              [class.circle]="node.kind === 'project'"
+              [class.active]="isMapSelected(node)"
+              [attr.data-status]="node.status ?? null"
+              [style.left.px]="node.x"
+              [style.top.px]="node.y"
+              [style.width.px]="node.width"
+              [style.height.px]="node.height"
+              tabindex="0"
+              role="button"
+              (click)="selectMapNode(node)"
+              (keydown.enter)="selectMapNode(node)"
             >
-              <span class="status-pip" [attr.data-status]="node.task.status"></span>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>
-              <span class="tree-copy">
-                <span class="tree-label">{{ node.task.title }}</span>
-                <span class="tree-meta">{{ node.task.output_type }} · {{ node.task.status }}</span>
-              </span>
-            </button>
-            @if (node.task.output_type === 'code') {
-              @if (store.codeOutput(node.task.task_id); as code) {
-                <button
-                  type="button"
-                  class="tree-item output"
-                  [class.active]="isOutputSelected(node.task.task_id, 'code')"
-                  (click)="openCode(node.task.task_id)"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8 5 12l4 4M15 8l4 4-4 4"/></svg>
-                  <span class="tree-copy">
-                    <span class="tree-label">Code output</span>
-                    <span class="tree-meta">{{ code.branch }}</span>
-                  </span>
-                </button>
-              }
-            }
-            @if (node.task.output_type === 'research') {
-              @if (store.researchOutput(node.task.task_id); as research) {
-                <button
-                  type="button"
-                  class="tree-item output"
-                  [class.active]="isOutputSelected(node.task.task_id, 'research')"
-                  (click)="openResearch(node.task.task_id)"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7zM14 3v5h5"/></svg>
-                  <span class="tree-copy">
-                    <span class="tree-label">Research output</span>
-                    <span class="tree-meta">{{ research.path }}</span>
-                  </span>
-                </button>
-              }
-            }
-          </div>
-          @for (child of node.children; track child.task.task_id) {
-            <ng-container *ngTemplateOutlet="branch; context: { $implicit: child, depth: depth + 1 }" />
+              <span class="map-label">{{ node.label }}</span>
+              <button
+                type="button"
+                class="plus"
+                [attr.aria-label]="'Add a task connected to ' + node.label"
+                (click)="addMapTask(node, $event)"
+              >+</button>
+            </div>
           }
-        </ng-template>
-        @for (node of store.forest(); track node.task.task_id) {
-          <ng-container *ngTemplateOutlet="branch; context: { $implicit: node, depth: 0 }" />
-        }
-        @if (store.forest().length === 0) {
-          <p class="tree-empty">No tasks yet. Generate them from the warplan chat.</p>
-        }
-      </nav>
+        </div>
+      </div>
     }
 
     <ul class="legend">
@@ -195,7 +174,27 @@
                   <pre>{{ message.content }}</pre>
                 </article>
               }
+              @if (store.pendingReply()) {
+                <p class="pending">Waiting for Cursor…</p>
+              }
             </div>
+            @if (store.artifacts().length > 0) {
+              <section class="artifacts" aria-label="Attached artifacts">
+                <h3>Artifacts</h3>
+                @for (artifact of store.artifacts(); track artifact.path) {
+                  <article class="artifact">
+                    <header>{{ artifact.name }}</header>
+                    @if (artifact.text) {
+                      <pre>{{ artifact.text }}</pre>
+                    } @else if (artifact.content_type === 'image' && artifact.url) {
+                      <img [src]="artifact.url" [alt]="artifact.name" />
+                    } @else if (artifact.url) {
+                      <a class="text-link" [href]="artifact.url" target="_blank" rel="noopener">Download {{ artifact.name }}</a>
+                    }
+                  </article>
+                }
+              </section>
+            }
             <div class="composer">
               <label class="sr-only" for="project-chat">Message</label>
               <textarea id="project-chat" rows="3" [(ngModel)]="chatDraft" name="chatDraft" placeholder="Continue the warplan conversation."></textarea>
@@ -274,6 +273,12 @@
                 <button type="button" class="ghost" [disabled]="store.busy()" (click)="store.move(task.task_id, -1)">Move earlier</button>
                 <button type="button" class="ghost" [disabled]="store.busy()" (click)="store.move(task.task_id, 1)">Move later</button>
                 <button type="button" class="danger" [disabled]="store.busy()" (click)="deleteTask(task)">Delete</button>
+                @if (store.codeOutput(task.task_id)) {
+                  <button type="button" class="ghost" (click)="openCode(task.task_id)">Code output</button>
+                }
+                @if (store.researchOutput(task.task_id)) {
+                  <button type="button" class="ghost" (click)="openResearch(task.task_id)">Research output</button>
+                }
               </div>
             </div>
             <div class="transcript" aria-live="polite">
@@ -283,7 +288,27 @@
                   <pre>{{ message.content }}</pre>
                 </article>
               }
+              @if (store.pendingReply()) {
+                <p class="pending">Waiting for Cursor…</p>
+              }
             </div>
+            @if (store.artifacts().length > 0) {
+              <section class="artifacts" aria-label="Attached artifacts">
+                <h3>Artifacts</h3>
+                @for (artifact of store.artifacts(); track artifact.path) {
+                  <article class="artifact">
+                    <header>{{ artifact.name }}</header>
+                    @if (artifact.text) {
+                      <pre>{{ artifact.text }}</pre>
+                    } @else if (artifact.content_type === 'image' && artifact.url) {
+                      <img [src]="artifact.url" [alt]="artifact.name" />
+                    } @else if (artifact.url) {
+                      <a class="text-link" [href]="artifact.url" target="_blank" rel="noopener">Download {{ artifact.name }}</a>
+                    }
+                  </article>
+                }
+              </section>
+            }
             <div class="composer">
               <label class="sr-only" for="task-chat">Feedback</label>
               <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Send feedback. A review task returns to DOING."></textarea>

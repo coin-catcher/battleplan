@@ -56,6 +56,25 @@ export interface ChatMessage {
   intent?: 'chat' | 'generate_tasks' | 'feedback' | 'approve';
 }
 
+export interface ChatArtifact {
+  scope: 'project' | 'task';
+  project_id: string;
+  task_id?: string;
+  path: string;
+  name: string;
+  size_bytes: number;
+  updated_at: string;
+  content_type: 'text' | 'image' | 'file';
+  text?: string;
+  url?: string;
+  url_expires_at?: string;
+}
+
+export interface ConversationPage {
+  messages: ChatMessage[];
+  artifacts: ChatArtifact[];
+}
+
 export interface TaskDraft {
   title: string;
   prompt: string;

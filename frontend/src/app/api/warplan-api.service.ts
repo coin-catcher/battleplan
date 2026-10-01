@@ -5,6 +5,7 @@ import { environment } from '../../environments/environment';
 import { RequestSigner } from './request-signer.service';
 import type {
   ChatMessage,
+  ConversationPage,
   Project,
   ProjectTask,
   TaskCodeOutput,
@@ -43,6 +44,10 @@ export class WarplanApi {
     return this.send<{ tasks: ProjectTask[] }>('POST', `/projects/${projectId}/tasks`, { tasks }).then((body) => body.tasks);
   }
 
+  createTask(projectId: string, input: { depends_on?: string; title?: string; prompt?: string; output_type?: 'code' | 'research' }): Promise<ProjectTask> {
+    return this.send<{ task: ProjectTask }>('POST', `/projects/${projectId}/tasks`, { task: input }).then((body) => body.task);
+  }
+
   updateTask(projectId: string, taskId: string, patch: Record<string, unknown>): Promise<ProjectTask> {
     return this.send<ProjectTask>('PATCH', `/projects/${projectId}/tasks/${taskId}`, patch);
   }
@@ -76,8 +81,8 @@ export class WarplanApi {
     return this.send<TaskResearchOutput>('PUT', `/tasks/${taskId}/outputs/research`, output);
   }
 
-  listProjectMessages(projectId: string): Promise<ChatMessage[]> {
-    return this.get<{ messages: ChatMessage[] }>(`/projects/${projectId}/messages`).then((body) => body.messages);
+  listProjectMessages(projectId: string): Promise<ConversationPage> {
+    return this.get<ConversationPage>(`/projects/${projectId}/messages`);
   }
 
   sendProjectMessage(projectId: string, message: string): Promise<ChatMessage> {
@@ -88,8 +93,8 @@ export class WarplanApi {
     return this.send<ChatMessage>('POST', `/projects/${projectId}/messages/generate-tasks`);
   }
 
-  listTaskMessages(taskId: string): Promise<{ messages: ChatMessage[]; task: ProjectTask }> {
-    return this.get<{ messages: ChatMessage[]; task: ProjectTask }>(`/tasks/${taskId}/messages`);
+  listTaskMessages(taskId: string): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ConversationPage['artifacts'] }> {
+    return this.get<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ConversationPage['artifacts'] }>(`/tasks/${taskId}/messages`);
   }
 
   sendTaskMessage(taskId: string, message: string): Promise<ChatMessage> {

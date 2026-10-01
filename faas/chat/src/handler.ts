@@ -18,7 +18,7 @@ function routes(deps: ServiceDeps): Route[] {
       path: '/projects/{projectId}/messages',
       handler: async (_request, params) => ({
         statusCode: 200,
-        body: { messages: await service.listProjectMessages(params.projectId) },
+        body: await service.listProjectMessages(params.projectId),
       }),
     },
     {
