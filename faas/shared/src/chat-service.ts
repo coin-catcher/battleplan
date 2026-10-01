@@ -46,6 +46,56 @@ export class ChatService {
     return this.dispatchProject(projectId, GENERATE_TASKS_INSTRUCTION, 'generate_tasks');
   }
 
+  async generateTaskTasks(taskId: string): Promise<ChatMessage> {
+    const task = await this.requireTask(taskId);
+    const project = await this.requireProject(task.project_id);
+    const agentId = task.cursor_agent_id || project.cursor_agent_id;
+    if (!agentId) throw new HttpError(409, 'This project is not linked to a Cursor agent.');
+    const text = [
+      `Generate tasks from the conversation for "${task.title}".`,
+      task.prompt ? `Task prompt:\n${task.prompt}` : '',
+      GENERATE_TASKS_INSTRUCTION,
+    ].filter(Boolean).join('\n\n');
+    const run = await this.cursor.createRun(agentId, {
+      text,
+      mode: task.cursor_agent_id ? 'agent' : 'plan',
+    });
+    return this.record({
+      scope: 'task',
+      project_id: task.project_id,
+      task_id: taskId,
+      role: 'user',
+      content: text,
+      run_id: run.id,
+      intent: 'generate_tasks',
+      cursor_agent_id: agentId,
+    });
+  }
+
+  async note(target: { scope: 'project'; projectId: string } | { scope: 'task'; taskId: string }, content: string): Promise<ChatMessage> {
+    const text = content.trim();
+    if (!text) throw new HttpError(400, 'message is required.');
+    if (target.scope === 'project') {
+      const project = await this.requireProject(target.projectId);
+      return this.record({
+        scope: 'project',
+        project_id: project.project_id,
+        role: 'change',
+        content: text,
+        intent: 'chat',
+      });
+    }
+    const task = await this.requireTask(target.taskId);
+    return this.record({
+      scope: 'task',
+      project_id: task.project_id,
+      task_id: task.task_id,
+      role: 'change',
+      content: text,
+      intent: 'chat',
+    });
+  }
+
   async listTaskMessages(taskId: string): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }> {
     const task = await this.requireTask(taskId);
     if (task.cursor_agent_id) {
@@ -60,6 +110,11 @@ export class ChatService {
         taskId,
       });
     }
+    await this.importReferencedRuns({
+      scope: 'task',
+      projectId: task.project_id,
+      taskId,
+    });
     const updated = await this.repo.getTask(taskId);
     return {
       messages: await this.repo.listTaskMessages(taskId),
@@ -107,8 +162,9 @@ export class ChatService {
       : await this.repo.getResearchOutput(taskId);
     if (!output?.pr_link) throw new HttpError(409, 'Record a pull request before approving the task.');
     assertCanTransition('REVIEW', 'DOING', false);
+    const project = await this.requireProject(task.project_id);
     const run = await this.cursor.createRun(task.cursor_agent_id, {
-      text: mergeApprovalPrompt(task, output.pr_link),
+      text: mergeApprovalPrompt(task, output.pr_link, project.starting_ref?.trim() || 'main'),
       mode: 'agent',
     });
     task.status = 'DOING';
@@ -173,6 +229,43 @@ export class ChatService {
         });
         existing.push(saved);
       }
+      if (target.scope === 'task') await this.applyTaskRun(target.taskId, run);
+    }
+  }
+
+  private async importReferencedRuns(
+    target: { scope: 'project'; projectId: string } | { scope: 'task'; projectId: string; taskId: string },
+  ): Promise<void> {
+    const existing = target.scope === 'project'
+      ? await this.repo.listProjectMessages(target.projectId)
+      : await this.repo.listTaskMessages(target.taskId);
+    const pending = existing.filter((message) => message.role === 'user'
+      && message.run_id
+      && message.cursor_agent_id
+      && !existing.some((item) => item.role === 'assistant' && item.run_id === message.run_id));
+    for (const message of pending) {
+      const agentId = message.cursor_agent_id;
+      const runId = message.run_id;
+      if (!agentId || !runId) continue;
+      let run;
+      try {
+        run = await this.cursor.getRun(agentId, runId);
+      } catch {
+        continue;
+      }
+      if (!TERMINAL_RUN.has(run.status)) continue;
+      if (existing.some((item) => item.role === 'assistant' && item.run_id === run.id)) continue;
+      const saved = await this.record({
+        scope: target.scope,
+        project_id: target.projectId,
+        task_id: target.scope === 'task' ? target.taskId : undefined,
+        role: 'assistant',
+        content: assistantText(run),
+        run_id: run.id,
+        intent: message.intent ?? 'chat',
+        cursor_agent_id: agentId,
+      });
+      existing.push(saved);
       if (target.scope === 'task') await this.applyTaskRun(target.taskId, run);
     }
   }

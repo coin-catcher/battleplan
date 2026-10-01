@@ -35,6 +35,15 @@ export function requireString(body: Record<string, unknown>, field: string): str
   return value.trim();
 }
 
+export function optionalNumber(body: Record<string, unknown>, field: string): number | undefined {
+  const value = body[field];
+  if (value == null || value === '') return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new HttpError(400, `${field} must be a number.`);
+  }
+  return value;
+}
+
 export function optionalString(body: Record<string, unknown>, field: string): string | undefined {
   const value = body[field];
   if (value == null || value === '') return undefined;

@@ -306,6 +306,24 @@ describe('warplan flow', () => {
     const again = await chat.listProjectMessages(project.project_id);
     expect(again.artifacts[0].text).toContain('problem space');
   });
+
+  it('records the repository and base branch on the project chat', async () => {
+    const repo = new MemoryRepository();
+    const ticks = clock();
+    const cursor = new FakeCursor();
+    const projects = new ProjectsService(repo, cursor, ticks);
+    const chat = new ChatService(repo, cursor, ticks);
+    const project = await projects.create({ initial_prompt: 'Plan the release.' });
+    const updated = await projects.update(project.project_id, {
+      repo_url: 'https://github.com/acme/warplan',
+      starting_ref: 'develop',
+    });
+    expect(updated.repo_url).toBe('https://github.com/acme/warplan');
+    expect(updated.starting_ref).toBe('develop');
+    const notes = (await chat.listProjectMessages(project.project_id)).messages.filter((message) => message.role === 'change');
+    expect(notes.at(-1)?.content).toContain('develop');
+    expect(notes.at(-1)?.content).toContain('https://github.com/acme/warplan');
+  });
 });
 
 describe('request signatures', () => {

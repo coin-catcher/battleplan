@@ -1,5 +1,5 @@
 import type { CursorClient } from './cursor-client.js';
-import type { NormalizedTaskDraft, OutputType, ProjectTask, TaskStatus } from './domain.js';
+import type { ChatMessage, NormalizedTaskDraft, OutputType, ProjectTask, TaskStatus } from './domain.js';
 import { isOutputType, isTaskStatus } from './domain.js';
 import { HttpError } from './errors.js';
 import { assertAcyclic } from './graph.js';
@@ -16,6 +16,8 @@ export interface TaskPatch {
   output_type?: OutputType;
   status?: TaskStatus;
   manual?: boolean;
+  map_x?: number;
+  map_y?: number;
 }
 
 export class TasksService {
@@ -63,6 +65,11 @@ export class TasksService {
     };
     assertAcyclic([...existing, task]);
     await this.repo.saveTask(task);
+    const parent = dependencies[0] ? existing.find((item) => item.task_id === dependencies[0]) : undefined;
+    await this.repo.saveMessage(this.changeNote(
+      task,
+      parent ? `Created task connected to "${parent.title}".` : 'Created task connected to the project.',
+    ));
     return task;
   }
 
@@ -91,14 +98,17 @@ export class TasksService {
 
   async update(projectId: string, taskId: string, patch: TaskPatch): Promise<ProjectTask> {
     const task = await this.requireTask(projectId, taskId);
+    const changes: string[] = [];
     if (patch.title !== undefined) {
       const title = patch.title.trim();
       if (!title) throw new HttpError(400, 'title is required.');
+      if (title !== task.title) changes.push(`Title: ${title}`);
       task.title = title;
     }
     if (patch.prompt !== undefined) {
       const prompt = patch.prompt.trim();
       if (!prompt) throw new HttpError(400, 'prompt is required.');
+      if (prompt !== task.prompt) changes.push('Prompt updated.');
       task.prompt = prompt;
     }
     if (patch.output_type !== undefined) {
@@ -111,22 +121,29 @@ export class TasksService {
           throw new HttpError(400, 'Split mixed outputs into two tasks instead of changing output_type.');
         }
       }
+      if (patch.output_type !== task.output_type) changes.push(`Output: ${patch.output_type}`);
       task.output_type = patch.output_type;
     }
     if (patch.dependencies !== undefined) {
       if (!Array.isArray(patch.dependencies) || patch.dependencies.some((item) => typeof item !== 'string')) {
         throw new HttpError(400, 'dependencies must be an array of task ids.');
       }
-      task.dependencies = [...new Set(patch.dependencies)];
+      const nextDependencies = [...new Set(patch.dependencies)];
+      if (nextDependencies.join(',') !== task.dependencies.join(',')) changes.push('Dependencies updated.');
+      task.dependencies = nextDependencies;
       const tasks = (await this.repo.listTasks(projectId)).map((item) => item.task_id === task.task_id ? task : item);
       assertAcyclic(tasks);
     }
     if (patch.status !== undefined) {
       if (!isTaskStatus(patch.status)) throw new HttpError(400, 'Unknown task status.');
+      if (patch.status !== task.status) changes.push(`Status: ${patch.status}`);
       await this.applyStatus(task, patch.status, Boolean(patch.manual));
     }
+    if (patch.map_x !== undefined) task.map_x = patch.map_x;
+    if (patch.map_y !== undefined) task.map_y = patch.map_y;
     task.updated_at = this.clock.nowIso();
     await this.repo.saveTask(task);
+    if (changes.length > 0) await this.repo.saveMessage(this.changeNote(task, changes.join('\n')));
     return task;
   }
 
@@ -222,6 +239,19 @@ export class TasksService {
       run_id: created.run.id,
       intent: 'chat',
     });
+  }
+
+  private changeNote(task: ProjectTask, content: string): ChatMessage {
+    return {
+      message_id: this.clock.newId(),
+      scope: 'task',
+      project_id: task.project_id,
+      task_id: task.task_id,
+      role: 'change',
+      content,
+      created_at: this.clock.nowIso(),
+      intent: 'chat',
+    };
   }
 
   private async requireProject(projectId: string) {

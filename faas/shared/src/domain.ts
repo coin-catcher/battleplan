@@ -5,7 +5,7 @@ export const OUTPUT_TYPES = ['code', 'research'] as const;
 export type OutputType = (typeof OUTPUT_TYPES)[number];
 
 export type PendingAction = 'merge';
-export type MessageRole = 'user' | 'assistant';
+export type MessageRole = 'user' | 'assistant' | 'change';
 export type MessageIntent = 'chat' | 'generate_tasks' | 'feedback' | 'approve';
 
 export interface Project {
@@ -17,6 +17,8 @@ export interface Project {
   latest_run_id?: string;
   repo_url?: string;
   starting_ref?: string;
+  map_x?: number;
+  map_y?: number;
   created_at: string;
   updated_at: string;
 }
@@ -30,6 +32,8 @@ export interface ProjectTask {
   status: TaskStatus;
   output_type: OutputType;
   order: number;
+  map_x?: number;
+  map_y?: number;
   cursor_agent_id?: string;
   cursor_chat_link?: string;
   latest_run_id?: string;
@@ -60,6 +64,7 @@ export interface ChatMessage {
   created_at: string;
   run_id?: string;
   intent?: MessageIntent;
+  cursor_agent_id?: string;
 }
 
 export type ArtifactKind = 'text' | 'image' | 'file';
