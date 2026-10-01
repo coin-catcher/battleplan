@@ -1,14 +1,15 @@
-import { Component, computed, effect, inject, OnInit, signal } from '@angular/core';
+import { Component, computed, effect, ElementRef, inject, OnInit, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { OutputType, ProjectTask, TaskStatus } from './core/models';
+import type { ChatArtifact, ChatMessage, OutputType, ProjectTask, TaskStatus } from './core/models';
 import { TASK_STATUSES } from './core/models';
+import { isMarkdownPath, MarkdownPipe } from './core/markdown';
 import { layoutMindmap, type MindmapNode } from './core/mindmap';
 import { RequestSigner } from './api/request-signer.service';
 import { WarplanStore } from './state/warplan-store.service';
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule],
+  imports: [FormsModule, MarkdownPipe],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss',
 })
@@ -17,7 +18,23 @@ export class AppComponent implements OnInit {
   readonly signer = inject(RequestSigner);
   readonly statuses = TASK_STATUSES;
   readonly signingOpen = signal(false);
-  readonly map = computed(() => layoutMindmap(this.store.project()?.title ?? 'Project', this.store.tasks()));
+  readonly zoom = signal(1);
+  readonly dragPins = signal<Record<string, { x: number; y: number }>>({});
+  readonly mapStage = viewChild<ElementRef<HTMLElement>>('mapStage');
+  readonly map = computed(() => {
+    const project = this.store.project();
+    const pins = this.dragPins();
+    const tasks = this.store.tasks().map((task) => {
+      const pin = pins[task.task_id];
+      return pin ? { ...task, map_x: pin.x, map_y: pin.y } : task;
+    });
+    const projectDrag = pins['project'];
+    const projectPin = projectDrag
+      ?? (project && Number.isFinite(project.map_x) && Number.isFinite(project.map_y)
+        ? { x: project.map_x as number, y: project.map_y as number }
+        : undefined);
+    return layoutMindmap(project?.title ?? 'Project', tasks, projectPin);
+  });
 
   keyPem = '';
   keyError = '';
@@ -27,6 +44,8 @@ export class AppComponent implements OnInit {
   initialPrompt = '';
   repoUrl = '';
   startingRef = 'main';
+  projectRepo = '';
+  projectBranch = 'main';
   chatDraft = '';
   taskTitle = '';
   taskPrompt = '';
@@ -42,6 +61,7 @@ export class AppComponent implements OnInit {
   researchLink = '';
   researchPath = '';
 
+  private centeredProject = '';
   private titleSignature = '';
   private taskSignature = '';
   private outputSignature = '';
@@ -49,16 +69,22 @@ export class AppComponent implements OnInit {
   constructor() {
     effect(() => {
       const project = this.store.project();
-      const signature = project ? `${project.project_id}:${project.title}` : '';
+      const signature = project ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}` : '';
       if (signature === this.titleSignature) return;
       this.titleSignature = signature;
       this.title = project?.title ?? '';
+      this.projectRepo = project?.repo_url ?? '';
+      this.projectBranch = project?.starting_ref || 'main';
+      if (project && project.project_id !== this.centeredProject) {
+        this.centeredProject = project.project_id;
+        queueMicrotask(() => this.centerMap());
+      }
     });
 
     effect(() => {
       const task = this.store.selectedTask();
       if (!task || this.store.selection().kind !== 'task') return;
-      const signature = `${task.task_id}:${task.updated_at}:${task.status}:${task.dependencies.join(',')}`;
+      const signature = `${task.task_id}:${task.status}:${task.title}:${task.prompt}:${task.output_type}:${task.dependencies.join(',')}`;
       if (signature === this.taskSignature) return;
       this.taskSignature = signature;
       this.taskTitle = task.title;
@@ -96,6 +122,32 @@ export class AppComponent implements OnInit {
   async ngOnInit(): Promise<void> {
     await this.signer.restore();
     if (this.signer.ready()) await this.store.loadProjects();
+  }
+
+  private centerMap(): void {
+    const stage = this.mapStage()?.nativeElement;
+    const project = this.map().nodes.find((node) => node.id === 'project');
+    if (!stage || !project) return;
+    const zoom = this.zoom();
+    stage.scrollLeft = project.x * zoom - stage.clientWidth / 2;
+    stage.scrollTop = project.y * zoom - stage.clientHeight / 2;
+  }
+
+  private zoomAt(offsetX: number, offsetY: number, factor: number): void {
+    const stage = this.mapStage()?.nativeElement;
+    const previous = this.zoom();
+    const next = clampZoom(previous * factor);
+    if (!stage || next === previous) {
+      this.zoom.set(next);
+      return;
+    }
+    const worldX = (stage.scrollLeft + offsetX) / previous;
+    const worldY = (stage.scrollTop + offsetY) / previous;
+    this.zoom.set(next);
+    queueMicrotask(() => {
+      stage.scrollLeft = worldX * next - offsetX;
+      stage.scrollTop = worldY * next - offsetY;
+    });
   }
 
   showSigning(): boolean {
@@ -151,6 +203,111 @@ export class AppComponent implements OnInit {
     if (node.kind === 'project') return selection.kind === 'project';
     return (selection.kind === 'task' || selection.kind === 'code' || selection.kind === 'research')
       && selection.taskId === node.id;
+  }
+
+  timeline(): Array<
+    | { id: string; kind: 'message'; message: ChatMessage }
+    | { id: string; kind: 'artifact'; artifact: ChatArtifact }
+  > {
+    return [
+      ...this.store.messages().map((message) => ({ id: message.message_id, at: message.created_at, kind: 'message' as const, message })),
+      ...this.store.artifacts().map((artifact) => ({ id: artifact.path, at: artifact.updated_at, kind: 'artifact' as const, artifact })),
+    ].sort((left, right) => left.at.localeCompare(right.at));
+  }
+
+  speaker(message: ChatMessage): string {
+    if (message.role === 'change') return 'Update';
+    return message.role === 'user' ? 'You' : 'Cursor';
+  }
+
+  markdownArtifact(artifact: ChatArtifact): boolean {
+    return artifact.content_type === 'text' && isMarkdownPath(artifact.path);
+  }
+
+  saveProject(): void {
+    void this.store.saveProject({
+      title: this.title.trim(),
+      repo_url: this.projectRepo.trim(),
+      starting_ref: this.projectBranch.trim() || 'main',
+    });
+  }
+
+  deleteProject(): void {
+    const project = this.store.project();
+    if (project && confirm(`Delete "${project.title}"?`)) void this.store.deleteProject();
+  }
+
+  zoomBy(factor: number): void {
+    const stage = this.mapStage()?.nativeElement;
+    if (!stage) {
+      this.zoom.update((value) => clampZoom(value * factor));
+      return;
+    }
+    this.zoomAt(stage.clientWidth / 2, stage.clientHeight / 2, factor);
+  }
+
+  onMapWheel(event: WheelEvent): void {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    const stage = this.mapStage()?.nativeElement;
+    if (!stage) return;
+    const rect = stage.getBoundingClientRect();
+    this.zoomAt(event.clientX - rect.left, event.clientY - rect.top, event.deltaY < 0 ? 1.1 : 1 / 1.1);
+  }
+
+  onStagePointerDown(event: PointerEvent): void {
+    const target = event.target as HTMLElement;
+    if (target.closest('.map-node, .zoom-controls')) return;
+    const stage = this.mapStage()?.nativeElement;
+    if (!stage) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const scrollLeft = stage.scrollLeft;
+    const scrollTop = stage.scrollTop;
+    const move = (ev: PointerEvent) => {
+      stage.scrollLeft = scrollLeft - (ev.clientX - startX);
+      stage.scrollTop = scrollTop - (ev.clientY - startY);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  onNodePointerDown(node: MindmapNode, event: PointerEvent): void {
+    if ((event.target as HTMLElement).closest('.plus')) return;
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const originX = node.x;
+    const originY = node.y;
+    let dragged = false;
+    const move = (ev: PointerEvent) => {
+      const dx = (ev.clientX - startX) / this.zoom();
+      const dy = (ev.clientY - startY) / this.zoom();
+      if (!dragged && Math.hypot(dx, dy) < 4) return;
+      dragged = true;
+      this.dragPins.update((pins) => ({ ...pins, [node.id]: { x: originX + dx, y: originY + dy } }));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      const pin = this.dragPins()[node.id];
+      if (dragged && pin) {
+        void this.store.placeNode(node.id, pin.x, pin.y);
+      } else if (!dragged) {
+        this.selectMapNode(node);
+      }
+      this.dragPins.update((pins) => {
+        const next = { ...pins };
+        delete next[node.id];
+        return next;
+      });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   }
 
   selectMapNode(node: MindmapNode): void {
@@ -226,4 +383,8 @@ export class AppComponent implements OnInit {
       void this.store.deleteTask(task.task_id);
     }
   }
+}
+
+function clampZoom(value: number): number {
+  return Math.min(2.4, Math.max(0.45, value));
 }

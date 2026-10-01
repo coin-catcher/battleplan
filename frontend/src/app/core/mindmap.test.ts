@@ -39,4 +39,18 @@ describe('mindmap', () => {
     const buildDistance = Math.hypot(build!.x - project!.x, build!.y - project!.y);
     expect(buildDistance).toBeGreaterThan(surveyDistance);
   });
+
+  it('keeps a dragged task in place and rebalances the others', () => {
+    const pinned = task('survey', []);
+    pinned.map_x = 400;
+    pinned.map_y = 500;
+    const before = layoutMindmap('Plan', [pinned, task('notes', [], 1)]);
+    const after = layoutMindmap('Plan', [pinned, task('notes', [], 1), task('build', [], 2)]);
+    const stayed = after.nodes.find((node) => node.id === 'survey');
+    expect(stayed).toMatchObject({ x: 400, y: 500 });
+    const notesBefore = before.nodes.find((node) => node.id === 'notes');
+    const notesAfter = after.nodes.find((node) => node.id === 'notes');
+    expect(notesBefore && notesAfter).toBeTruthy();
+    expect(notesAfter!.x === notesBefore!.x && notesAfter!.y === notesBefore!.y).toBe(false);
+  });
 });

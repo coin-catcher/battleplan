@@ -32,7 +32,14 @@ const PROJECT_RADIUS = 68;
 const TASK_WIDTH = 156;
 const TASK_HEIGHT = 64;
 
-export function layoutMindmap(title: string, tasks: ProjectTask[]): MindmapLayout {
+const WORLD_X = 1600;
+const WORLD_Y = 1200;
+
+export function layoutMindmap(
+  title: string,
+  tasks: ProjectTask[],
+  projectPin?: { x: number; y: number },
+): MindmapLayout {
   const byId = new Map(tasks.map((task) => [task.task_id, task]));
   const depth = new Map<string, number>();
   const visiting = new Set<string>();
@@ -91,50 +98,39 @@ export function layoutMindmap(title: string, tasks: ProjectTask[]): MindmapLayou
     angleOf.set(task.task_id, index * 0.7);
   });
 
-  const maxDepth = tasks.reduce((max, task) => Math.max(max, depthOf(task.task_id)), 0);
-  const outer = 180 + maxDepth * 132 + TASK_WIDTH;
-  const size = Math.max(640, outer * 2);
-  const center = size / 2;
+  const projectX = projectPin?.x ?? WORLD_X;
+  const projectY = projectPin?.y ?? WORLD_Y;
   const nodes: MindmapNode[] = [{
     id: 'project',
     kind: 'project',
     label: title || 'Project',
-    x: center,
-    y: center,
+    x: projectX,
+    y: projectY,
     width: PROJECT_RADIUS * 2,
     height: PROJECT_RADIUS * 2,
   }];
   for (const task of tasks) {
-    const radius = 180 + depthOf(task.task_id) * 132;
+    const radius = 200 + depthOf(task.task_id) * 150;
     const angle = angleOf.get(task.task_id) ?? 0;
+    const pinned = Number.isFinite(task.map_x) && Number.isFinite(task.map_y);
     nodes.push({
       id: task.task_id,
       kind: 'task',
       label: task.title,
       status: task.status,
-      x: center + Math.cos(angle) * radius,
-      y: center + Math.sin(angle) * radius,
+      x: pinned ? task.map_x! : projectX + Math.cos(angle) * radius,
+      y: pinned ? task.map_y! : projectY + Math.sin(angle) * radius,
       width: TASK_WIDTH,
       height: TASK_HEIGHT,
     });
   }
+  separateUnpinned(nodes, tasks);
 
-  const pad = 36;
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
+  let maxX = WORLD_X + 800;
+  let maxY = WORLD_Y + 600;
   for (const node of nodes) {
-    minX = Math.min(minX, node.x - node.width / 2);
-    minY = Math.min(minY, node.y - node.height / 2);
-    maxX = Math.max(maxX, node.x + node.width / 2);
-    maxY = Math.max(maxY, node.y + node.height / 2);
-  }
-  const shiftX = pad - minX;
-  const shiftY = pad - minY;
-  for (const node of nodes) {
-    node.x += shiftX;
-    node.y += shiftY;
+    maxX = Math.max(maxX, node.x + node.width / 2 + 80);
+    maxY = Math.max(maxY, node.y + node.height / 2 + 80);
   }
 
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
@@ -156,11 +152,31 @@ export function layoutMindmap(title: string, tasks: ProjectTask[]): MindmapLayou
     }
   }
   return {
-    width: Math.max(280, maxX - minX + pad * 2),
-    height: Math.max(280, maxY - minY + pad * 2),
+    width: Math.max(WORLD_X * 2, maxX),
+    height: Math.max(WORLD_Y * 2, maxY),
     nodes,
     edges,
   };
+}
+
+function separateUnpinned(nodes: MindmapNode[], tasks: ProjectTask[]): void {
+  const pinned = new Set(tasks.filter((task) => Number.isFinite(task.map_x) && Number.isFinite(task.map_y)).map((task) => task.task_id));
+  for (let pass = 0; pass < 8; pass += 1) {
+    for (const node of nodes) {
+      if (node.kind === 'project' || pinned.has(node.id)) continue;
+      for (const other of nodes) {
+        if (other === node) continue;
+        const dx = node.x - other.x;
+        const dy = node.y - other.y;
+        const distance = Math.hypot(dx, dy) || 1;
+        const needed = (node.width + other.width) / 2 + 28;
+        if (distance >= needed) continue;
+        const push = (needed - distance) / distance;
+        node.x += dx * push;
+        node.y += dy * push;
+      }
+    }
+  }
 }
 
 function drawEdge(from: MindmapNode, to: MindmapNode, dashed: boolean): MindmapEdge {

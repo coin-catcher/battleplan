@@ -89,14 +89,56 @@ export class WarplanStore {
     if (projectId && !this.error()) this.continueProjectWatch(projectId);
   }
 
-  async saveTitle(title: string): Promise<void> {
+  async saveProject(patch: { title: string; repo_url: string; starting_ref: string }): Promise<void> {
     const project = this.project();
     if (!project) return;
     await this.run(async () => {
-      const updated = await this.api.updateTitle(project.project_id, title);
+      const updated = await this.api.updateProject(project.project_id, patch);
       this.projects.update((projects) => projects.map((item) => item.project_id === updated.project_id ? updated : item));
-      this.notice.set('Title saved.');
+      this.applyConversation(await this.api.listProjectMessages(project.project_id));
+      this.notice.set('Project saved.');
     });
+  }
+
+  async deleteProject(): Promise<void> {
+    const project = this.project();
+    if (!project) return;
+    this.stopWatch();
+    await this.run(async () => {
+      await this.api.deleteProject(project.project_id);
+      this.projects.update((projects) => projects.filter((item) => item.project_id !== project.project_id));
+      const next = this.projects()[0];
+      this.projectId.set(next?.project_id ?? null);
+      this.tasks.set([]);
+      this.messages.set([]);
+      this.artifacts.set([]);
+      this.selection.set(next ? { kind: 'project' } : { kind: 'create' });
+      this.notice.set('Project deleted.');
+    });
+    const projectId = this.projectId();
+    if (projectId && this.selection().kind === 'project') await this.selectProject(projectId);
+  }
+
+  async placeNode(id: string, x: number, y: number): Promise<void> {
+    const map_x = Math.round(x);
+    const map_y = Math.round(y);
+    try {
+      if (id === 'project') {
+        const project = this.project();
+        if (!project) return;
+        this.projects.update((projects) => projects.map((item) => item.project_id === project.project_id ? { ...item, map_x, map_y } : item));
+        const updated = await this.api.updateProject(project.project_id, { map_x, map_y });
+        this.projects.update((projects) => projects.map((item) => item.project_id === updated.project_id ? updated : item));
+        return;
+      }
+      const task = this.tasks().find((item) => item.task_id === id);
+      if (!task) return;
+      this.replaceTask({ ...task, map_x, map_y });
+      const updated = await this.api.updateTask(task.project_id, task.task_id, { map_x, map_y });
+      this.replaceTask(updated);
+    } catch (error) {
+      this.error.set(error instanceof Error ? error.message : 'Could not save the node position.');
+    }
   }
 
   async openProjectChat(): Promise<void> {
@@ -125,14 +167,19 @@ export class WarplanStore {
   async generateTasks(): Promise<void> {
     const projectId = this.projectId();
     if (!projectId) return;
+    const selection = this.selection();
+    const taskId = selection.kind === 'task' ? selection.taskId : undefined;
     let runId: string | undefined;
     await this.run(async () => {
-      const sent = await this.api.generateTasks(projectId);
+      const sent = taskId
+        ? await this.api.generateTaskTasks(taskId)
+        : await this.api.generateTasks(projectId);
       runId = sent.run_id;
       this.rememberMessage(sent);
     });
     if (!runId || this.error()) return;
-    await this.watchProject(projectId, runId);
+    if (taskId) await this.watchTask(taskId, runId);
+    else await this.watchProject(projectId, runId);
     const reply = this.messages().find((message) => message.run_id === runId && message.role === 'assistant');
     if (!reply) {
       this.error.set('The Cursor agent has not replied yet.');
@@ -142,7 +189,10 @@ export class WarplanStore {
       const drafts = parseGeneratedTaskList(reply.content);
       await this.api.createTasks(projectId, drafts);
       await this.reloadTasks();
-      this.notice.set(`Created ${drafts.length} task${drafts.length === 1 ? '' : 's'}.`);
+      const note = `Created ${drafts.length} task${drafts.length === 1 ? '' : 's'} from this conversation.`;
+      const saved = taskId ? await this.api.noteTask(taskId, note) : await this.api.noteProject(projectId, note);
+      this.rememberMessage(saved);
+      this.notice.set(note);
     });
   }
 
@@ -194,6 +244,7 @@ export class WarplanStore {
     await this.run(async () => {
       const updated = await this.api.updateTask(task.project_id, task.task_id, patch);
       this.replaceTask(updated);
+      this.applyTaskConversation(await this.api.listTaskMessages(task.task_id));
       this.notice.set('Task saved.');
     });
   }
