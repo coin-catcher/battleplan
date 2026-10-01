@@ -85,10 +85,21 @@ export class AppComponent implements OnInit {
       this.title = project?.title ?? '';
       this.projectRepo = project?.repo_url ?? '';
       this.projectBranch = project?.starting_ref || 'main';
-      if (project && project.project_id !== this.centeredProject) {
-        this.centeredProject = project.project_id;
-        queueMicrotask(() => this.centerMap());
-      }
+    });
+    effect(() => {
+      const projectId = this.store.project()?.project_id;
+      const stage = this.mapStage()?.nativeElement;
+      if (!projectId || !stage || this.centeredProject === projectId) return;
+      const center = (): void => {
+        if (this.centeredProject === projectId) return;
+        if (stage.clientWidth === 0) {
+          requestAnimationFrame(center);
+          return;
+        }
+        this.centeredProject = projectId;
+        this.centerMap();
+      };
+      requestAnimationFrame(center);
     });
 
     effect(() => {
