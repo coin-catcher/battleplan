@@ -65,8 +65,17 @@ export class AppComponent implements OnInit {
   private titleSignature = '';
   private taskSignature = '';
   private outputSignature = '';
+  private readonly onMapWheelCapture = (event: WheelEvent): void => {
+    this.onMapWheel(event);
+  };
 
   constructor() {
+    effect((onCleanup) => {
+      const stage = this.mapStage()?.nativeElement;
+      if (!stage) return;
+      stage.addEventListener('wheel', this.onMapWheelCapture, { passive: false });
+      onCleanup(() => stage.removeEventListener('wheel', this.onMapWheelCapture));
+    });
     effect(() => {
       const project = this.store.project();
       const signature = project ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}` : '';

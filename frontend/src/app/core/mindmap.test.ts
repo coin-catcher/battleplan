@@ -40,6 +40,15 @@ describe('mindmap', () => {
     expect(buildDistance).toBeGreaterThan(surveyDistance);
   });
 
+  it('moves an unpinned root when another root is added', () => {
+    const alone = layoutMindmap('Plan', [task('survey', [])]);
+    const pair = layoutMindmap('Plan', [task('survey', []), task('notes', [], 1)]);
+    const before = alone.nodes.find((node) => node.id === 'survey');
+    const after = pair.nodes.find((node) => node.id === 'survey');
+    expect(before && after).toBeTruthy();
+    expect(Math.hypot(after!.x - before!.x, after!.y - before!.y)).toBeGreaterThan(40);
+  });
+
   it('keeps a dragged task in place and rebalances the others', () => {
     const pinned = task('survey', []);
     pinned.map_x = 400;

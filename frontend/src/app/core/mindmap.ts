@@ -60,8 +60,11 @@ export function layoutMindmap(
     .filter((task) => task.dependencies.every((id) => !byId.has(id) || id === task.task_id))
     .sort((left, right) => left.order - right.order || left.title.localeCompare(right.title));
   const angleOf = new Map<string, number>();
+  const rootCount = Math.max(direct.length, 1);
+  const rootStep = (Math.PI * 2) / rootCount;
+  const rootStart = -Math.PI / 2 - ((rootCount - 1) * rootStep) / 2;
   direct.forEach((task, index) => {
-    angleOf.set(task.task_id, -Math.PI / 2 + (index / Math.max(direct.length, 1)) * Math.PI * 2);
+    angleOf.set(task.task_id, rootStart + index * rootStep);
   });
 
   const childrenOf = new Map<string, ProjectTask[]>();
