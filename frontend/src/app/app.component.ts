@@ -1,4 +1,4 @@
-import { Component, computed, effect, ElementRef, inject, OnInit, signal, viewChild } from '@angular/core';
+import { Component, computed, effect, ElementRef, inject, NgZone, OnInit, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { ChatArtifact, ChatMessage, OutputType, ProjectTask, TaskStatus } from './core/models';
 import { TASK_STATUSES } from './core/models';
@@ -16,6 +16,7 @@ import { WarplanStore } from './state/warplan-store.service';
 export class AppComponent implements OnInit {
   readonly store = inject(WarplanStore);
   readonly signer = inject(RequestSigner);
+  private readonly zone = inject(NgZone);
   readonly statuses = TASK_STATUSES;
   readonly signingOpen = signal(false);
   readonly zoom = signal(1);
@@ -261,7 +262,8 @@ export class AppComponent implements OnInit {
     const stage = this.mapStage()?.nativeElement;
     if (!stage) return;
     const rect = stage.getBoundingClientRect();
-    this.zoomAt(event.clientX - rect.left, event.clientY - rect.top, event.deltaY < 0 ? 1.1 : 1 / 1.1);
+    const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
+    this.zone.run(() => this.zoomAt(event.clientX - rect.left, event.clientY - rect.top, factor));
   }
 
   onStagePointerDown(event: PointerEvent): void {
