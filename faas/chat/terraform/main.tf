@@ -23,8 +23,11 @@ module "lambda" {
     "GET /projects/{projectId}/messages",
     "POST /projects/{projectId}/messages/generate-tasks",
     "POST /projects/{projectId}/messages",
+    "POST /projects/{projectId}/notes",
     "GET /tasks/{taskId}/messages",
     "POST /tasks/{taskId}/messages",
+    "POST /tasks/{taskId}/messages/generate-tasks",
+    "POST /tasks/{taskId}/notes",
     "POST /tasks/{taskId}/approve",
   ]
 }
