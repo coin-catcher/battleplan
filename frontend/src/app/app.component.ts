@@ -1,15 +1,14 @@
-import { NgTemplateOutlet } from '@angular/common';
-import { Component, effect, inject, OnInit, signal } from '@angular/core';
+import { Component, computed, effect, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { OutputType, ProjectTask, TaskStatus } from './core/models';
 import { TASK_STATUSES } from './core/models';
-import type { TaskNode } from './core/task-tree';
+import { layoutMindmap, type MindmapNode } from './core/mindmap';
 import { RequestSigner } from './api/request-signer.service';
 import { WarplanStore } from './state/warplan-store.service';
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, NgTemplateOutlet],
+  imports: [FormsModule],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss',
 })
@@ -18,6 +17,7 @@ export class AppComponent implements OnInit {
   readonly signer = inject(RequestSigner);
   readonly statuses = TASK_STATUSES;
   readonly signingOpen = signal(false);
+  readonly map = computed(() => layoutMindmap(this.store.project()?.title ?? 'Project', this.store.tasks()));
 
   keyPem = '';
   keyError = '';
@@ -146,14 +146,21 @@ export class AppComponent implements OnInit {
     return this.store.tasks().filter((task) => task.task_id !== current?.task_id);
   }
 
-  isSelected(node: TaskNode): boolean {
+  isMapSelected(node: MindmapNode): boolean {
     const selection = this.store.selection();
-    return selection.kind === 'task' && selection.taskId === node.task.task_id;
+    if (node.kind === 'project') return selection.kind === 'project';
+    return (selection.kind === 'task' || selection.kind === 'code' || selection.kind === 'research')
+      && selection.taskId === node.id;
   }
 
-  isOutputSelected(taskId: string, kind: string): boolean {
-    const selection = this.store.selection();
-    return selection.kind === kind && 'taskId' in selection && selection.taskId === taskId;
+  selectMapNode(node: MindmapNode): void {
+    if (node.kind === 'project') void this.store.openProjectChat();
+    else void this.store.openTask(node.id);
+  }
+
+  addMapTask(node: MindmapNode, event: Event): void {
+    event.stopPropagation();
+    void this.store.addTask(node.kind === 'task' ? node.id : undefined);
   }
 
   openCode(taskId: string): void {
