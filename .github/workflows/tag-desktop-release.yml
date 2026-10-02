@@ -41,8 +41,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           TAG="${{ steps.meta.outputs.tag }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists on this commit or locally."
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q .; then
+            echo "Remote tag ${TAG} already exists. Bump version in package.json before merging to main."
             exit 1
           fi
           git tag -a "$TAG" -m "Battleplan desktop ${{ steps.meta.outputs.kind }} release ${TAG}"

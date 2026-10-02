@@ -134,6 +134,6 @@ jobs:
           files: upload/*
           fail_on_unmatched_files: true
           draft: false
-          make_latest: true
+          make_latest: ${{ !contains(env.RELEASE_TAG, '-test-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
