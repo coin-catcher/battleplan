@@ -34,7 +34,7 @@ Use **Import project** / **Export project** in the sidebar to move a project as 
    git tag v1.0.1
    git push origin v1.0.1
    ```
-3. The **Release Battleplan desktop** workflow runs on that tag push. It builds Windows, macOS, and Linux installers and uploads them to the GitHub Release for that tag.
+3. The **Release Battleplan desktop** workflow runs on that tag push. It builds Windows, macOS, and Linux installers in parallel, then a single publish job uploads all assets to the GitHub Release (avoids race conditions from parallel publishers).
 
 ### Release page vs installer assets
 

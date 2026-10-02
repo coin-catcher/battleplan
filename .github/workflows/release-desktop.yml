@@ -7,26 +7,19 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Git tag to build and attach installers to (e.g. v1.0.0)'
+        description: 'Git tag to build and attach installers to (e.g. v1.0.1)'
         required: true
         type: string
 
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
 jobs:
-  release:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux
-          - os: macos-latest
-            platform: mac
-          - os: windows-latest
-            platform: win
-    runs-on: ${{ matrix.os }}
+  test:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,18 +37,86 @@ jobs:
       - name: Run tests
         run: npm run test:local
 
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: desktop-linux
+          - os: macos-latest
+            artifact: desktop-mac
+          - os: windows-latest
+            artifact: desktop-win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Build desktop app
         run: npm run build:electron
         env:
           CI: true
 
-      - name: Publish GitHub release assets
+      - name: Package installers
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 45
           max_attempts: 3
           retry_wait_seconds: 30
-          command: npx electron-builder --publish always
+          command: npx electron-builder --publish never
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/**
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Verify installer artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Bundled files:"
+          find release-assets -type f | sort
+          test "$(find release-assets -type f | wc -l)" -ge 8
+          find release-assets -name 'battleplan-*-linux.AppImage' | grep -q .
+          find release-assets -name 'battleplan-*-linux.deb' | grep -q .
+          find release-assets -name 'battleplan-*-mac.zip' | grep -q .
+          find release-assets -name 'battleplan-*-mac.dmg' | grep -q .
+          find release-assets -name 'battleplan-*-win.exe' | grep -q .
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: |
+            release-assets/**
+          fail_on_unmatched_files: true
+          draft: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
