@@ -6,8 +6,8 @@
   "scripts": {
     "build": "terraform fmt -recursive",
     "test": "npm run test:local",
-    "test:local": "bash -n ../scripts/tf-deploy.sh && bash -n ../scripts/tf-destroy.sh && terraform fmt -check -recursive && terraform -chdir=bootstrap init -backend=false -input=false && terraform -chdir=bootstrap validate && terraform init -backend=false -input=false && terraform validate",
-    "test:agent": "bash -n ../scripts/tf-deploy.sh && bash -n ../scripts/tf-destroy.sh && terraform fmt -check -recursive && terraform -chdir=bootstrap init -backend=false -input=false && terraform -chdir=bootstrap validate && terraform init -backend=false -input=false && terraform validate",
+    "test:local": "bash -n ../scripts/tf-preflight.sh && bash -n ../scripts/tf-deploy.sh && bash -n ../scripts/tf-destroy.sh && terraform fmt -check -recursive && terraform -chdir=bootstrap init -backend=false -input=false && terraform -chdir=bootstrap validate && terraform init -backend=false -input=false && terraform validate",
+    "test:agent": "bash -n ../scripts/tf-preflight.sh && bash -n ../scripts/tf-deploy.sh && bash -n ../scripts/tf-destroy.sh && terraform fmt -check -recursive && terraform -chdir=bootstrap init -backend=false -input=false && terraform -chdir=bootstrap validate && terraform init -backend=false -input=false && terraform validate",
     "deploy": "npm run deploy:local",
     "deploy:local": "npm run deploy:local --prefix bootstrap && bash ../scripts/tf-deploy.sh local stack . infra",
     "deploy:agent": "npm run deploy:agent --prefix bootstrap && bash ../scripts/tf-deploy.sh agent stack . infra"

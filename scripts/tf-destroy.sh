@@ -47,22 +47,9 @@ else
   KEYS=("${ALL_KEYS[@]}")
 fi
 
+# shellcheck disable=SC1091
+source "${ROOT}/scripts/tf-preflight.sh" "$MODE" "$ROOT"
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
-
-if [[ "$MODE" == "agent" ]]; then
-  export TF_IN_AUTOMATION=1
-  export TF_INPUT=0
-  unset AWS_PROFILE || true
-else
-  export AWS_PROFILE="${AWS_PROFILE:-default}"
-fi
-
-if [[ -f "${ROOT}/infra/outputs.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "${ROOT}/infra/outputs.env"
-  set +a
-fi
 
 confirm_destroy() {
   if [[ "$MODE" == "agent" || "${WARPLAN_AUTO_APPROVE:-}" == "1" ]]; then
