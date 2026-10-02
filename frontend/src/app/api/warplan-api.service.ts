@@ -1,11 +1,8 @@
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { firstValueFrom } from 'rxjs';
-import { environment } from '../../environments/environment';
-import { RequestSigner } from './request-signer.service';
 import type {
   ChatMessage,
   ConversationPage,
+  OutputType,
   Project,
   ProjectTask,
   TaskCodeOutput,
@@ -13,23 +10,26 @@ import type {
   TaskResearchOutput,
   TaskStatus,
 } from '../core/models';
+import { BrowserCursor } from '../data/cursor-browser';
+import { CursorKey } from '../data/cursor-key.service';
+import { IdbRepository } from '../data/idb-repository';
+import { LocalEngine } from '../data/local-engine';
 
 @Injectable({ providedIn: 'root' })
 export class WarplanApi {
-  private readonly http = inject(HttpClient);
-  private readonly signer = inject(RequestSigner);
-  private readonly base = environment.apiBaseUrl.replace(/\/$/, '');
+  private readonly keys = inject(CursorKey);
+  private readonly engine = new LocalEngine(new IdbRepository(), new BrowserCursor(() => this.keys.value()));
 
   listProjects(): Promise<Project[]> {
-    return this.get<{ projects: Project[] }>('/projects').then((body) => body.projects);
+    return this.engine.listProjects();
   }
 
   createProject(input: { initial_prompt: string; repo_url?: string; starting_ref?: string }): Promise<Project> {
-    return this.send<Project>('POST', '/projects', input);
+    return this.engine.createProject(input);
   }
 
   updateTitle(projectId: string, title: string): Promise<Project> {
-    return this.updateProject(projectId, { title });
+    return this.engine.updateProject(projectId, { title });
   }
 
   updateProject(projectId: string, patch: {
@@ -39,127 +39,104 @@ export class WarplanApi {
     map_x?: number;
     map_y?: number;
   }): Promise<Project> {
-    return this.send<Project>('PATCH', `/projects/${projectId}`, patch);
+    return this.engine.updateProject(projectId, patch);
   }
 
   deleteProject(projectId: string): Promise<void> {
-    return this.send<void>('DELETE', `/projects/${projectId}`);
+    return this.engine.deleteProject(projectId);
   }
 
   listTasks(projectId: string): Promise<ProjectTask[]> {
-    return this.get<{ tasks: ProjectTask[] }>(`/projects/${projectId}/tasks`).then((body) => body.tasks);
+    return this.engine.listTasks(projectId);
   }
 
   createTasks(projectId: string, tasks: TaskDraft[]): Promise<ProjectTask[]> {
-    return this.send<{ tasks: ProjectTask[] }>('POST', `/projects/${projectId}/tasks`, { tasks }).then((body) => body.tasks);
+    return this.engine.createTasks(projectId, tasks);
   }
 
-  createTask(projectId: string, input: { depends_on?: string; title?: string; prompt?: string; output_type?: 'code' | 'research' }): Promise<ProjectTask> {
-    return this.send<{ task: ProjectTask }>('POST', `/projects/${projectId}/tasks`, { task: input }).then((body) => body.task);
+  createTask(projectId: string, input: {
+    depends_on?: string;
+    title?: string;
+    prompt?: string;
+    output_type?: OutputType;
+  }): Promise<ProjectTask> {
+    return this.engine.createTask(projectId, input);
   }
 
   updateTask(projectId: string, taskId: string, patch: Record<string, unknown>): Promise<ProjectTask> {
-    return this.send<ProjectTask>('PATCH', `/projects/${projectId}/tasks/${taskId}`, patch);
+    return this.engine.updateTask(projectId, taskId, {
+      title: typeof patch['title'] === 'string' ? patch['title'] : undefined,
+      prompt: typeof patch['prompt'] === 'string' ? patch['prompt'] : undefined,
+      dependencies: Array.isArray(patch['dependencies']) ? patch['dependencies'] as string[] : undefined,
+      output_type: patch['output_type'] === 'code' || patch['output_type'] === 'research' ? patch['output_type'] : undefined,
+      status: typeof patch['status'] === 'string' ? patch['status'] as TaskStatus : undefined,
+      manual: typeof patch['manual'] === 'boolean' ? patch['manual'] : undefined,
+      map_x: typeof patch['map_x'] === 'number' ? patch['map_x'] : undefined,
+      map_y: typeof patch['map_y'] === 'number' ? patch['map_y'] : undefined,
+    });
   }
 
   deleteTask(projectId: string, taskId: string): Promise<void> {
-    return this.send<void>('DELETE', `/projects/${projectId}/tasks/${taskId}`);
+    return this.engine.deleteTask(projectId, taskId);
   }
 
   reorderTasks(projectId: string, taskIds: string[]): Promise<ProjectTask[]> {
-    return this.send<{ tasks: ProjectTask[] }>('POST', `/projects/${projectId}/tasks/reorder`, { task_ids: taskIds })
-      .then((body) => body.tasks);
+    return this.engine.reorderTasks(projectId, taskIds);
   }
 
   transition(projectId: string, taskId: string, status: TaskStatus, manual: boolean): Promise<ProjectTask> {
-    return this.send<ProjectTask>('POST', `/projects/${projectId}/tasks/${taskId}/transition`, { status, manual });
+    return this.engine.transition(projectId, taskId, status, manual);
   }
 
   getCodeOutput(taskId: string): Promise<TaskCodeOutput | null> {
-    return this.get<{ output: TaskCodeOutput | null }>(`/tasks/${taskId}/outputs/code`).then((body) => body.output);
+    return this.engine.getCodeOutput(taskId);
   }
 
   saveCodeOutput(taskId: string, output: Omit<TaskCodeOutput, 'task_id'>): Promise<TaskCodeOutput> {
-    return this.send<TaskCodeOutput>('PUT', `/tasks/${taskId}/outputs/code`, output);
+    return this.engine.saveCodeOutput(taskId, output);
   }
 
   getResearchOutput(taskId: string): Promise<TaskResearchOutput | null> {
-    return this.get<{ output: TaskResearchOutput | null }>(`/tasks/${taskId}/outputs/research`).then((body) => body.output);
+    return this.engine.getResearchOutput(taskId);
   }
 
   saveResearchOutput(taskId: string, output: Omit<TaskResearchOutput, 'task_id'>): Promise<TaskResearchOutput> {
-    return this.send<TaskResearchOutput>('PUT', `/tasks/${taskId}/outputs/research`, output);
+    return this.engine.saveResearchOutput(taskId, output);
   }
 
   listProjectMessages(projectId: string): Promise<ConversationPage> {
-    return this.get<ConversationPage>(`/projects/${projectId}/messages`);
+    return this.engine.listProjectMessages(projectId);
   }
 
   sendProjectMessage(projectId: string, message: string): Promise<ChatMessage> {
-    return this.send<ChatMessage>('POST', `/projects/${projectId}/messages`, { message });
+    return this.engine.sendProjectMessage(projectId, message);
   }
 
   generateTasks(projectId: string): Promise<ChatMessage> {
-    return this.send<ChatMessage>('POST', `/projects/${projectId}/messages/generate-tasks`);
+    return this.engine.generateTasks(projectId);
   }
 
   generateTaskTasks(taskId: string): Promise<ChatMessage> {
-    return this.send<ChatMessage>('POST', `/tasks/${taskId}/messages/generate-tasks`);
+    return this.engine.generateTaskTasks(taskId);
   }
 
   noteProject(projectId: string, message: string): Promise<ChatMessage> {
-    return this.send<ChatMessage>('POST', `/projects/${projectId}/notes`, { message });
+    return this.engine.noteProject(projectId, message);
   }
 
   noteTask(taskId: string, message: string): Promise<ChatMessage> {
-    return this.send<ChatMessage>('POST', `/tasks/${taskId}/notes`, { message });
+    return this.engine.noteTask(taskId, message);
   }
 
   listTaskMessages(taskId: string): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ConversationPage['artifacts'] }> {
-    return this.get<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ConversationPage['artifacts'] }>(`/tasks/${taskId}/messages`);
+    return this.engine.listTaskMessages(taskId);
   }
 
   sendTaskMessage(taskId: string, message: string): Promise<ChatMessage> {
-    return this.send<ChatMessage>('POST', `/tasks/${taskId}/messages`, { message });
+    return this.engine.sendTaskMessage(taskId, message);
   }
 
   approve(taskId: string): Promise<ProjectTask> {
-    return this.send<ProjectTask>('POST', `/tasks/${taskId}/approve`);
+    return this.engine.approve(taskId);
   }
-
-  private get<T>(path: string): Promise<T> {
-    return this.request<T>('GET', path);
-  }
-
-  private send<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
-    return this.request<T>(method, path, body);
-  }
-
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const raw = body === undefined ? '' : JSON.stringify(body);
-    const signed = await this.signer.sign(method, path, raw);
-    try {
-      return await firstValueFrom(this.http.request<T>(method, `${this.base}${path}`, {
-        body: raw === '' ? null : raw,
-        headers: {
-          'content-type': 'application/json',
-          'x-warplan-timestamp': signed.timestamp,
-          'x-warplan-signature': signed.signature,
-        },
-      }));
-    } catch (error: unknown) {
-      throw new Error(readError(error));
-    }
-  }
-}
-
-function readError(error: unknown): string {
-  if (error instanceof HttpErrorResponse) {
-    const payload = error.error as { error?: string } | string | null;
-    if (payload && typeof payload === 'object' && payload.error) return payload.error;
-    if (typeof payload === 'string' && payload.trim()) return payload;
-    return error.message;
-  }
-  if (error instanceof Error) return error.message;
-  return 'Request failed.';
 }

@@ -1,20 +1,25 @@
 import { Pipe, PipeTransform } from '@angular/core';
-import { marked } from 'marked';
-
-marked.use({ gfm: true, breaks: true });
 
 export function isMarkdownPath(path: string): boolean {
   return /\.(md|markdown|mdx)$/i.test(path);
 }
 
-export function renderMarkdown(value: string): string {
-  const parsed = marked.parse(value, { async: false });
-  return typeof parsed === 'string' ? parsed : '';
+export function prepareMarkdown(value: string): string {
+  const fenced = value.replace(/```([^\n`]*)\n([\s\S]*?)```/g, (match, lang: string, body: string) => {
+    const language = lang.trim().toLowerCase();
+    if (language === 'mermaid') return match;
+    if (!/\bquadrantChart\b/.test(body)) return match;
+    return `\`\`\`mermaid\n${body.trim()}\n\`\`\``;
+  });
+  return fenced.replace(/(^|\n)(quadrantChart\b[\s\S]*?)(?=\n{2,}[^\s]|\n#|\s*$)/g, (match, lead: string, body: string) => {
+    if (match.includes('```')) return match;
+    return `${lead}\`\`\`mermaid\n${body.trim()}\n\`\`\`\n`;
+  });
 }
 
-@Pipe({ name: 'markdown', standalone: true })
-export class MarkdownPipe implements PipeTransform {
+@Pipe({ name: 'planMarkdown', standalone: true })
+export class PlanMarkdownPipe implements PipeTransform {
   transform(value: string | undefined): string {
-    return value ? renderMarkdown(value) : '';
+    return prepareMarkdown(value ?? '');
   }
 }

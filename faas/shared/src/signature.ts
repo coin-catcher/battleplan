@@ -3,7 +3,7 @@ import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { HttpError } from './errors.js';
 import { WARPLAN_PUBLIC_KEY } from './public-key.js';
 
-/** Keep in sync with frontend/src/app/api/request-signer.service.ts. */
+/** Request-signature canonical form verified by the HTTP API. */
 export const SIGNATURE_VERSION = 'v1';
 export const MAX_SIGNATURE_SKEW_MS = 5 * 60 * 1000;
 

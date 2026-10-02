@@ -23,28 +23,27 @@ Each of those folders has a `package.json` with `build`, `test:local`, `test:age
 
 ## Data
 
-Projects, tasks, outputs, and chat messages share one DynamoDB table.
+The Angular app keeps projects, tasks, outputs, chat messages, and artifacts in the browser IndexedDB database named `warplan`. Open **Cursor API key**, paste a key, and the app stores it in this browser’s local storage. Chat, task generation, and merges call `https://api.cursor.com` directly from the browser.
 
-- **projects**: `project_id`, `title`, `initial_prompt`, `cursor_chat_link`, plus the Cursor agent id and repository.
-- **project_tasks**: `task_id`, `project_id`, `title`, `prompt`, `dependencies`, `status`, `output_type` (`code` or `research`).
+- **projects**: `project_id`, `title`, `initial_prompt`, `cursor_chat_link`, plus the Cursor agent id, repository, and base branch.
+- **project_tasks**: `task_id`, `project_id`, `title`, `prompt`, `dependencies`, `status`, `output_type` (`code` or `research`), and optional mindmap coordinates.
 - **task_code_output**: `task_id`, `repo`, `branch`, `pr_message`, `pr_link`.
 - **task_research_output**: the same pull-request fields, plus `path` under `research/<project_id>/<task_id>/`.
 
-Guided status changes are `TODO → DOING → DONE` or `ABANDONED`. A task in `DOING` moves to `REVIEW` when a pull request is ready. Feedback returns it to `DOING`. Approval asks the Cursor agent to merge, then the task becomes `DONE`. The status dropdown can set any status directly.
+Guided status changes are `TODO → DOING → REVIEW → DONE`, and a task can move to `BLOCKED` or `ABANDONED`. A task in `DOING` moves to `REVIEW` when a pull request is ready. Feedback returns it to `DOING`. Approval asks the Cursor agent to merge, then the task becomes `DONE`. The status dropdown can set any status directly.
 
-A task has one output type. If a generated task asks for both, the tasks Lambda splits it into a research task and a code task that depends on it.
+A task has one output type. If a generated task asks for both, the app splits it into a research task and a code task that depends on it.
+
+The `faas` services and the shared DynamoDB table remain in the repository. The dashboard does not call them.
 
 ## Local development
 
 ```bash
-npm install --prefix faas
-npm run dev:local --prefix faas
+npm install --prefix frontend
 npm start --prefix frontend
 ```
 
-The faas dev server runs the Lambda handlers in-process on `http://localhost:8787`. Without `CURSOR_API_KEY` it uses a demo agent so the UI can create a project, generate tasks, open a pull request, and approve a merge. With `CURSOR_API_KEY` set, those same handlers call `https://api.cursor.com/v1`.
-
-Every API request is signed with the Ed25519 private key in `keys/warplan-private.pem`. Open **Signing key** in the app and import that file before calling the API; the PEM is stored in the browser’s local storage and is not bundled into the Angular app. Each Lambda verifies `x-warplan-timestamp` and `x-warplan-signature` with the public key in `keys/warplan-public.pem`.
+Save a Cursor API key in the app before creating a project. Projects and tasks stay in this browser.
 
 ## Deploy
 
@@ -58,4 +57,4 @@ npm run deploy:local
 
 Cloud agents run `npm run deploy:agent` instead. Bootstrap is idempotent. Every later `terraform plan -out=*.tfplan` is uploaded to `s3://<plan-bucket>/plans/...` before apply. Remote state is stored in the same bucket under `state/`.
 
-The frontend deploy builds the Angular app with the API endpoint from `infra/outputs.env` and syncs it to the frontend S3 website bucket.
+The frontend deploy builds the Angular app and syncs it to the frontend S3 website bucket. The built site does not embed an API endpoint.
