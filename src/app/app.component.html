@@ -1,0 +1,403 @@
+<div class="shell" [style.--pane-width.px]="paneWidth()">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <p class="brand-kicker">Cursor orchestration</p>
+        <h1>Battleplan</h1>
+      </div>
+    </div>
+
+    <label class="field">
+      <span>Color scheme</span>
+      <select [value]="themeId()" (change)="chooseTheme($event)" aria-label="Color scheme">
+        @for (theme of themes; track theme.id) {
+          <option [value]="theme.id">{{ theme.label }}</option>
+        }
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Project</span>
+      <select [value]="store.projectId() ?? ''" (change)="onProjectChange($event)">
+        <option value="" disabled>Select a project</option>
+        @for (project of store.projects(); track project.project_id) {
+          <option [value]="project.project_id">{{ project.title }}</option>
+        }
+      </select>
+    </label>
+    <button type="button" class="ghost" (click)="store.showCreate()">New project</button>
+    <button type="button" class="ghost" (click)="openCursorKey()">Cursor API key</button>
+
+    @if (store.project()) {
+      <div class="map-frame">
+        <div class="zoom-controls">
+          <button type="button" (click)="zoomBy(1.15)" aria-label="Zoom in">+</button>
+          <button type="button" (click)="zoomBy(1 / 1.15)" aria-label="Zoom out">−</button>
+        </div>
+        <div #mapStage class="map-stage" aria-label="Project mindmap" (pointerdown)="onStagePointerDown($event)">
+          <div class="map-scaler" [style.width.px]="map().width * zoom()" [style.height.px]="map().height * zoom()">
+            <div class="map-canvas" [style.width.px]="map().width" [style.height.px]="map().height" [style.transform]="'scale(' + zoom() + ')'">
+          <svg [attr.viewBox]="'0 0 ' + map().width + ' ' + map().height" [attr.width]="map().width" [attr.height]="map().height">
+            <defs>
+              <marker id="arrow-solid" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L10,4 L0,8 Z" />
+              </marker>
+              <marker id="arrow-dashed" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L10,4 L0,8 Z" />
+              </marker>
+            </defs>
+            @for (edge of map().edges; track edge.from + '>' + edge.to) {
+              <line
+                [attr.x1]="edge.x1"
+                [attr.y1]="edge.y1"
+                [attr.x2]="edge.x2"
+                [attr.y2]="edge.y2"
+                [class.dashed]="edge.dashed"
+                [attr.marker-end]="edge.dashed ? 'url(#arrow-dashed)' : 'url(#arrow-solid)'"
+              />
+            }
+          </svg>
+          @for (node of map().nodes; track node.id) {
+            <div
+              class="map-node"
+              [class.circle]="node.kind === 'project'"
+              [class.active]="isMapSelected(node)"
+              [attr.data-status]="node.status ?? null"
+              [style.left.px]="node.x"
+              [style.top.px]="node.y"
+              [style.width.px]="node.width"
+              [style.height.px]="node.height"
+              tabindex="0"
+              role="button"
+              (pointerdown)="onNodePointerDown(node, $event)"
+              (keydown.enter)="selectMapNode(node)"
+            >
+              <span class="map-label">{{ node.label }}</span>
+              <button
+                type="button"
+                class="plus"
+                [attr.aria-label]="'Add a task connected to ' + node.label"
+                (click)="addMapTask(node, $event)"
+              >+</button>
+            </div>
+          }
+            </div>
+          </div>
+        </div>
+      </div>
+    }
+
+    <ul class="legend">
+      <li data-status="TODO">TODO</li>
+      <li data-status="DOING">DOING</li>
+      <li data-status="REVIEW">REVIEW</li>
+      <li data-status="DONE">DONE</li>
+      <li data-status="BLOCKED">BLOCKED</li>
+      <li data-status="ABANDONED">ABANDONED</li>
+    </ul>
+  </aside>
+
+  <div class="divider" role="separator" aria-orientation="vertical" aria-label="Resize panes" (pointerdown)="startResize($event)"></div>
+
+  <main class="editor">
+    @if (store.error()) {
+      <p class="banner error" role="alert">{{ store.error() }}</p>
+    }
+    @if (store.notice()) {
+      <p class="banner notice">{{ store.notice() }}</p>
+    }
+
+    @if (showCursorKey()) {
+      <section class="panel">
+        <header class="panel-head">
+          <div>
+            <p class="eyebrow">Cursor</p>
+            <h2>API key</h2>
+          </div>
+        </header>
+        <p>Paste a Cursor API key. It stays in this browser and is sent directly to Cursor. Projects, tasks, chats, and artifacts are stored in this browser.</p>
+        @if (cursorKey.ready() && !replacingKey) {
+          <p class="banner notice">A Cursor API key is stored in this browser.</p>
+          <div class="composer-actions">
+            <button type="button" class="primary" (click)="closeCursorKey()">Continue</button>
+            <button type="button" class="ghost" (click)="replacingKey = true">Replace key</button>
+            <button type="button" class="danger" (click)="clearCursorKey()">Remove key</button>
+          </div>
+        } @else {
+          <label class="field">
+            <span>API key</span>
+            <input type="password" [(ngModel)]="apiKey" name="apiKey" autocomplete="off" placeholder="cursor_…" />
+          </label>
+          @if (keyError) {
+            <p class="banner error" role="alert">{{ keyError }}</p>
+          }
+          <div class="composer-actions">
+            <button type="button" class="primary" [disabled]="!apiKey.trim()" (click)="saveCursorKey()">Save to this browser</button>
+            @if (cursorKey.ready()) {
+              <button type="button" class="ghost" (click)="replacingKey = false">Cancel</button>
+            }
+          </div>
+        }
+      </section>
+    } @else { @switch (store.selection().kind) {
+      @case ('create') {
+        <section class="panel">
+          <header class="panel-head">
+            <h2>Start a battleplan</h2>
+            <p>The initial prompt is sent to a Cursor cloud agent in plan mode. The chat title becomes the project title.</p>
+          </header>
+          <label class="field">
+            <span>Initial prompt</span>
+            <textarea rows="8" [(ngModel)]="initialPrompt" name="initialPrompt" placeholder="Describe the project or feature to plan."></textarea>
+          </label>
+          <div class="split">
+            <label class="field">
+              <span>Repository URL</span>
+              <input [(ngModel)]="repoUrl" name="repoUrl" placeholder="https://github.com/org/repo" />
+            </label>
+            <label class="field">
+              <span>Starting ref</span>
+              <input [(ngModel)]="startingRef" name="startingRef" />
+            </label>
+          </div>
+          <button type="button" class="primary" [disabled]="store.busy() || !initialPrompt.trim()" (click)="createProject()">
+            Send to Cursor
+          </button>
+        </section>
+      }
+      @case ('project') {
+        @if (store.project(); as project) {
+          <section class="panel chat-layout">
+            <div class="toolbar">
+              <button type="button" class="primary" [disabled]="store.busy() || !title.trim()" (click)="saveProject()">Save</button>
+              <button type="button" class="danger" [disabled]="store.busy()" (click)="deleteProject()">Delete</button>
+              <button type="button" class="accent" [disabled]="store.busy()" (click)="store.generateTasks()">Generate Tasks</button>
+              <a class="text-link" [href]="project.cursor_chat_link" target="_blank" rel="noopener">Open in Cursor</a>
+            </div>
+            <header class="panel-head">
+              <div>
+                <p class="eyebrow">Project chat</p>
+                <h2>{{ project.title }}</h2>
+              </div>
+            </header>
+            <div class="config">
+              <label class="field">
+                <span>Title</span>
+                <input [(ngModel)]="title" name="title" />
+              </label>
+              <label class="field">
+                <span>Repository</span>
+                <input [(ngModel)]="projectRepo" name="projectRepo" placeholder="https://github.com/org/repo" />
+              </label>
+              <label class="field">
+                <span>Base branch</span>
+                <input [(ngModel)]="projectBranch" name="projectBranch" placeholder="main" />
+              </label>
+            </div>
+            <p class="pending">New task branches are created from this branch, and approved pull requests merge back into it.</p>
+            <div class="transcript" aria-live="polite">
+              @for (item of timeline(); track item.id) {
+                @if (item.kind === 'message') {
+                  <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
+                    <p class="who">{{ speaker(item.message) }}</p>
+                    <pre>{{ item.message.content }}</pre>
+                  </article>
+                } @else {
+                  <article class="artifact">
+                    <header>{{ item.artifact.name }}</header>
+                    @if (markdownArtifact(item.artifact) && item.artifact.text) {
+                      <markdown class="md" mermaid [data]="planMarkdown(item.artifact.text)"></markdown>
+                    } @else if (item.artifact.text) {
+                      <pre>{{ item.artifact.text }}</pre>
+                    } @else if (item.artifact.content_type === 'image' && item.artifact.url) {
+                      <img [src]="item.artifact.url" [alt]="item.artifact.name" />
+                    } @else if (item.artifact.url) {
+                      <a class="text-link" [href]="item.artifact.url" target="_blank" rel="noopener">Download {{ item.artifact.name }}</a>
+                    }
+                  </article>
+                }
+              }
+              @if (store.pendingReply()) {
+                <p class="pending">Waiting for Cursor…</p>
+              }
+            </div>
+            <div class="composer">
+              <label class="sr-only" for="project-chat">Message</label>
+              <textarea id="project-chat" rows="3" [(ngModel)]="chatDraft" name="chatDraft" placeholder="Continue the battleplan conversation."></textarea>
+              <div class="composer-actions">
+                <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+              </div>
+            </div>
+          </section>
+        }
+      }
+      @case ('task') {
+        @if (store.selectedTask(); as task) {
+          <section class="panel chat-layout">
+            <div class="toolbar">
+              <button type="button" class="primary" [disabled]="store.busy()" (click)="saveTask()">Save</button>
+              <button type="button" class="danger" [disabled]="store.busy()" (click)="deleteTask(task)">Delete</button>
+              <button type="button" class="accent" [disabled]="store.busy()" (click)="store.generateTasks()">Generate Tasks</button>
+              @if (task.status === 'TODO') {
+                <button type="button" class="accent" [disabled]="store.busy()" (click)="start(task.task_id)">Start</button>
+              }
+              @if (task.status === 'REVIEW') {
+                <button type="button" class="accent" [disabled]="store.busy()" (click)="store.approve()">Approve and merge</button>
+              }
+              @if (store.codeOutput(task.task_id)) {
+                <button type="button" class="ghost" (click)="openCode(task.task_id)">Code output</button>
+              }
+              @if (store.researchOutput(task.task_id)) {
+                <button type="button" class="ghost" (click)="openResearch(task.task_id)">Research output</button>
+              }
+              @if (task.cursor_chat_link) {
+                <a class="text-link" [href]="task.cursor_chat_link" target="_blank" rel="noopener">Open task agent</a>
+              }
+            </div>
+            <header class="panel-head">
+              <div>
+                <p class="eyebrow">{{ task.output_type }} task · {{ task.status }}</p>
+                <h2>{{ task.title }}</h2>
+              </div>
+            </header>
+            @if (task.pending_action === 'merge') {
+              <p class="banner notice">Cursor is merging the pull request.</p>
+            }
+            <div class="config">
+              <label class="field">
+                <span>Title</span>
+                <input [(ngModel)]="taskTitle" name="taskTitle" />
+              </label>
+              <label class="field">
+                <span>Output</span>
+                <select [(ngModel)]="outputType" name="outputType">
+                  <option value="code">code</option>
+                  <option value="research">research</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Status</span>
+                <select [value]="task.status" (change)="onStatusChange(task.task_id, $event)">
+                  @for (status of statuses; track status) {
+                    <option [value]="status">{{ status }}</option>
+                  }
+                </select>
+              </label>
+            </div>
+            <label class="field">
+              <span>Prompt</span>
+              <textarea rows="3" [(ngModel)]="taskPrompt" name="taskPrompt"></textarea>
+            </label>
+            <fieldset class="deps">
+              <legend>Dependencies</legend>
+              @for (other of otherTasks(); track other.task_id) {
+                <label>
+                  <input
+                    type="checkbox"
+                    [checked]="dependencies.includes(other.task_id)"
+                    (change)="toggleDependency(other.task_id, $event)"
+                  />
+                  {{ other.title }}
+                </label>
+              } @empty {
+                <p>No other tasks to depend on.</p>
+              }
+            </fieldset>
+            <div class="transcript" aria-live="polite">
+              @for (item of timeline(); track item.id) {
+                @if (item.kind === 'message') {
+                  <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
+                    <p class="who">{{ speaker(item.message) }}</p>
+                    <pre>{{ item.message.content }}</pre>
+                  </article>
+                } @else {
+                  <article class="artifact">
+                    <header>{{ item.artifact.name }}</header>
+                    @if (markdownArtifact(item.artifact) && item.artifact.text) {
+                      <markdown class="md" mermaid [data]="planMarkdown(item.artifact.text)"></markdown>
+                    } @else if (item.artifact.text) {
+                      <pre>{{ item.artifact.text }}</pre>
+                    } @else if (item.artifact.content_type === 'image' && item.artifact.url) {
+                      <img [src]="item.artifact.url" [alt]="item.artifact.name" />
+                    } @else if (item.artifact.url) {
+                      <a class="text-link" [href]="item.artifact.url" target="_blank" rel="noopener">Download {{ item.artifact.name }}</a>
+                    }
+                  </article>
+                }
+              }
+              @if (store.pendingReply()) {
+                <p class="pending">Waiting for Cursor…</p>
+              }
+            </div>
+            <div class="composer">
+              <label class="sr-only" for="task-chat">Message</label>
+              <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat."></textarea>
+              <div class="composer-actions">
+                <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+              </div>
+            </div>
+          </section>
+        }
+      }
+      @case ('code') {
+        @if (store.selectedTask(); as task) {
+          <section class="panel">
+            <header class="panel-head">
+              <div>
+                <p class="eyebrow">Code output</p>
+                <h2>{{ task.title }}</h2>
+              </div>
+            </header>
+            <label class="field"><span>Repository</span><input [(ngModel)]="codeRepo" name="codeRepo" /></label>
+            <label class="field"><span>Branch</span><input [(ngModel)]="codeBranch" name="codeBranch" /></label>
+            <label class="field"><span>PR message</span><textarea rows="4" [(ngModel)]="codeMessage" name="codeMessage"></textarea></label>
+            <label class="field"><span>PR link</span><input [(ngModel)]="codeLink" name="codeLink" /></label>
+            @if (codeLink) {
+              <a class="text-link" [href]="codeLink" target="_blank" rel="noopener">Review pull request</a>
+            }
+            <button
+              type="button"
+              class="primary"
+              [disabled]="store.busy()"
+              (click)="store.saveCodeOutput({ repo: codeRepo, branch: codeBranch, pr_message: codeMessage, pr_link: codeLink })"
+            >Save code output</button>
+          </section>
+        }
+      }
+      @case ('research') {
+        @if (store.selectedTask(); as task) {
+          <section class="panel">
+            <header class="panel-head">
+              <div>
+                <p class="eyebrow">Research output</p>
+                <h2>{{ task.title }}</h2>
+              </div>
+            </header>
+            <label class="field"><span>Repository</span><input [(ngModel)]="researchRepo" name="researchRepo" /></label>
+            <label class="field"><span>Branch</span><input [(ngModel)]="researchBranch" name="researchBranch" /></label>
+            <label class="field"><span>Research folder</span><input [(ngModel)]="researchPath" name="researchPath" /></label>
+            <label class="field"><span>PR message</span><textarea rows="4" [(ngModel)]="researchMessage" name="researchMessage"></textarea></label>
+            <label class="field"><span>PR link</span><input [(ngModel)]="researchLink" name="researchLink" /></label>
+            @if (researchLink) {
+              <a class="text-link" [href]="researchLink" target="_blank" rel="noopener">Review pull request</a>
+            }
+            <button
+              type="button"
+              class="primary"
+              [disabled]="store.busy()"
+              (click)="store.saveResearchOutput({ repo: researchRepo, branch: researchBranch, pr_message: researchMessage, pr_link: researchLink, path: researchPath })"
+            >Save research output</button>
+          </section>
+        }
+      }
+      @default {
+        <section class="panel empty-state">
+          <h2>No project selected</h2>
+          <p>Create a battleplan to brief a Cursor cloud agent, then turn the conversation into an ordered task list.</p>
+          <button type="button" class="primary" (click)="store.showCreate()">New project</button>
+        </section>
+      }
+    } }
+  </main>
+</div>
