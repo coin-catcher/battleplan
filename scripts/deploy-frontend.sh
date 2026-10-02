@@ -11,6 +11,7 @@ if [[ "$MODE" != "local" && "$MODE" != "agent" ]]; then
   exit 1
 fi
 
+export NG_CLI_ANALYTICS=false
 npm run build --prefix "${ROOT}/frontend"
 bash "${ROOT}/scripts/tf-deploy.sh" "$MODE" stack "${ROOT}/frontend/terraform" "frontend"
 DEPLOY_STATUS=$?

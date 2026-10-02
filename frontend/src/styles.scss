@@ -139,6 +139,7 @@ html[data-theme="glacier"] {
 
 html, body {
   height: 100%;
+  max-height: 100%;
   overflow: hidden;
 }
 
@@ -157,8 +158,8 @@ button, input, select, textarea {
 button { cursor: pointer; }
 
 .shell {
-  height: 100vh;
-  height: 100dvh;
+  height: 100%;
+  max-height: 100dvh;
   overflow: hidden;
   display: flex;
   align-items: stretch;
@@ -168,6 +169,7 @@ button { cursor: pointer; }
   width: var(--pane-width, 640px);
   flex: none;
   height: 100%;
+  min-height: 0;
   overflow: hidden;
   background: var(--sidebar);
   color: var(--sidebar-ink);
@@ -223,6 +225,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   border-radius: 16px;
   background:
     radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.05), transparent 42%),
@@ -333,10 +336,12 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 }
 
 .editor {
-  flex: 1;
-  min-width: 320px;
-  height: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 28px;
 }
 .panel {
