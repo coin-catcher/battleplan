@@ -6,8 +6,8 @@
   "scripts": {
     "build": "terraform fmt -recursive",
     "test": "npm run test:local",
-    "test:local": "bash -n ../../scripts/tf-deploy.sh && terraform fmt -check -recursive && terraform init -backend=false -input=false && terraform validate",
-    "test:agent": "bash -n ../../scripts/tf-deploy.sh && terraform fmt -check -recursive && terraform init -backend=false -input=false && terraform validate",
+    "test:local": "bash -n ../../scripts/tf-deploy.sh && bash -n ../../scripts/tf-destroy.sh && terraform fmt -check -recursive && terraform init -backend=false -input=false && terraform validate",
+    "test:agent": "bash -n ../../scripts/tf-deploy.sh && bash -n ../../scripts/tf-destroy.sh && terraform fmt -check -recursive && terraform init -backend=false -input=false && terraform validate",
     "deploy": "npm run deploy:local",
     "deploy:local": "bash ../../scripts/tf-deploy.sh local bootstrap . bootstrap",
     "deploy:agent": "bash ../../scripts/tf-deploy.sh agent bootstrap . bootstrap"

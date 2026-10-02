@@ -11,6 +11,8 @@
     "deploy": "npm run deploy:local",
     "deploy:local": "npm run deploy:local --prefix infra && npm run deploy:local --prefix faas && npm run deploy:local --prefix frontend",
     "deploy:agent": "npm run deploy:agent --prefix infra && npm run deploy:agent --prefix faas && npm run deploy:agent --prefix frontend",
+    "destroy:local": "bash scripts/tf-destroy.sh local",
+    "destroy:agent": "bash scripts/tf-destroy.sh agent",
     "dev:local": "npm run dev:local --prefix faas"
   }
 }

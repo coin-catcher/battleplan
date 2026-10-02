@@ -58,3 +58,5 @@ npm run deploy:local
 Cloud agents run `npm run deploy:agent` instead. Bootstrap is idempotent. Every later `terraform plan -out=*.tfplan` is uploaded to `s3://<plan-bucket>/plans/...` before apply. Remote state is stored in the same bucket under `state/`.
 
 The frontend deploy builds the Angular app and syncs it to the frontend S3 website bucket. The built site does not embed an API endpoint.
+
+`npm run destroy:local` destroys every resource in each Terraform state. Lambda stacks go first, then the frontend bucket, the shared API and table, and the bootstrap bucket last. Pass a state key to `scripts/tf-destroy.sh` to limit the run to one file, for example `bash scripts/tf-destroy.sh local frontend`. `npm run destroy:agent` runs the full sequence without a confirmation prompt.
