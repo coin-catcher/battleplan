@@ -23,17 +23,11 @@ if [[ -z "$WORK_DIR" || -z "$STATE_KEY" ]]; then
 fi
 
 WORK_DIR="$(cd "$WORK_DIR" && pwd)"
+# shellcheck disable=SC1091
+source "${ROOT}/scripts/tf-preflight.sh" "$MODE" "$ROOT"
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 PLAN_FILE="${WORK_DIR}/warplan.tfplan"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-
-if [[ "$MODE" == "agent" ]]; then
-  export TF_IN_AUTOMATION=1
-  export TF_INPUT=0
-  unset AWS_PROFILE || true
-else
-  export AWS_PROFILE="${AWS_PROFILE:-default}"
-fi
 
 tf() {
   terraform -chdir="$WORK_DIR" "$@"
