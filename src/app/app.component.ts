@@ -3,8 +3,11 @@ import { FormsModule } from '@angular/forms';
 import type { ChatArtifact, ChatMessage, OutputType, ProjectTask, TaskStatus } from './core/models';
 import { TASK_STATUSES } from './core/models';
 import { isMarkdownPath, prepareMarkdown } from './core/markdown';
-import { applyTheme, readTheme, THEMES, type ThemeId } from './core/themes';
+import { applyTheme, THEMES, type ThemeId } from './core/themes';
+import { AppPreferences } from './data/app-preferences.service';
+import { electronBridge, isElectronApp } from './data/electron-bridge';
 import { CursorKey } from './data/cursor-key.service';
+import { ProjectPortability } from './data/project-portability.service';
 import { layoutMindmap, type MindmapNode } from './core/mindmap';
 import { MarkdownComponent } from 'ngx-markdown';
 import { BattleplanStore } from './state/battleplan-store.service';
@@ -18,6 +21,9 @@ import { BattleplanStore } from './state/battleplan-store.service';
 export class AppComponent implements OnInit {
   readonly store = inject(BattleplanStore);
   readonly cursorKey = inject(CursorKey);
+  readonly preferences = inject(AppPreferences);
+  readonly portability = inject(ProjectPortability);
+  readonly desktop = isElectronApp();
   readonly themes = THEMES;
   private readonly zone = inject(NgZone);
   readonly statuses = TASK_STATUSES;
@@ -43,8 +49,9 @@ export class AppComponent implements OnInit {
   apiKey = '';
   keyError = '';
   replacingKey = false;
-  readonly themeId = signal(readTheme());
-  readonly paneWidth = signal(readPaneWidth());
+  readonly themeId = signal<ThemeId>('harbor');
+  readonly paneWidth = signal(640);
+  readonly updatePrompt = signal<{ version: string; notes: string } | null>(null);
 
   title = '';
   initialPrompt = '';
@@ -146,15 +153,24 @@ export class AppComponent implements OnInit {
   }
 
   async ngOnInit(): Promise<void> {
-    applyTheme(this.themeId());
-    this.cursorKey.restore();
+    await this.preferences.restore();
+    this.themeId.set(this.preferences.theme());
+    this.paneWidth.set(this.preferences.paneWidth());
+    applyTheme(this.themeId(), !this.desktop);
     if (this.cursorKey.ready()) await this.store.loadProjects();
+    electronBridge()?.on('update:available', (payload) => {
+      const info = payload as { version?: string; releaseNotes?: string | null };
+      const version = info.version ?? 'new';
+      const notes = typeof info.releaseNotes === 'string' ? info.releaseNotes : 'A newer Battleplan release is available.';
+      this.zone.run(() => this.updatePrompt.set({ version, notes }));
+    });
   }
 
   chooseTheme(event: Event): void {
     const theme = (event.target as HTMLSelectElement).value as ThemeId;
     this.themeId.set(theme);
-    applyTheme(theme);
+    applyTheme(theme, !this.desktop);
+    void this.preferences.saveTheme(theme);
   }
 
   startResize(event: PointerEvent): void {
@@ -166,7 +182,7 @@ export class AppComponent implements OnInit {
       this.paneWidth.set(next);
     };
     const up = () => {
-      localStorage.setItem('battleplan-pane-width', String(this.paneWidth()));
+      void this.preferences.savePaneWidth(this.paneWidth());
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
@@ -219,19 +235,18 @@ export class AppComponent implements OnInit {
 
   saveCursorKey(): void {
     this.keyError = '';
-    try {
-      this.cursorKey.save(this.apiKey);
+    void this.cursorKey.save(this.apiKey).then(() => {
       this.apiKey = '';
       this.replacingKey = false;
       this.signingOpen.set(false);
       if (this.store.projects().length === 0) void this.store.loadProjects();
-    } catch (error) {
+    }).catch((error) => {
       this.keyError = error instanceof Error ? error.message : 'Could not save that key.';
-    }
+    });
   }
 
   clearCursorKey(): void {
-    this.cursorKey.clear();
+    void this.cursorKey.clear();
     this.apiKey = '';
     this.replacingKey = false;
     this.signingOpen.set(true);
@@ -283,6 +298,45 @@ export class AppComponent implements OnInit {
   deleteProject(): void {
     const project = this.store.project();
     if (project && confirm(`Delete "${project.title}"?`)) void this.store.deleteProject();
+  }
+
+  exportProject(): void {
+    const project = this.store.project();
+    if (!project || !this.portability.supported()) return;
+    void this.portability.exportProject(project.project_id).then((result) => {
+      if (!result.canceled && result.filePath) this.store.notice.set(`Exported to ${result.filePath}`);
+    }).catch((error) => {
+      this.store.error.set(error instanceof Error ? error.message : 'Export failed.');
+    });
+  }
+
+  importProject(overwrite = false): void {
+    if (!this.portability.supported()) return;
+    void this.portability.importProject(overwrite).then(async (result) => {
+      if (result.canceled) return;
+      if (result.exists) {
+        const ok = confirm('This project already exists. Do you want to overwrite your existing project?');
+        if (ok) this.importProject(true);
+        return;
+      }
+      if (result.project) {
+        await this.store.loadProjects();
+        await this.store.selectProject(result.project.project_id);
+        this.store.notice.set(`Imported "${result.project.title}".`);
+      }
+    }).catch((error) => {
+      this.store.error.set(error instanceof Error ? error.message : 'Import failed.');
+    });
+  }
+
+  dismissUpdate(): void {
+    this.updatePrompt.set(null);
+  }
+
+  installUpdate(): void {
+    void electronBridge()?.invoke<{ ok: boolean }>('update:install').then((result) => {
+      if (!result.ok) this.store.error.set('Could not install the update.');
+    });
   }
 
   zoomBy(factor: number): void {
@@ -438,7 +492,3 @@ function clampZoom(value: number): number {
   return Math.min(2.4, Math.max(0.45, value));
 }
 
-function readPaneWidth(): number {
-  const stored = Number(localStorage.getItem('battleplan-pane-width'));
-  return Number.isFinite(stored) && stored >= 320 ? stored : 640;
-}

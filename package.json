@@ -1,10 +1,18 @@
 {
-  "name": "frontend",
-  "version": "0.0.0",
+  "name": "battleplan",
+  "version": "1.0.0",
+  "description": "Strategy, tactics, design, and agent orchestration management dashboard for Cursor Cloud Agents.",
+  "author": "coin-catcher",
+  "main": "dist-electron/electron/main.js",
   "scripts": {
     "ng": "ng",
     "start": "ng serve --host 127.0.0.1 --port 4200",
     "build": "ng build",
+    "build:electron": "ng build --configuration electron && tsc -p electron/tsconfig.json",
+    "electron:dev": "concurrently -k \"ng serve --host 127.0.0.1 --port 4200\" \"wait-on http://127.0.0.1:4200 && cross-env BATTLEPLAN_DEV_SERVER_URL=http://127.0.0.1:4200 tsc -p electron/tsconfig.json && electron dist-electron/electron/main.js\"",
+    "electron:start": "npm run build:electron && electron dist-electron/electron/main.js",
+    "dist": "npm run build:electron && electron-builder --publish never",
+    "dist:publish": "npm run build:electron && electron-builder --publish always",
     "watch": "ng build --watch --configuration development",
     "test": "npm run test:local",
     "test:local": "vitest run --reporter=verbose",
@@ -19,6 +27,9 @@
     "@angular/platform-browser": "^19.2.0",
     "@angular/platform-browser-dynamic": "^19.2.0",
     "@angular/router": "^19.2.0",
+    "archiver": "^7.0.1",
+    "electron-updater": "^6.6.2",
+    "extract-zip": "^2.0.1",
     "marked": "^15.0.12",
     "mermaid": "^11.17.2",
     "ngx-markdown": "^19.1.1",
@@ -30,7 +41,12 @@
     "@angular-devkit/build-angular": "^19.2.27",
     "@angular/cli": "^19.2.27",
     "@angular/compiler-cli": "^19.2.0",
+    "@types/archiver": "^6.0.3",
     "@types/jasmine": "~5.1.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^7.0.3",
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.12",
     "fake-indexeddb": "^6.2.5",
     "jasmine-core": "~5.6.0",
     "karma": "~6.4.0",
@@ -39,6 +55,46 @@
     "karma-jasmine": "~5.1.0",
     "karma-jasmine-html-reporter": "~2.1.0",
     "typescript": "~5.7.2",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "wait-on": "^8.0.5"
+  },
+  "build": {
+    "appId": "com.coincatcher.battleplan",
+    "productName": "Battleplan",
+    "artifactName": "battleplan-${version}-${os}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/electron/**/*",
+      "dist/frontend/browser/**/*",
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "coin-catcher",
+        "repo": "battleplan"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
   }
 }

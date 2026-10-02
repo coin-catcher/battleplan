@@ -27,6 +27,12 @@
       </select>
     </label>
     <button type="button" class="ghost" (click)="store.showCreate()">New project</button>
+    @if (desktop) {
+      <button type="button" class="ghost" (click)="importProject()">Import project</button>
+    }
+    @if (desktop && store.project()) {
+      <button type="button" class="ghost" (click)="exportProject()">Export project</button>
+    }
     <button type="button" class="ghost" (click)="openCursorKey()">Cursor API key</button>
 
     @if (store.project()) {
@@ -116,9 +122,9 @@
             <h2>API key</h2>
           </div>
         </header>
-        <p>Paste a Cursor API key. It stays in this browser and is sent directly to Cursor. Projects, tasks, chats, and artifacts are stored in this browser.</p>
+        <p>Paste a Cursor API key. It is sent directly to Cursor. @if (desktop) { Projects and settings are stored on disk in your Battleplan data folder. } @else { Projects, tasks, chats, and artifacts are stored in this browser. }</p>
         @if (cursorKey.ready() && !replacingKey) {
-          <p class="banner notice">A Cursor API key is stored in this browser.</p>
+          <p class="banner notice">A Cursor API key is saved for this app.</p>
           <div class="composer-actions">
             <button type="button" class="primary" (click)="closeCursorKey()">Continue</button>
             <button type="button" class="ghost" (click)="replacingKey = true">Replace key</button>
@@ -401,3 +407,19 @@
     } }
   </main>
 </div>
+
+@if (updatePrompt(); as update) {
+  <div class="modal-backdrop" role="presentation">
+    <section class="modal" role="dialog" aria-labelledby="update-title">
+      <header class="panel-head">
+        <h2 id="update-title">Update available</h2>
+        <p>Battleplan {{ update.version }} is ready to install.</p>
+      </header>
+      <p class="update-notes">{{ update.notes }}</p>
+      <div class="modal-actions">
+        <button type="button" class="ghost" (click)="dismissUpdate()">Not now</button>
+        <button type="button" class="primary" (click)="installUpdate()">Download and restart</button>
+      </div>
+    </section>
+  </div>
+}

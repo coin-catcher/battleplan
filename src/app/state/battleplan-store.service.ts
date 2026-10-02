@@ -1,5 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { BattleplanApi } from '../api/battleplan-api.service';
+import { AppPreferences } from '../data/app-preferences.service';
 import type {
   ChatArtifact,
   ChatMessage,
@@ -20,6 +21,7 @@ const POLL_ATTEMPTS = 300;
 @Injectable({ providedIn: 'root' })
 export class BattleplanStore {
   private readonly api = inject(BattleplanApi);
+  private readonly preferences = inject(AppPreferences);
 
   readonly projects = signal<Project[]>([]);
   readonly projectId = signal<string | null>(null);
@@ -49,7 +51,11 @@ export class BattleplanStore {
     await this.run(async () => {
       const projects = await this.api.listProjects();
       this.projects.set(projects);
-      if (!this.projectId() && projects[0]) await this.selectProject(projects[0].project_id);
+      const preferred = this.preferences.currentProjectId();
+      const initial = preferred && projects.some((item) => item.project_id === preferred)
+        ? preferred
+        : projects[0]?.project_id;
+      if (!this.projectId() && initial) await this.selectProject(initial);
       if (projects.length === 0) this.selection.set({ kind: 'create' });
     });
   }
@@ -57,6 +63,7 @@ export class BattleplanStore {
   async selectProject(projectId: string): Promise<void> {
     this.stopWatch();
     this.projectId.set(projectId);
+    await this.preferences.setCurrentProjectId(projectId);
     this.selection.set({ kind: 'project' });
     await this.run(async () => {
       await this.reloadTasks();
@@ -109,6 +116,7 @@ export class BattleplanStore {
       this.projects.update((projects) => projects.filter((item) => item.project_id !== project.project_id));
       const next = this.projects()[0];
       this.projectId.set(next?.project_id ?? null);
+      await this.preferences.setCurrentProjectId(next?.project_id ?? null);
       this.tasks.set([]);
       this.messages.set([]);
       this.artifacts.set([]);

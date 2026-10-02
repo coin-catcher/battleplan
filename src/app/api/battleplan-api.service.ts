@@ -12,13 +12,13 @@ import type {
 } from '../core/models';
 import { BrowserCursor } from '../data/cursor-browser';
 import { CursorKey } from '../data/cursor-key.service';
-import { IdbRepository } from '../data/idb-repository';
+import { createBattleplanRepository } from '../data/repository-factory';
 import { LocalEngine } from '../data/local-engine';
 
 @Injectable({ providedIn: 'root' })
 export class BattleplanApi {
   private readonly keys = inject(CursorKey);
-  private readonly engine = new LocalEngine(new IdbRepository(), new BrowserCursor(() => this.keys.value()));
+  private readonly engine = new LocalEngine(createBattleplanRepository(), new BrowserCursor(() => this.keys.value()));
 
   listProjects(): Promise<Project[]> {
     return this.engine.listProjects();

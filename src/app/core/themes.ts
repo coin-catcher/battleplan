@@ -15,7 +15,7 @@ export function readTheme(): ThemeId {
   return THEMES.some((theme) => theme.id === stored) ? stored as ThemeId : 'harbor';
 }
 
-export function applyTheme(theme: ThemeId): void {
+export function applyTheme(theme: ThemeId, persist = true): void {
   document.documentElement.dataset['theme'] = theme;
-  localStorage.setItem(STORAGE_KEY, theme);
+  if (persist && typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEY, theme);
 }

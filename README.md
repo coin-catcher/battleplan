@@ -7,10 +7,13 @@ Battleplan is the planning surface for a project, as a mindmap "skin" over Curso
 
 # Battleplan frontend
 
-Angular app for the battleplan sidebar, project chat, task tree, and output review.
+Angular app for the battleplan sidebar, project chat, task tree, and output review. The same UI ships inside the cross-platform Electron desktop app, which stores project data on disk and checks GitHub Releases for updates.
 
 ```bash
-npm start          # http://127.0.0.1:4200, talks to the local Lambda server
+npm start              # browser dev server at http://127.0.0.1:4200
+npm run electron:dev   # Angular + Electron with hot reload
+npm run electron:start # production build inside Electron
 npm run test:local
 npm run build
+npm run dist           # local desktop installers (see docs/DESKTOP_RELEASE.md)
 ```
