@@ -79,11 +79,22 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
+      - name: Stage release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          shopt -s nullglob
+          for file in release/battleplan-* release/latest-*.yml release/*.blockmap; do
+            cp "$file" upload/
+          done
+          ls -la upload
+
       - name: Upload platform artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: release/**
+          path: upload/*
           if-no-files-found: error
           retention-days: 7
 
@@ -103,18 +114,24 @@ jobs:
           set -euo pipefail
           echo "Bundled files:"
           find release-assets -type f | sort
-          test "$(find release-assets -type f | wc -l)" -ge 8
           find release-assets -name 'battleplan-*-linux.AppImage' | grep -q .
           find release-assets -name 'battleplan-*-linux.deb' | grep -q .
           find release-assets -name 'battleplan-*-mac.zip' | grep -q .
           find release-assets -name 'battleplan-*-mac.dmg' | grep -q .
           find release-assets -name 'battleplan-*-win.exe' | grep -q .
 
+      - name: Flatten release bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          find release-assets -type f -exec cp {} upload/ \;
+          ls -la upload
+
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          files: |
-            release-assets/**
+          files: upload/*
           fail_on_unmatched_files: true
           draft: false
           make_latest: true
