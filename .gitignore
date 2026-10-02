@@ -2,6 +2,8 @@
 
 # Compiled output
 /dist
+/dist-electron
+/release
 /tmp
 /out-tsc
 /bazel-out
@@ -40,3 +42,4 @@ testem.log
 # System files
 .DS_Store
 Thumbs.db
+electron/dist-electron/

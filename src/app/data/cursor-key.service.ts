@@ -1,32 +1,25 @@
-import { Injectable, signal } from '@angular/core';
-
-const STORAGE_KEY = 'battleplan-cursor-api-key';
+import { Injectable, inject } from '@angular/core';
+import { AppPreferences } from './app-preferences.service';
 
 @Injectable({ providedIn: 'root' })
 export class CursorKey {
-  readonly ready = signal(false);
-  private key = '';
+  private readonly preferences = inject(AppPreferences);
+
+  readonly ready = this.preferences.ready;
 
   restore(): void {
-    this.key = localStorage.getItem(STORAGE_KEY) ?? '';
-    this.ready.set(this.key.trim().length > 0);
+    void this.preferences.restore();
   }
 
   value(): string {
-    return this.key;
+    return this.preferences.cursorApiKey();
   }
 
-  save(key: string): void {
-    const next = key.trim();
-    if (!next) throw new Error('Paste a Cursor API key.');
-    this.key = next;
-    localStorage.setItem(STORAGE_KEY, next);
-    this.ready.set(true);
+  save(key: string): Promise<void> {
+    return this.preferences.saveCursorApiKey(key);
   }
 
-  clear(): void {
-    this.key = '';
-    localStorage.removeItem(STORAGE_KEY);
-    this.ready.set(false);
+  clear(): Promise<void> {
+    return this.preferences.clearCursorApiKey();
   }
 }
