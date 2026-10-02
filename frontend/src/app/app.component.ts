@@ -2,20 +2,23 @@ import { Component, computed, effect, ElementRef, inject, NgZone, OnInit, signal
 import { FormsModule } from '@angular/forms';
 import type { ChatArtifact, ChatMessage, OutputType, ProjectTask, TaskStatus } from './core/models';
 import { TASK_STATUSES } from './core/models';
-import { isMarkdownPath, MarkdownPipe } from './core/markdown';
+import { isMarkdownPath, prepareMarkdown } from './core/markdown';
+import { applyTheme, readTheme, THEMES, type ThemeId } from './core/themes';
+import { CursorKey } from './data/cursor-key.service';
 import { layoutMindmap, type MindmapNode } from './core/mindmap';
-import { RequestSigner } from './api/request-signer.service';
+import { MarkdownComponent } from 'ngx-markdown';
 import { WarplanStore } from './state/warplan-store.service';
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, MarkdownPipe],
+  imports: [FormsModule, MarkdownComponent],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss',
 })
 export class AppComponent implements OnInit {
   readonly store = inject(WarplanStore);
-  readonly signer = inject(RequestSigner);
+  readonly cursorKey = inject(CursorKey);
+  readonly themes = THEMES;
   private readonly zone = inject(NgZone);
   readonly statuses = TASK_STATUSES;
   readonly signingOpen = signal(false);
@@ -37,9 +40,11 @@ export class AppComponent implements OnInit {
     return layoutMindmap(project?.title ?? 'Project', tasks, projectPin);
   });
 
-  keyPem = '';
+  apiKey = '';
   keyError = '';
   replacingKey = false;
+  readonly themeId = signal(readTheme());
+  readonly paneWidth = signal(readPaneWidth());
 
   title = '';
   initialPrompt = '';
@@ -141,8 +146,32 @@ export class AppComponent implements OnInit {
   }
 
   async ngOnInit(): Promise<void> {
-    await this.signer.restore();
-    if (this.signer.ready()) await this.store.loadProjects();
+    applyTheme(this.themeId());
+    this.cursorKey.restore();
+    if (this.cursorKey.ready()) await this.store.loadProjects();
+  }
+
+  chooseTheme(event: Event): void {
+    const theme = (event.target as HTMLSelectElement).value as ThemeId;
+    this.themeId.set(theme);
+    applyTheme(theme);
+  }
+
+  startResize(event: PointerEvent): void {
+    event.preventDefault();
+    const startX = event.clientX;
+    const start = this.paneWidth();
+    const move = (ev: PointerEvent) => {
+      const next = Math.min(window.innerWidth - 360, Math.max(320, start + ev.clientX - startX));
+      this.paneWidth.set(next);
+    };
+    const up = () => {
+      localStorage.setItem('warplan-pane-width', String(this.paneWidth()));
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   }
 
   private centerMap(): void {
@@ -171,47 +200,45 @@ export class AppComponent implements OnInit {
     });
   }
 
-  showSigning(): boolean {
-    return !this.signer.ready() || this.signingOpen();
+  showCursorKey(): boolean {
+    return !this.cursorKey.ready() || this.signingOpen();
   }
 
-  openSigning(): void {
+  openCursorKey(): void {
     this.keyError = '';
     this.replacingKey = false;
     this.signingOpen.set(true);
   }
 
-  closeSigning(): void {
-    this.keyPem = '';
+  closeCursorKey(): void {
+    this.apiKey = '';
     this.keyError = '';
     this.replacingKey = false;
     this.signingOpen.set(false);
   }
 
-  async onKeyFile(event: Event): Promise<void> {
-    const file = (event.target as HTMLInputElement).files?.[0];
-    if (!file) return;
-    this.keyPem = await file.text();
-  }
-
-  async importKey(): Promise<void> {
+  saveCursorKey(): void {
     this.keyError = '';
     try {
-      await this.signer.importPem(this.keyPem);
-      this.keyPem = '';
+      this.cursorKey.save(this.apiKey);
+      this.apiKey = '';
       this.replacingKey = false;
       this.signingOpen.set(false);
-      if (this.store.projects().length === 0) await this.store.loadProjects();
+      if (this.store.projects().length === 0) void this.store.loadProjects();
     } catch (error) {
-      this.keyError = error instanceof Error ? error.message : 'Could not import that key.';
+      this.keyError = error instanceof Error ? error.message : 'Could not save that key.';
     }
   }
 
-  clearKey(): void {
-    this.signer.clear();
-    this.keyPem = '';
+  clearCursorKey(): void {
+    this.cursorKey.clear();
+    this.apiKey = '';
     this.replacingKey = false;
     this.signingOpen.set(true);
+  }
+
+  planMarkdown(value: string | undefined): string {
+    return prepareMarkdown(value ?? '');
   }
 
   otherTasks(): ProjectTask[] {
@@ -409,4 +436,9 @@ export class AppComponent implements OnInit {
 
 function clampZoom(value: number): number {
   return Math.min(2.4, Math.max(0.45, value));
+}
+
+function readPaneWidth(): number {
+  const stored = Number(localStorage.getItem('warplan-pane-width'));
+  return Number.isFinite(stored) && stored >= 320 ? stored : 640;
 }

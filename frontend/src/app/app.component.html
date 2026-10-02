@@ -1,4 +1,4 @@
-<div class="shell">
+<div class="shell" [style.--pane-width.px]="paneWidth()">
   <aside class="sidebar">
     <div class="brand">
       <span class="brand-mark" aria-hidden="true"></span>
@@ -7,6 +7,15 @@
         <h1>Warplan</h1>
       </div>
     </div>
+
+    <label class="field">
+      <span>Color scheme</span>
+      <select [value]="themeId()" (change)="chooseTheme($event)" aria-label="Color scheme">
+        @for (theme of themes; track theme.id) {
+          <option [value]="theme.id">{{ theme.label }}</option>
+        }
+      </select>
+    </label>
 
     <label class="field">
       <span>Project</span>
@@ -18,7 +27,7 @@
       </select>
     </label>
     <button type="button" class="ghost" (click)="store.showCreate()">New project</button>
-    <button type="button" class="ghost" (click)="openSigning()">Signing key</button>
+    <button type="button" class="ghost" (click)="openCursorKey()">Cursor API key</button>
 
     @if (store.project()) {
       <div class="map-frame">
@@ -84,9 +93,12 @@
       <li data-status="DOING">DOING</li>
       <li data-status="REVIEW">REVIEW</li>
       <li data-status="DONE">DONE</li>
+      <li data-status="BLOCKED">BLOCKED</li>
       <li data-status="ABANDONED">ABANDONED</li>
     </ul>
   </aside>
+
+  <div class="divider" role="separator" aria-orientation="vertical" aria-label="Resize panes" (pointerdown)="startResize($event)"></div>
 
   <main class="editor">
     @if (store.error()) {
@@ -96,37 +108,33 @@
       <p class="banner notice">{{ store.notice() }}</p>
     }
 
-    @if (showSigning()) {
+    @if (showCursorKey()) {
       <section class="panel">
         <header class="panel-head">
           <div>
-            <p class="eyebrow">Request signing</p>
-            <h2>Import signing key</h2>
+            <p class="eyebrow">Cursor</p>
+            <h2>API key</h2>
           </div>
         </header>
-        <p>Paste the private key, or choose the PEM file. It stays in this browser’s local storage and signs every API request.</p>
-        @if (signer.ready() && !replacingKey) {
-          <p class="banner notice">A signing key is stored in this browser.</p>
+        <p>Paste a Cursor API key. It stays in this browser and is sent directly to Cursor. Projects, tasks, chats, and artifacts are stored in this browser.</p>
+        @if (cursorKey.ready() && !replacingKey) {
+          <p class="banner notice">A Cursor API key is stored in this browser.</p>
           <div class="composer-actions">
-            <button type="button" class="primary" (click)="closeSigning()">Continue</button>
+            <button type="button" class="primary" (click)="closeCursorKey()">Continue</button>
             <button type="button" class="ghost" (click)="replacingKey = true">Replace key</button>
-            <button type="button" class="danger" (click)="clearKey()">Remove key</button>
+            <button type="button" class="danger" (click)="clearCursorKey()">Remove key</button>
           </div>
         } @else {
           <label class="field">
-            <span>Private key PEM</span>
-            <textarea rows="8" [(ngModel)]="keyPem" name="keyPem" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
-          </label>
-          <label class="field">
-            <span>Or choose a file</span>
-            <input type="file" accept=".pem,text/plain" (change)="onKeyFile($event)" />
+            <span>API key</span>
+            <input type="password" [(ngModel)]="apiKey" name="apiKey" autocomplete="off" placeholder="cursor_…" />
           </label>
           @if (keyError) {
             <p class="banner error" role="alert">{{ keyError }}</p>
           }
           <div class="composer-actions">
-            <button type="button" class="primary" [disabled]="!keyPem.trim()" (click)="importKey()">Save to this browser</button>
-            @if (signer.ready()) {
+            <button type="button" class="primary" [disabled]="!apiKey.trim()" (click)="saveCursorKey()">Save to this browser</button>
+            @if (cursorKey.ready()) {
               <button type="button" class="ghost" (click)="replacingKey = false">Cancel</button>
             }
           </div>
@@ -199,7 +207,7 @@
                   <article class="artifact">
                     <header>{{ item.artifact.name }}</header>
                     @if (markdownArtifact(item.artifact) && item.artifact.text) {
-                      <div class="md" [innerHTML]="item.artifact.text | markdown"></div>
+                      <markdown class="md" mermaid [data]="planMarkdown(item.artifact.text)"></markdown>
                     } @else if (item.artifact.text) {
                       <pre>{{ item.artifact.text }}</pre>
                     } @else if (item.artifact.content_type === 'image' && item.artifact.url) {
@@ -307,7 +315,7 @@
                   <article class="artifact">
                     <header>{{ item.artifact.name }}</header>
                     @if (markdownArtifact(item.artifact) && item.artifact.text) {
-                      <div class="md" [innerHTML]="item.artifact.text | markdown"></div>
+                      <markdown class="md" mermaid [data]="planMarkdown(item.artifact.text)"></markdown>
                     } @else if (item.artifact.text) {
                       <pre>{{ item.artifact.text }}</pre>
                     } @else if (item.artifact.content_type === 'image' && item.artifact.url) {

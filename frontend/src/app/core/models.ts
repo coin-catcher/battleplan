@@ -1,4 +1,4 @@
-export const TASK_STATUSES = ['TODO', 'DOING', 'REVIEW', 'DONE', 'ABANDONED'] as const;
+export const TASK_STATUSES = ['TODO', 'DOING', 'REVIEW', 'BLOCKED', 'DONE', 'ABANDONED'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type OutputType = 'code' | 'research';
 
