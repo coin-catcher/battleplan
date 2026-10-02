@@ -2,7 +2,10 @@
   "name": "battleplan",
   "version": "1.0.0",
   "description": "Strategy, tactics, design, and agent orchestration management dashboard for Cursor Cloud Agents.",
-  "author": "coin-catcher",
+  "author": {
+    "name": "coin-catcher",
+    "email": "41898282+coin-catcher@users.noreply.github.com"
+  },
   "main": "dist-electron/electron/main.js",
   "scripts": {
     "ng": "ng",
@@ -74,7 +77,8 @@
       {
         "provider": "github",
         "owner": "coin-catcher",
-        "repo": "battleplan"
+        "repo": "battleplan",
+        "releaseType": "release"
       }
     ],
     "linux": {
@@ -82,7 +86,8 @@
         "AppImage",
         "deb"
       ],
-      "category": "Development"
+      "category": "Development",
+      "maintainer": "coin-catcher <41898282+coin-catcher@users.noreply.github.com>"
     },
     "mac": {
       "target": [
