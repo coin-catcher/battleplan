@@ -1,8 +1,8 @@
-# warplan
+# battleplan
 
 Strategy, tactics, design, and agent orchestration management dashboard.
 
-Warplan is the planning surface for a project. A project starts as a prompt to a [Cursor cloud agent](https://cursor.com/docs/cloud-agent/api/endpoints). The conversation stays in the warplan UI. When the plan is settled, **Generate Tasks** asks the agent for an ordered task list. Each task is either a code change or a research write-up, can depend on other tasks, and is executed by its own cloud agent. Finished work comes back as a pull request for review. Approval tells the agent to merge the pull request.
+Battleplan is the planning surface for a project. A project starts as a prompt to a [Cursor cloud agent](https://cursor.com/docs/cloud-agent/api/endpoints). The conversation stays in the battleplan UI. When the plan is settled, **Generate Tasks** asks the agent for an ordered task list. Each task is either a code change or a research write-up, can depend on other tasks, and is executed by its own cloud agent. Finished work comes back as a pull request for review. Approval tells the agent to merge the pull request.
 
 ## Layout
 
@@ -19,11 +19,11 @@ Warplan is the planning surface for a project. A project starts as a prompt to a
 
 Each of those folders has a `package.json` with `build`, `test:local`, `test:agent`, `deploy:local`, and `deploy:agent`.
 
-`deploy:local` uses `AWS_PROFILE` (default `default`) and asks before apply. `deploy:agent` is for a Cursor cloud agent: `TF_IN_AUTOMATION=1`, no profile prompt, and apply without a confirmation. Set `WARPLAN_AUTO_APPROVE=1` to apply from a local non-interactive shell.
+`deploy:local` uses `AWS_PROFILE` (default `default`) and asks before apply. `deploy:agent` is for a Cursor cloud agent: `TF_IN_AUTOMATION=1`, no profile prompt, and apply without a confirmation. Set `BATTLEPLAN_AUTO_APPROVE=1` to apply from a local non-interactive shell.
 
 ## Data
 
-The Angular app keeps projects, tasks, outputs, chat messages, and artifacts in the browser IndexedDB database named `warplan`. Open **Cursor API key**, paste a key, and the app stores it in this browser’s local storage. Chat, task generation, and merges call `https://api.cursor.com` directly from the browser.
+The Angular app keeps projects, tasks, outputs, chat messages, and artifacts in the browser IndexedDB database named `battleplan`. Open **Cursor API key**, paste a key, and the app stores it in this browser’s local storage. Chat, task generation, and merges call `https://api.cursor.com` directly from the browser.
 
 - **projects**: `project_id`, `title`, `initial_prompt`, `cursor_chat_link`, plus the Cursor agent id, repository, and base branch.
 - **project_tasks**: `task_id`, `project_id`, `title`, `prompt`, `dependencies`, `status`, `output_type` (`code` or `research`), and optional mindmap coordinates.

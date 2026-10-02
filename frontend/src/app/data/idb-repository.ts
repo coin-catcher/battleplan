@@ -6,9 +6,9 @@ import type {
   TaskCodeOutput,
   TaskResearchOutput,
 } from '../core/models';
-import type { WarplanRepository } from './repository';
+import type { BattleplanRepository } from './repository';
 
-const DB_NAME = 'warplan';
+const DB_NAME = 'battleplan';
 const DB_VERSION = 1;
 
 type ArtifactRecord = ChatArtifact & { id: string; owner: string };
@@ -37,7 +37,7 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
   });
 }
 
-export class IdbRepository implements WarplanRepository {
+export class IdbRepository implements BattleplanRepository {
   private database: Promise<IDBDatabase> | null = null;
 
   private open(): Promise<IDBDatabase> {

@@ -8,7 +8,7 @@ export const THEMES = [
 
 export type ThemeId = (typeof THEMES)[number]['id'];
 
-const STORAGE_KEY = 'warplan-theme';
+const STORAGE_KEY = 'battleplan-theme';
 
 export function readTheme(): ThemeId {
   const stored = localStorage.getItem(STORAGE_KEY);

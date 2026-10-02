@@ -1,8 +1,8 @@
 {
-  "name": "warplan",
+  "name": "battleplan",
   "private": true,
   "version": "0.1.0",
-  "description": "High-level planning, Cursor cloud agent orchestration, and AWS deployment for warplan projects.",
+  "description": "High-level planning, Cursor cloud agent orchestration, and AWS deployment for battleplan projects.",
   "scripts": {
     "build": "npm run build --prefix faas && npm run build --prefix frontend",
     "test": "npm run test:local",

@@ -1,11 +1,11 @@
 output "table_name" {
   description = "DynamoDB table for projects, tasks, outputs, and chat."
-  value       = aws_dynamodb_table.warplan.name
+  value       = aws_dynamodb_table.battleplan.name
 }
 
 output "table_arn" {
-  description = "ARN of the warplan table."
-  value       = aws_dynamodb_table.warplan.arn
+  description = "ARN of the battleplan table."
+  value       = aws_dynamodb_table.battleplan.arn
 }
 
 output "api_id" {
@@ -24,6 +24,6 @@ output "api_execution_arn" {
 }
 
 output "lambda_role_arn" {
-  description = "Shared execution role for warplan Lambdas."
+  description = "Shared execution role for battleplan Lambdas."
   value       = aws_iam_role.lambda.arn
 }

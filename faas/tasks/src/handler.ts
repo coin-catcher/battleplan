@@ -14,8 +14,8 @@ import {
   type Route,
   type ServiceDeps,
   type TaskStatus,
-} from '@warplan/shared';
-import { HttpError } from '@warplan/shared';
+} from '@battleplan/shared';
+import { HttpError } from '@battleplan/shared';
 
 function routes(deps: ServiceDeps): Route[] {
   const service = new TasksService(deps.repo, deps.cursor);

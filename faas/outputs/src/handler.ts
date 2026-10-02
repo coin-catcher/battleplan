@@ -9,7 +9,7 @@ import {
   type ServiceDeps,
   type TaskCodeOutput,
   type TaskResearchOutput,
-} from '@warplan/shared';
+} from '@battleplan/shared';
 
 function routes(deps: ServiceDeps): Route[] {
   const service = new OutputsService(deps.repo);

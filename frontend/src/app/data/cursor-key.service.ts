@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 
-const STORAGE_KEY = 'warplan-cursor-api-key';
+const STORAGE_KEY = 'battleplan-cursor-api-key';
 
 @Injectable({ providedIn: 'root' })
 export class CursorKey {

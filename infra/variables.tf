@@ -1,11 +1,11 @@
 variable "aws_region" {
   type        = string
-  description = "Region for shared warplan resources."
+  description = "Region for shared battleplan resources."
   default     = "us-east-1"
 }
 
 variable "project" {
   type        = string
   description = "Resource name prefix."
-  default     = "warplan"
+  default     = "battleplan"
 }

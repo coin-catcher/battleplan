@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { ChatArtifact, ChatMessage, Project, ProjectTask, TaskCodeOutput, TaskResearchOutput } from '../core/models';
 import type { CursorClient } from './cursor-browser';
 import { LocalEngine } from './local-engine';
-import type { WarplanRepository } from './repository';
+import type { BattleplanRepository } from './repository';
 
-class MemoryRepository implements WarplanRepository {
+class MemoryRepository implements BattleplanRepository {
   projects = new Map<string, Project>();
   tasks = new Map<string, ProjectTask>();
   code = new Map<string, TaskCodeOutput>();

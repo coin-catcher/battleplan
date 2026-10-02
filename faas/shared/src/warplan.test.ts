@@ -20,10 +20,10 @@ import { parseGeneratedTaskList } from './task-list.js';
 import { assertAcyclic } from './graph.js';
 import { HttpError } from './errors.js';
 import { GENERATE_TASKS_INSTRUCTION } from './prompts.js';
-import { WARPLAN_PUBLIC_KEY } from './public-key.js';
+import { BATTLEPLAN_PUBLIC_KEY } from './public-key.js';
 import { canonicalRequest } from './signature.js';
 
-const privateKey = createPrivateKey(readFileSync(new URL('../../../keys/warplan-private.pem', import.meta.url)));
+const privateKey = createPrivateKey(readFileSync(new URL('../../../keys/battleplan-private.pem', import.meta.url)));
 
 function clock(): Clock {
   let id = 0;
@@ -128,9 +128,9 @@ class FakeCursor implements CursorClient {
     if (withPullRequest && !text.includes('Merge the pull request')) {
       run.git = {
         branches: [{
-          repoUrl: 'github.com/acme/warplan',
+          repoUrl: 'github.com/acme/battleplan',
           branch: 'cursor/ship-api',
-          prUrl: 'https://github.com/acme/warplan/pull/7',
+          prUrl: 'https://github.com/acme/battleplan/pull/7',
         }],
       };
     }
@@ -168,8 +168,8 @@ function event(
     headers: options?.unsigned
       ? {}
       : {
-          'x-warplan-timestamp': timestamp,
-          'x-warplan-signature': signature,
+          'x-battleplan-timestamp': timestamp,
+          'x-battleplan-signature': signature,
         },
     requestContext: {
       accountId: '1',
@@ -212,7 +212,7 @@ describe('task rules', () => {
   });
 });
 
-describe('warplan flow', () => {
+describe('battleplan flow', () => {
   it('creates a project, generates tasks, reviews a pull request, and merges it', async () => {
     const repo = new MemoryRepository();
     const cursor = new FakeCursor();
@@ -223,18 +223,18 @@ describe('warplan flow', () => {
     const outputs = new OutputsService(repo, ticks);
 
     const project = await projects.create({
-      initial_prompt: 'Plan the first warplan release.',
-      repo_url: 'https://github.com/acme/warplan',
+      initial_prompt: 'Plan the first battleplan release.',
+      repo_url: 'https://github.com/acme/battleplan',
       starting_ref: 'main',
     });
-    expect(project.title).toBe('Plan the first warplan release.');
+    expect(project.title).toBe('Plan the first battleplan release.');
     expect(project.cursor_chat_link).toBe(`https://cursor.com/agents/${project.cursor_agent_id}`);
 
     const history = await chat.listProjectMessages(project.project_id);
     expect(history.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
 
-    await projects.updateTitle(project.project_id, 'Release warplan');
-    expect((await projects.get(project.project_id)).title).toBe('Release warplan');
+    await projects.updateTitle(project.project_id, 'Release battleplan');
+    expect((await projects.get(project.project_id)).title).toBe('Release battleplan');
 
     const instruction = await chat.generateTasks(project.project_id);
     expect(instruction.content).toBe(GENERATE_TASKS_INSTRUCTION);
@@ -315,21 +315,21 @@ describe('warplan flow', () => {
     const chat = new ChatService(repo, cursor, ticks);
     const project = await projects.create({ initial_prompt: 'Plan the release.' });
     const updated = await projects.update(project.project_id, {
-      repo_url: 'https://github.com/acme/warplan',
+      repo_url: 'https://github.com/acme/battleplan',
       starting_ref: 'develop',
     });
-    expect(updated.repo_url).toBe('https://github.com/acme/warplan');
+    expect(updated.repo_url).toBe('https://github.com/acme/battleplan');
     expect(updated.starting_ref).toBe('develop');
     const notes = (await chat.listProjectMessages(project.project_id)).messages.filter((message) => message.role === 'change');
     expect(notes.at(-1)?.content).toContain('develop');
-    expect(notes.at(-1)?.content).toContain('https://github.com/acme/warplan');
+    expect(notes.at(-1)?.content).toContain('https://github.com/acme/battleplan');
   });
 });
 
 describe('request signatures', () => {
   it('embeds the repository public key', () => {
-    const pem = readFileSync(new URL('../../../keys/warplan-public.pem', import.meta.url), 'utf8');
-    expect(WARPLAN_PUBLIC_KEY.trim()).toBe(pem.trim());
+    const pem = readFileSync(new URL('../../../keys/battleplan-public.pem', import.meta.url), 'utf8');
+    expect(BATTLEPLAN_PUBLIC_KEY.trim()).toBe(pem.trim());
   });
 
   const handlers: Array<[string, APIGatewayProxyHandlerV2]> = [
@@ -377,7 +377,7 @@ describe('lambda routes', () => {
     const projects = createProjectsHandler({ repo, cursor });
     const created = responseBody(await projects(event('POST', '/projects', {
       initial_prompt: 'Sketch the navigation.',
-      repo_url: 'https://github.com/acme/warplan',
+      repo_url: 'https://github.com/acme/battleplan',
     }), {} as never, () => undefined));
     const project = JSON.parse(created.body) as { project_id: string };
     expect(created.statusCode).toBe(201);
@@ -432,7 +432,7 @@ describe('cursor client', () => {
     const created = await client.createAgent({
       prompt: 'Plan the work',
       mode: 'plan',
-      repoUrl: 'https://github.com/acme/warplan',
+      repoUrl: 'https://github.com/acme/battleplan',
       startingRef: 'develop',
       autoCreatePr: false,
     });

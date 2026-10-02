@@ -1,9 +1,9 @@
 {
-  "name": "@warplan/shared",
+  "name": "@battleplan/shared",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Domain model, DynamoDB repository, and Cursor client shared by the warplan Lambdas.",
+  "description": "Domain model, DynamoDB repository, and Cursor client shared by the battleplan Lambdas.",
   "exports": {
     ".": "./src/index.ts"
   },

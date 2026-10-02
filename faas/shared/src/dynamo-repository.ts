@@ -15,7 +15,7 @@ import type {
   TaskCodeOutput,
   TaskResearchOutput,
 } from './domain.js';
-import type { WarplanRepository } from './repository.js';
+import type { BattleplanRepository } from './repository.js';
 
 type Item = Record<string, unknown>;
 
@@ -29,7 +29,7 @@ function strip(item: Item): Item {
   return copy;
 }
 
-export class DynamoRepository implements WarplanRepository {
+export class DynamoRepository implements BattleplanRepository {
   private readonly documents: DynamoDBDocumentClient;
 
   constructor(

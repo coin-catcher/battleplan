@@ -16,7 +16,7 @@ resource "aws_lambda_function" "this" {
 
   environment {
     variables = {
-      WARPLAN_TABLE_NAME = var.table_name
+      BATTLEPLAN_TABLE_NAME = var.table_name
       CURSOR_API_BASE    = "https://api.cursor.com"
       CURSOR_API_KEY     = var.cursor_api_key
     }

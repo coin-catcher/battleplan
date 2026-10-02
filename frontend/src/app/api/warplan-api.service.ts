@@ -16,7 +16,7 @@ import { IdbRepository } from '../data/idb-repository';
 import { LocalEngine } from '../data/local-engine';
 
 @Injectable({ providedIn: 'root' })
-export class WarplanApi {
+export class BattleplanApi {
   private readonly keys = inject(CursorKey);
   private readonly engine = new LocalEngine(new IdbRepository(), new BrowserCursor(() => this.keys.value()));
 

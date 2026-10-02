@@ -1,8 +1,8 @@
 {
-  "name": "@warplan/faas",
+  "name": "@battleplan/faas",
   "private": true,
   "version": "0.1.0",
-  "description": "TypeScript Lambdas for warplan projects, tasks, outputs, chat, and Cursor agents.",
+  "description": "TypeScript Lambdas for battleplan projects, tasks, outputs, chat, and Cursor agents.",
   "type": "module",
   "workspaces": [
     "shared",

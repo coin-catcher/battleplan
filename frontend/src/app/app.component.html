@@ -4,7 +4,7 @@
       <span class="brand-mark" aria-hidden="true"></span>
       <div>
         <p class="brand-kicker">Cursor orchestration</p>
-        <h1>Warplan</h1>
+        <h1>Battleplan</h1>
       </div>
     </div>
 
@@ -144,7 +144,7 @@
       @case ('create') {
         <section class="panel">
           <header class="panel-head">
-            <h2>Start a warplan</h2>
+            <h2>Start a battleplan</h2>
             <p>The initial prompt is sent to a Cursor cloud agent in plan mode. The chat title becomes the project title.</p>
           </header>
           <label class="field">
@@ -224,7 +224,7 @@
             </div>
             <div class="composer">
               <label class="sr-only" for="project-chat">Message</label>
-              <textarea id="project-chat" rows="3" [(ngModel)]="chatDraft" name="chatDraft" placeholder="Continue the warplan conversation."></textarea>
+              <textarea id="project-chat" rows="3" [(ngModel)]="chatDraft" name="chatDraft" placeholder="Continue the battleplan conversation."></textarea>
               <div class="composer-actions">
                 <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
               </div>
@@ -394,7 +394,7 @@
       @default {
         <section class="panel empty-state">
           <h2>No project selected</h2>
-          <p>Create a warplan to brief a Cursor cloud agent, then turn the conversation into an ordered task list.</p>
+          <p>Create a battleplan to brief a Cursor cloud agent, then turn the conversation into an ordered task list.</p>
           <button type="button" class="primary" (click)="store.showCreate()">New project</button>
         </section>
       }

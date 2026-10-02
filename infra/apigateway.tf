@@ -1,10 +1,10 @@
 resource "aws_apigatewayv2_api" "http" {
   name          = "${var.project}-api"
   protocol_type = "HTTP"
-  description   = "HTTP API in front of the warplan Lambdas."
+  description   = "HTTP API in front of the battleplan Lambdas."
 
   cors_configuration {
-    allow_headers = ["content-type", "authorization", "x-warplan-timestamp", "x-warplan-signature"]
+    allow_headers = ["content-type", "authorization", "x-battleplan-timestamp", "x-battleplan-signature"]
     allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     allow_origins = ["*"]
     max_age       = 600

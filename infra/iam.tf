@@ -22,7 +22,7 @@ resource "aws_iam_role_policy" "lambda" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "WarplanTable"
+        Sid    = "BattleplanTable"
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
@@ -33,8 +33,8 @@ resource "aws_iam_role_policy" "lambda" {
           "dynamodb:BatchWriteItem"
         ]
         Resource = [
-          aws_dynamodb_table.warplan.arn,
-          "${aws_dynamodb_table.warplan.arn}/index/*"
+          aws_dynamodb_table.battleplan.arn,
+          "${aws_dynamodb_table.battleplan.arn}/index/*"
         ]
       },
       {

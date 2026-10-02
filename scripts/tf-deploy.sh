@@ -26,7 +26,7 @@ WORK_DIR="$(cd "$WORK_DIR" && pwd)"
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/tf-preflight.sh" "$MODE" "$ROOT"
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
-PLAN_FILE="${WORK_DIR}/warplan.tfplan"
+PLAN_FILE="${WORK_DIR}/battleplan.tfplan"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 tf() {
@@ -34,16 +34,16 @@ tf() {
 }
 
 load_bootstrap_outputs() {
-  if [[ -n "${WARPLAN_TF_BUCKET:-}" && -n "${WARPLAN_TF_LOCK_TABLE:-}" ]]; then
+  if [[ -n "${BATTLEPLAN_TF_BUCKET:-}" && -n "${BATTLEPLAN_TF_LOCK_TABLE:-}" ]]; then
     return
   fi
   local bootstrap="${ROOT}/infra/bootstrap"
   if [[ ! -d "${bootstrap}/.terraform" && ! -f "${bootstrap}/terraform.tfstate" ]]; then
-    echo "Bootstrap has not been applied. Run npm run deploy:${MODE} --prefix infra/bootstrap first, or set WARPLAN_TF_BUCKET and WARPLAN_TF_LOCK_TABLE." >&2
+    echo "Bootstrap has not been applied. Run npm run deploy:${MODE} --prefix infra/bootstrap first, or set BATTLEPLAN_TF_BUCKET and BATTLEPLAN_TF_LOCK_TABLE." >&2
     exit 1
   fi
-  WARPLAN_TF_BUCKET="${WARPLAN_TF_BUCKET:-$(terraform -chdir="$bootstrap" output -raw plan_bucket)}"
-  WARPLAN_TF_LOCK_TABLE="${WARPLAN_TF_LOCK_TABLE:-$(terraform -chdir="$bootstrap" output -raw lock_table)}"
+  BATTLEPLAN_TF_BUCKET="${BATTLEPLAN_TF_BUCKET:-$(terraform -chdir="$bootstrap" output -raw plan_bucket)}"
+  BATTLEPLAN_TF_LOCK_TABLE="${BATTLEPLAN_TF_LOCK_TABLE:-$(terraform -chdir="$bootstrap" output -raw lock_table)}"
   REGION="${AWS_REGION:-$(terraform -chdir="$bootstrap" output -raw region)}"
 }
 
@@ -55,11 +55,11 @@ upload_plan() {
 }
 
 confirm_apply() {
-  if [[ "$MODE" == "agent" || "${WARPLAN_AUTO_APPROVE:-}" == "1" ]]; then
+  if [[ "$MODE" == "agent" || "${BATTLEPLAN_AUTO_APPROVE:-}" == "1" ]]; then
     return
   fi
   if [[ ! -t 0 ]]; then
-    echo "Refusing to apply without a TTY. Re-run with WARPLAN_AUTO_APPROVE=1." >&2
+    echo "Refusing to apply without a TTY. Re-run with BATTLEPLAN_AUTO_APPROVE=1." >&2
     exit 1
   fi
   local answer
@@ -86,10 +86,10 @@ load_bootstrap_outputs
 INIT_ARGS=(
   -input=false
   -reconfigure
-  -backend-config="bucket=${WARPLAN_TF_BUCKET}"
+  -backend-config="bucket=${BATTLEPLAN_TF_BUCKET}"
   -backend-config="key=state/${STATE_KEY}/terraform.tfstate"
   -backend-config="region=${REGION}"
-  -backend-config="dynamodb_table=${WARPLAN_TF_LOCK_TABLE}"
+  -backend-config="dynamodb_table=${BATTLEPLAN_TF_LOCK_TABLE}"
   -backend-config="encrypt=true"
 )
 
@@ -101,19 +101,19 @@ if [[ -n "${TF_VAR_FILE:-}" ]]; then
 fi
 
 tf plan "${PLAN_ARGS[@]}"
-upload_plan "$WARPLAN_TF_BUCKET"
+upload_plan "$BATTLEPLAN_TF_BUCKET"
 confirm_apply
 tf apply -input=false "$PLAN_FILE"
 
 if [[ "$STATE_KEY" == "infra" ]]; then
   {
-    echo "WARPLAN_TABLE_NAME=$(tf output -raw table_name)"
-    echo "WARPLAN_API_ID=$(tf output -raw api_id)"
-    echo "WARPLAN_API_ENDPOINT=$(tf output -raw api_endpoint)"
-    echo "WARPLAN_API_EXECUTION_ARN=$(tf output -raw api_execution_arn)"
-    echo "WARPLAN_LAMBDA_ROLE_ARN=$(tf output -raw lambda_role_arn)"
-    echo "WARPLAN_TF_BUCKET=${WARPLAN_TF_BUCKET}"
-    echo "WARPLAN_TF_LOCK_TABLE=${WARPLAN_TF_LOCK_TABLE}"
+    echo "BATTLEPLAN_TABLE_NAME=$(tf output -raw table_name)"
+    echo "BATTLEPLAN_API_ID=$(tf output -raw api_id)"
+    echo "BATTLEPLAN_API_ENDPOINT=$(tf output -raw api_endpoint)"
+    echo "BATTLEPLAN_API_EXECUTION_ARN=$(tf output -raw api_execution_arn)"
+    echo "BATTLEPLAN_LAMBDA_ROLE_ARN=$(tf output -raw lambda_role_arn)"
+    echo "BATTLEPLAN_TF_BUCKET=${BATTLEPLAN_TF_BUCKET}"
+    echo "BATTLEPLAN_TF_LOCK_TABLE=${BATTLEPLAN_TF_LOCK_TABLE}"
     echo "AWS_REGION=${REGION}"
   } > "${ROOT}/infra/outputs.env"
   echo "Wrote ${ROOT}/infra/outputs.env"

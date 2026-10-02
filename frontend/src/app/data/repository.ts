@@ -7,7 +7,7 @@ import type {
   TaskResearchOutput,
 } from '../core/models';
 
-export interface WarplanRepository {
+export interface BattleplanRepository {
   saveProject(project: Project): Promise<void>;
   getProject(projectId: string): Promise<Project | null>;
   listProjects(): Promise<Project[]>;

@@ -1,5 +1,5 @@
 {
-  "name": "@warplan/infra-bootstrap",
+  "name": "@battleplan/infra-bootstrap",
   "private": true,
   "version": "0.1.0",
   "description": "One-time Terraform that creates the S3 bucket for subsequent .tfplan files.",

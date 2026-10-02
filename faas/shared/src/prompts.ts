@@ -2,7 +2,7 @@ import type { Project, ProjectTask } from './domain.js';
 import { researchPath } from './domain.js';
 
 export const GENERATE_TASKS_INSTRUCTION = [
-  'Generate an ordered list of project tasks based on the agreed decisions in this warplan.',
+  'Generate an ordered list of project tasks based on the agreed decisions in this battleplan.',
   'Return only a JSON array, with no markdown and no commentary.',
   'Each item must be an object with:',
   '- "title": string, a short task name',
@@ -16,7 +16,7 @@ export const GENERATE_TASKS_INSTRUCTION = [
 export function taskExecutionPrompt(task: ProjectTask, project: Project): string {
   const base = project.starting_ref?.trim() || 'main';
   const lines = [
-    `You are executing a warplan ${task.output_type} task.`,
+    `You are executing a battleplan ${task.output_type} task.`,
     `Create the working branch from \`${base}\` in ${project.repo_url ?? 'the project repository'}.`,
     `Open the pull request against \`${base}\`, which is the branch this project merges into.`,
   ];
@@ -48,7 +48,7 @@ export function feedbackPrompt(task: ProjectTask, feedback: string): string {
 
 export function mergeApprovalPrompt(task: ProjectTask, prLink: string, baseBranch = 'main'): string {
   return [
-    `The user approved the warplan task "${task.title}".`,
+    `The user approved the battleplan task "${task.title}".`,
     `Merge the pull request ${prLink} into \`${baseBranch}\` and confirm when the merge is complete.`,
     'Do not open a new pull request.',
   ].join('\n');

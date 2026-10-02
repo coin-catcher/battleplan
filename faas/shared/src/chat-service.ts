@@ -5,7 +5,7 @@ import { researchPath } from './domain.js';
 import { HttpError } from './errors.js';
 import { systemClock, type Clock } from './ids.js';
 import { feedbackPrompt, GENERATE_TASKS_INSTRUCTION, mergeApprovalPrompt } from './prompts.js';
-import type { WarplanRepository } from './repository.js';
+import type { BattleplanRepository } from './repository.js';
 import { assertCanTransition } from './status.js';
 
 const TERMINAL_RUN = new Set(['FINISHED', 'ERROR', 'CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED']);
@@ -21,7 +21,7 @@ export interface ConversationPage {
 
 export class ChatService {
   constructor(
-    private readonly repo: WarplanRepository,
+    private readonly repo: BattleplanRepository,
     private readonly cursor: CursorClient,
     private readonly clock: Clock = systemClock,
   ) {}

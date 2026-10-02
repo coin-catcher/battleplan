@@ -1,4 +1,4 @@
-resource "aws_dynamodb_table" "warplan" {
+resource "aws_dynamodb_table" "battleplan" {
   name         = var.project
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "pk"

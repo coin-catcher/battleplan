@@ -8,7 +8,7 @@ import { createHandler as createProjectsHandler } from '../projects/src/handler.
 import { createHandler as createTasksHandler } from '../tasks/src/handler.js';
 import { DemoCursor } from './demo-cursor.js';
 
-const port = Number(process.env.WARPLAN_LOCAL_PORT ?? 8787);
+const port = Number(process.env.BATTLEPLAN_LOCAL_PORT ?? 8787);
 const repo = new MemoryRepository();
 const cursor: CursorClient = process.env.CURSOR_API_KEY
   ? new HttpCursorClient({ apiKey: process.env.CURSOR_API_KEY, baseUrl: process.env.CURSOR_API_BASE })
@@ -108,11 +108,11 @@ function corsHeaders(): Record<string, string> {
   return {
     'access-control-allow-origin': '*',
     'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-    'access-control-allow-headers': 'content-type,authorization,x-warplan-timestamp,x-warplan-signature',
+    'access-control-allow-headers': 'content-type,authorization,x-battleplan-timestamp,x-battleplan-signature',
   };
 }
 
 server.listen(port, () => {
   const mode = process.env.CURSOR_API_KEY ? 'Cursor API' : 'demo Cursor agent';
-  console.log(`warplan local API on http://localhost:${port} (${mode})`);
+  console.log(`battleplan local API on http://localhost:${port} (${mode})`);
 });

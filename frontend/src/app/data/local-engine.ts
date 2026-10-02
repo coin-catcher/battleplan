@@ -12,7 +12,7 @@ import type {
 import { TASK_STATUSES } from '../core/models';
 import type { CursorClient, CursorRun } from './cursor-browser';
 import { normalizeRepoUrl } from './cursor-browser';
-import type { WarplanRepository } from './repository';
+import type { BattleplanRepository } from './repository';
 
 const TERMINAL_RUN = new Set(['FINISHED', 'ERROR', 'CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED']);
 const TEXT_ARTIFACT = /\.(md|markdown|txt|json|csv|ya?ml|html|log|xml|tsv|rst)$/i;
@@ -30,7 +30,7 @@ const GUIDED: Record<TaskStatus, TaskStatus[]> = {
 };
 
 const GENERATE_TASKS_INSTRUCTION = [
-  'Generate an ordered list of project tasks based on the agreed decisions in this warplan.',
+  'Generate an ordered list of project tasks based on the agreed decisions in this battleplan.',
   'Return only a JSON array, with no markdown and no commentary.',
   'Each item must be an object with:',
   '- "title": string, a short task name',
@@ -55,7 +55,7 @@ interface NormalizedDraft {
 
 export class LocalEngine {
   constructor(
-    private readonly repo: WarplanRepository,
+    private readonly repo: BattleplanRepository,
     private readonly cursor: CursorClient,
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly newId: () => string = () => crypto.randomUUID(),
@@ -78,7 +78,7 @@ export class LocalEngine {
     const timestamp = this.now();
     const project: Project = {
       project_id: this.newId(),
-      title: created.agent.name?.trim() || 'Untitled warplan',
+      title: created.agent.name?.trim() || 'Untitled battleplan',
       initial_prompt: initialPrompt,
       cursor_chat_link: created.agent.url,
       cursor_agent_id: created.agent.id,
@@ -664,7 +664,7 @@ export class LocalEngine {
     if (!project.repo_url) throw new Error('Add a repository to the project before starting a task.');
     const base = project.starting_ref?.trim() || 'main';
     const lines = [
-      `You are executing a warplan ${task.output_type} task.`,
+      `You are executing a battleplan ${task.output_type} task.`,
       `Create the working branch from \`${base}\` in ${project.repo_url}.`,
       `Open the pull request against \`${base}\`, which is the branch this project merges into.`,
     ];
@@ -863,7 +863,7 @@ function feedbackPrompt(task: ProjectTask, feedback: string): string {
 
 function mergePrompt(task: ProjectTask, prLink: string, baseBranch: string): string {
   return [
-    `The user approved the warplan task "${task.title}".`,
+    `The user approved the battleplan task "${task.title}".`,
     `Merge the pull request ${prLink} into \`${baseBranch}\` and confirm when the merge is complete.`,
     'Do not open a new pull request.',
   ].join('\n');

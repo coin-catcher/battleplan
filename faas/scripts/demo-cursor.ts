@@ -13,7 +13,7 @@ import { GENERATE_TASKS_INSTRUCTION } from '../shared/src/prompts.js';
 const TASK_LIST = JSON.stringify([
   {
     title: 'Survey the domain',
-    prompt: 'Write research notes for the agreed warplan scope.',
+    prompt: 'Write research notes for the agreed battleplan scope.',
     output_type: 'research',
     depends_on: [],
   },
@@ -45,7 +45,7 @@ export class DemoCursor implements CursorClient {
     const run = this.finish(id, input.prompt, input.mode === 'agent', input.name);
     const agent: CursorAgent = {
       id,
-      name: (input.name ?? input.prompt).trim().slice(0, 48) || 'Untitled warplan',
+      name: (input.name ?? input.prompt).trim().slice(0, 48) || 'Untitled battleplan',
       status: 'IDLE',
       url: `https://cursor.com/agents/${id}`,
       latestRunId: run.id,
@@ -133,9 +133,9 @@ export class DemoCursor implements CursorClient {
     if (withPullRequest && !merging) {
       run.git = {
         branches: [{
-          repoUrl: 'github.com/acme/warplan',
+          repoUrl: 'github.com/acme/battleplan',
           branch: `cursor/${(name ?? 'task').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'task'}`,
-          prUrl: 'https://github.com/acme/warplan/pull/1',
+          prUrl: 'https://github.com/acme/battleplan/pull/1',
         }],
       };
     }

@@ -52,11 +52,11 @@ source "${ROOT}/scripts/tf-preflight.sh" "$MODE" "$ROOT"
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 
 confirm_destroy() {
-  if [[ "$MODE" == "agent" || "${WARPLAN_AUTO_APPROVE:-}" == "1" ]]; then
+  if [[ "$MODE" == "agent" || "${BATTLEPLAN_AUTO_APPROVE:-}" == "1" ]]; then
     return
   fi
   if [[ ! -t 0 ]]; then
-    echo "Refusing to destroy without a TTY. Re-run with WARPLAN_AUTO_APPROVE=1." >&2
+    echo "Refusing to destroy without a TTY. Re-run with BATTLEPLAN_AUTO_APPROVE=1." >&2
     exit 1
   fi
   echo "This destroys every resource in:"
@@ -83,25 +83,25 @@ work_dir_for() {
 }
 
 load_bootstrap_outputs() {
-  if [[ -n "${WARPLAN_TF_BUCKET:-}" && -n "${WARPLAN_TF_LOCK_TABLE:-}" ]]; then
+  if [[ -n "${BATTLEPLAN_TF_BUCKET:-}" && -n "${BATTLEPLAN_TF_LOCK_TABLE:-}" ]]; then
     return
   fi
   local bootstrap="${ROOT}/infra/bootstrap"
   if [[ ! -d "${bootstrap}/.terraform" && ! -f "${bootstrap}/terraform.tfstate" ]]; then
-    echo "Bootstrap has not been applied. Set WARPLAN_TF_BUCKET and WARPLAN_TF_LOCK_TABLE, or apply infra/bootstrap first." >&2
+    echo "Bootstrap has not been applied. Set BATTLEPLAN_TF_BUCKET and BATTLEPLAN_TF_LOCK_TABLE, or apply infra/bootstrap first." >&2
     exit 1
   fi
-  WARPLAN_TF_BUCKET="${WARPLAN_TF_BUCKET:-$(terraform -chdir="$bootstrap" output -raw plan_bucket)}"
-  WARPLAN_TF_LOCK_TABLE="${WARPLAN_TF_LOCK_TABLE:-$(terraform -chdir="$bootstrap" output -raw lock_table)}"
+  BATTLEPLAN_TF_BUCKET="${BATTLEPLAN_TF_BUCKET:-$(terraform -chdir="$bootstrap" output -raw plan_bucket)}"
+  BATTLEPLAN_TF_LOCK_TABLE="${BATTLEPLAN_TF_LOCK_TABLE:-$(terraform -chdir="$bootstrap" output -raw lock_table)}"
   REGION="${AWS_REGION:-$(terraform -chdir="$bootstrap" output -raw region)}"
 }
 
 prepare_lambda() {
   local area="$1"
-  export TF_VAR_table_name="${WARPLAN_TABLE_NAME:-placeholder}"
-  export TF_VAR_api_id="${WARPLAN_API_ID:-placeholder}"
-  export TF_VAR_api_execution_arn="${WARPLAN_API_EXECUTION_ARN:-arn:aws:execute-api:${REGION}:000000000000:placeholder}"
-  export TF_VAR_lambda_role_arn="${WARPLAN_LAMBDA_ROLE_ARN:-arn:aws:iam::000000000000:role/placeholder}"
+  export TF_VAR_table_name="${BATTLEPLAN_TABLE_NAME:-placeholder}"
+  export TF_VAR_api_id="${BATTLEPLAN_API_ID:-placeholder}"
+  export TF_VAR_api_execution_arn="${BATTLEPLAN_API_EXECUTION_ARN:-arn:aws:execute-api:${REGION}:000000000000:placeholder}"
+  export TF_VAR_lambda_role_arn="${BATTLEPLAN_LAMBDA_ROLE_ARN:-arn:aws:iam::000000000000:role/placeholder}"
   export TF_VAR_cursor_api_key="${CURSOR_API_KEY:-}"
   export TF_VAR_aws_region="$REGION"
   local source_file="${ROOT}/faas/${area}/dist/index.js"
@@ -116,10 +116,10 @@ init_stack() {
   local key="$2"
   load_bootstrap_outputs
   terraform -chdir="$work" init -input=false -reconfigure \
-    -backend-config="bucket=${WARPLAN_TF_BUCKET}" \
+    -backend-config="bucket=${BATTLEPLAN_TF_BUCKET}" \
     -backend-config="key=state/${key}/terraform.tfstate" \
     -backend-config="region=${REGION}" \
-    -backend-config="dynamodb_table=${WARPLAN_TF_LOCK_TABLE}" \
+    -backend-config="dynamodb_table=${BATTLEPLAN_TF_LOCK_TABLE}" \
     -backend-config="encrypt=true"
 }
 
@@ -221,7 +221,7 @@ destroy_one() {
   fi
 
   empty_state_buckets "$work"
-  local plan="${work}/warplan-destroy.tfplan"
+  local plan="${work}/battleplan-destroy.tfplan"
   terraform -chdir="$work" plan -input=false -destroy -out="$plan"
   terraform -chdir="$work" apply -input=false "$plan"
   rm -f "$plan"

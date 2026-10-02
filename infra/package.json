@@ -1,5 +1,5 @@
 {
-  "name": "@warplan/infra",
+  "name": "@battleplan/infra",
   "private": true,
   "version": "0.1.0",
   "description": "Project-wide Terraform for DynamoDB, the HTTP API, and the Lambda role.",

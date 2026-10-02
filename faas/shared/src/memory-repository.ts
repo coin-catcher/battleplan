@@ -7,13 +7,13 @@ import type {
   TaskResearchOutput,
 } from './domain.js';
 import { HttpError } from './errors.js';
-import type { WarplanRepository } from './repository.js';
+import type { BattleplanRepository } from './repository.js';
 
 function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
-export class MemoryRepository implements WarplanRepository {
+export class MemoryRepository implements BattleplanRepository {
   private readonly projects = new Map<string, Project>();
   private readonly tasks = new Map<string, ProjectTask>();
   private readonly codeOutputs = new Map<string, TaskCodeOutput>();

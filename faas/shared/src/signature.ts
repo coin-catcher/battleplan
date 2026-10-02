@@ -1,7 +1,7 @@
 import { createPublicKey, verify, type KeyObject } from 'node:crypto';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { HttpError } from './errors.js';
-import { WARPLAN_PUBLIC_KEY } from './public-key.js';
+import { BATTLEPLAN_PUBLIC_KEY } from './public-key.js';
 
 /** Request-signature canonical form verified by the HTTP API. */
 export const SIGNATURE_VERSION = 'v1';
@@ -23,8 +23,8 @@ export function rawRequestBody(event: Pick<APIGatewayProxyEventV2, 'body' | 'isB
 }
 
 export function assertSignedRequest(event: APIGatewayProxyEventV2, now = Date.now()): void {
-  const timestamp = header(event, 'x-warplan-timestamp');
-  const signature = header(event, 'x-warplan-signature');
+  const timestamp = header(event, 'x-battleplan-timestamp');
+  const signature = header(event, 'x-battleplan-signature');
   if (!timestamp || !signature) {
     throw new HttpError(401, 'Request signature is required.');
   }
@@ -64,6 +64,6 @@ function header(event: APIGatewayProxyEventV2, name: string): string | undefined
 let cachedKey: KeyObject | undefined;
 
 function publicKey(): KeyObject {
-  cachedKey ??= createPublicKey(WARPLAN_PUBLIC_KEY);
+  cachedKey ??= createPublicKey(BATTLEPLAN_PUBLIC_KEY);
   return cachedKey;
 }

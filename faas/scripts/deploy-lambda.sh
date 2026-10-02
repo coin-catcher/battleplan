@@ -23,15 +23,15 @@ if [[ -f "${ROOT}/infra/outputs.env" ]]; then
   set +a
 fi
 
-: "${WARPLAN_TABLE_NAME:?Set WARPLAN_TABLE_NAME or deploy infra first}"
-: "${WARPLAN_API_ID:?Set WARPLAN_API_ID or deploy infra first}"
-: "${WARPLAN_API_EXECUTION_ARN:?Set WARPLAN_API_EXECUTION_ARN or deploy infra first}"
-: "${WARPLAN_LAMBDA_ROLE_ARN:?Set WARPLAN_LAMBDA_ROLE_ARN or deploy infra first}"
+: "${BATTLEPLAN_TABLE_NAME:?Set BATTLEPLAN_TABLE_NAME or deploy infra first}"
+: "${BATTLEPLAN_API_ID:?Set BATTLEPLAN_API_ID or deploy infra first}"
+: "${BATTLEPLAN_API_EXECUTION_ARN:?Set BATTLEPLAN_API_EXECUTION_ARN or deploy infra first}"
+: "${BATTLEPLAN_LAMBDA_ROLE_ARN:?Set BATTLEPLAN_LAMBDA_ROLE_ARN or deploy infra first}"
 
-export TF_VAR_table_name="$WARPLAN_TABLE_NAME"
-export TF_VAR_api_id="$WARPLAN_API_ID"
-export TF_VAR_api_execution_arn="$WARPLAN_API_EXECUTION_ARN"
-export TF_VAR_lambda_role_arn="$WARPLAN_LAMBDA_ROLE_ARN"
+export TF_VAR_table_name="$BATTLEPLAN_TABLE_NAME"
+export TF_VAR_api_id="$BATTLEPLAN_API_ID"
+export TF_VAR_api_execution_arn="$BATTLEPLAN_API_EXECUTION_ARN"
+export TF_VAR_lambda_role_arn="$BATTLEPLAN_LAMBDA_ROLE_ARN"
 export TF_VAR_cursor_api_key="${CURSOR_API_KEY:-}"
 export TF_VAR_aws_region="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 

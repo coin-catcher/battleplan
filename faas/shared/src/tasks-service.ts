@@ -6,7 +6,7 @@ import { assertAcyclic } from './graph.js';
 import { systemClock, type Clock } from './ids.js';
 import { normalizeTaskDrafts } from './task-list.js';
 import { taskExecutionPrompt } from './prompts.js';
-import type { WarplanRepository } from './repository.js';
+import type { BattleplanRepository } from './repository.js';
 import { assertCanTransition } from './status.js';
 
 export interface TaskPatch {
@@ -22,7 +22,7 @@ export interface TaskPatch {
 
 export class TasksService {
   constructor(
-    private readonly repo: WarplanRepository,
+    private readonly repo: BattleplanRepository,
     private readonly cursor: CursorClient,
     private readonly clock: Clock = systemClock,
   ) {}

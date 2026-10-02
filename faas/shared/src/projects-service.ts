@@ -2,7 +2,7 @@ import type { CursorClient } from './cursor-client.js';
 import type { ChatMessage, Project } from './domain.js';
 import { HttpError } from './errors.js';
 import { systemClock, type Clock } from './ids.js';
-import type { WarplanRepository } from './repository.js';
+import type { BattleplanRepository } from './repository.js';
 
 export interface CreateProjectInput {
   initial_prompt: string;
@@ -20,7 +20,7 @@ export interface ProjectPatch {
 
 export class ProjectsService {
   constructor(
-    private readonly repo: WarplanRepository,
+    private readonly repo: BattleplanRepository,
     private readonly cursor: CursorClient,
     private readonly clock: Clock = systemClock,
   ) {}
@@ -38,7 +38,7 @@ export class ProjectsService {
     const timestamp = this.clock.nowIso();
     const project: Project = {
       project_id: this.clock.newId(),
-      title: created.agent.name?.trim() || 'Untitled warplan',
+      title: created.agent.name?.trim() || 'Untitled battleplan',
       initial_prompt: initialPrompt,
       cursor_chat_link: created.agent.url,
       cursor_agent_id: created.agent.id,

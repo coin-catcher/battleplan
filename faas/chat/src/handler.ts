@@ -8,7 +8,7 @@ import {
   requireString,
   type Route,
   type ServiceDeps,
-} from '@warplan/shared';
+} from '@battleplan/shared';
 
 function routes(deps: ServiceDeps): Route[] {
   const service = new ChatService(deps.repo, deps.cursor);

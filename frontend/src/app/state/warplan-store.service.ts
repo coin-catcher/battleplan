@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { WarplanApi } from '../api/warplan-api.service';
+import { BattleplanApi } from '../api/battleplan-api.service';
 import type {
   ChatArtifact,
   ChatMessage,
@@ -18,8 +18,8 @@ const POLL_INTERVAL_MS = 3000;
 const POLL_ATTEMPTS = 300;
 
 @Injectable({ providedIn: 'root' })
-export class WarplanStore {
-  private readonly api = inject(WarplanApi);
+export class BattleplanStore {
+  private readonly api = inject(BattleplanApi);
 
   readonly projects = signal<Project[]>([]);
   readonly projectId = signal<string | null>(null);

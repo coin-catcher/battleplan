@@ -7,5 +7,5 @@ variable "aws_region" {
 variable "project" {
   type        = string
   description = "Resource name prefix."
-  default     = "warplan"
+  default     = "battleplan"
 }

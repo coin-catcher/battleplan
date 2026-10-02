@@ -1,9 +1,9 @@
 {
-  "name": "@warplan/projects",
+  "name": "@battleplan/projects",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Project Lambda: create a warplan, store its Cursor chat link, and edit the title.",
+  "description": "Project Lambda: create a battleplan, store its Cursor chat link, and edit the title.",
   "scripts": {
     "build": "node ../scripts/build.mjs projects",
     "test": "npm run test:local",

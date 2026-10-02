@@ -2,7 +2,7 @@ import type { TaskCodeOutput, TaskResearchOutput } from './domain.js';
 import { researchPath } from './domain.js';
 import { HttpError } from './errors.js';
 import { systemClock, type Clock } from './ids.js';
-import type { WarplanRepository } from './repository.js';
+import type { BattleplanRepository } from './repository.js';
 import { assertCanTransition } from './status.js';
 
 function requiredFields(output: Partial<TaskCodeOutput>, fields: Array<keyof TaskCodeOutput>): void {
@@ -16,7 +16,7 @@ function requiredFields(output: Partial<TaskCodeOutput>, fields: Array<keyof Tas
 
 export class OutputsService {
   constructor(
-    private readonly repo: WarplanRepository,
+    private readonly repo: BattleplanRepository,
     private readonly clock: Clock = systemClock,
   ) {}
 

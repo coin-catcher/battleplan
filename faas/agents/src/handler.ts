@@ -9,8 +9,8 @@ import {
   requireString,
   type Route,
   type ServiceDeps,
-} from '@warplan/shared';
-import { HttpError } from '@warplan/shared';
+} from '@battleplan/shared';
+import { HttpError } from '@battleplan/shared';
 
 function routes(deps: ServiceDeps): Route[] {
   const service = new AgentsService(deps.repo, deps.cursor);

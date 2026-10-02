@@ -1,11 +1,11 @@
 import type { CreateRunInput, CursorAgent, CursorClient, CursorRun } from './cursor-client.js';
 import { HttpError } from './errors.js';
 import { systemClock, type Clock } from './ids.js';
-import type { WarplanRepository } from './repository.js';
+import type { BattleplanRepository } from './repository.js';
 
 export class AgentsService {
   constructor(
-    private readonly repo: WarplanRepository,
+    private readonly repo: BattleplanRepository,
     private readonly cursor: CursorClient,
     private readonly clock: Clock = systemClock,
   ) {}

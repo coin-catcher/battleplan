@@ -7,7 +7,7 @@ import { applyTheme, readTheme, THEMES, type ThemeId } from './core/themes';
 import { CursorKey } from './data/cursor-key.service';
 import { layoutMindmap, type MindmapNode } from './core/mindmap';
 import { MarkdownComponent } from 'ngx-markdown';
-import { WarplanStore } from './state/warplan-store.service';
+import { BattleplanStore } from './state/battleplan-store.service';
 
 @Component({
   selector: 'app-root',
@@ -16,7 +16,7 @@ import { WarplanStore } from './state/warplan-store.service';
   styleUrl: './app.component.scss',
 })
 export class AppComponent implements OnInit {
-  readonly store = inject(WarplanStore);
+  readonly store = inject(BattleplanStore);
   readonly cursorKey = inject(CursorKey);
   readonly themes = THEMES;
   private readonly zone = inject(NgZone);
@@ -166,7 +166,7 @@ export class AppComponent implements OnInit {
       this.paneWidth.set(next);
     };
     const up = () => {
-      localStorage.setItem('warplan-pane-width', String(this.paneWidth()));
+      localStorage.setItem('battleplan-pane-width', String(this.paneWidth()));
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
@@ -439,6 +439,6 @@ function clampZoom(value: number): number {
 }
 
 function readPaneWidth(): number {
-  const stored = Number(localStorage.getItem('warplan-pane-width'));
+  const stored = Number(localStorage.getItem('battleplan-pane-width'));
   return Number.isFinite(stored) && stored >= 320 ? stored : 640;
 }

@@ -3,7 +3,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project   = "warplan"
+      Project   = "battleplan"
       Component = "projects"
       ManagedBy = "terraform"
     }
@@ -12,7 +12,7 @@ provider "aws" {
 
 module "lambda" {
   source            = "../../modules/http-lambda"
-  function_name     = "warplan-projects"
+  function_name     = "battleplan-projects"
   source_file       = "${path.module}/../dist/index.js"
   role_arn          = var.lambda_role_arn
   table_name        = var.table_name

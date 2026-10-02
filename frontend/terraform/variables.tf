@@ -5,5 +5,5 @@ variable "aws_region" {
 
 variable "project" {
   type    = string
-  default = "warplan"
+  default = "battleplan"
 }
