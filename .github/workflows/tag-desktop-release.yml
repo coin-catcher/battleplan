@@ -12,6 +12,8 @@ permissions:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.meta.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,3 +49,10 @@ jobs:
           fi
           git tag -a "$TAG" -m "Battleplan desktop ${{ steps.meta.outputs.kind }} release ${TAG}"
           git push origin "$TAG"
+
+  release:
+    needs: tag
+    uses: ./.github/workflows/release-desktop-reusable.yml
+    with:
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+      ref: ${{ github.sha }}

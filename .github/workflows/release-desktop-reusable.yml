@@ -1,0 +1,135 @@
+name: Release Battleplan desktop (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:local
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: desktop-linux
+          - os: macos-latest
+            artifact: desktop-mac
+          - os: windows-latest
+            artifact: desktop-win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build desktop app
+        run: npm run build:electron
+        env:
+          CI: true
+
+      - name: Package installers
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 45
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: npx electron-builder --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Stage release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          shopt -s nullglob
+          for file in release/battleplan-* release/latest-*.yml release/*.blockmap; do
+            cp "$file" upload/
+          done
+          ls -la upload
+
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: upload/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Verify installer artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Bundled files:"
+          find release-assets -type f | sort
+          find release-assets -name 'battleplan-*-linux.AppImage' | grep -q .
+          find release-assets -name 'battleplan-*-linux.deb' | grep -q .
+          find release-assets -name 'battleplan-*-mac.zip' | grep -q .
+          find release-assets -name 'battleplan-*-mac.dmg' | grep -q .
+          find release-assets -name 'battleplan-*-win.exe' | grep -q .
+
+      - name: Flatten release bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          find release-assets -type f -exec cp {} upload/ \;
+          ls -la upload
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          files: upload/*
+          fail_on_unmatched_files: true
+          draft: false
+          make_latest: ${{ !contains(inputs.release_tag, '-test-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

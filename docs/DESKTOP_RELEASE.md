@@ -28,10 +28,10 @@ Use **Import project** / **Export project** in the sidebar to move a project as 
 
 ## Automated releases
 
-Two workflows chain together:
+Two entry points share the same build/publish jobs:
 
-1. **Tag desktop release** — runs when commits land on `develop` or `main`.
-2. **Release Battleplan desktop** — runs when a matching tag is pushed; builds installers and uploads them in one publish job.
+1. **Tag desktop release** — runs when commits land on `develop` or `main`. It creates the tag, then immediately builds and publishes installers (GitHub does not auto-start a second workflow when the tag is pushed by `GITHUB_TOKEN`).
+2. **Release Battleplan desktop** — runs when a tag is pushed manually or via **Run workflow**; uses the same reusable build/publish pipeline.
 
 ### `develop` (test builds)
 
