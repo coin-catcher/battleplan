@@ -44,6 +44,30 @@ function routes(deps: ServiceDeps): Route[] {
     },
     {
       method: 'POST',
+      path: '/tasks/{taskId}/messages/generate-tasks',
+      handler: async (_request, params) => ({
+        statusCode: 202,
+        body: await service.generateTaskTasks(params.taskId),
+      }),
+    },
+    {
+      method: 'POST',
+      path: '/projects/{projectId}/notes',
+      handler: async (request, params) => {
+        const body = jsonBody(request.body);
+        return { statusCode: 201, body: await service.note({ scope: 'project', projectId: params.projectId }, requireString(body, 'message')) };
+      },
+    },
+    {
+      method: 'POST',
+      path: '/tasks/{taskId}/notes',
+      handler: async (request, params) => {
+        const body = jsonBody(request.body);
+        return { statusCode: 201, body: await service.note({ scope: 'task', taskId: params.taskId }, requireString(body, 'message')) };
+      },
+    },
+    {
+      method: 'POST',
       path: '/tasks/{taskId}/messages',
       handler: async (request, params) => {
         const body = jsonBody(request.body);

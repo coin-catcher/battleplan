@@ -29,7 +29,17 @@ export class WarplanApi {
   }
 
   updateTitle(projectId: string, title: string): Promise<Project> {
-    return this.send<Project>('PATCH', `/projects/${projectId}`, { title });
+    return this.updateProject(projectId, { title });
+  }
+
+  updateProject(projectId: string, patch: {
+    title?: string;
+    repo_url?: string;
+    starting_ref?: string;
+    map_x?: number;
+    map_y?: number;
+  }): Promise<Project> {
+    return this.send<Project>('PATCH', `/projects/${projectId}`, patch);
   }
 
   deleteProject(projectId: string): Promise<void> {
@@ -91,6 +101,18 @@ export class WarplanApi {
 
   generateTasks(projectId: string): Promise<ChatMessage> {
     return this.send<ChatMessage>('POST', `/projects/${projectId}/messages/generate-tasks`);
+  }
+
+  generateTaskTasks(taskId: string): Promise<ChatMessage> {
+    return this.send<ChatMessage>('POST', `/tasks/${taskId}/messages/generate-tasks`);
+  }
+
+  noteProject(projectId: string, message: string): Promise<ChatMessage> {
+    return this.send<ChatMessage>('POST', `/projects/${projectId}/notes`, { message });
+  }
+
+  noteTask(taskId: string, message: string): Promise<ChatMessage> {
+    return this.send<ChatMessage>('POST', `/tasks/${taskId}/notes`, { message });
   }
 
   listTaskMessages(taskId: string): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ConversationPage['artifacts'] }> {

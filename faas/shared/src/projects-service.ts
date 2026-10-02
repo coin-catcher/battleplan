@@ -1,5 +1,5 @@
 import type { CursorClient } from './cursor-client.js';
-import type { Project } from './domain.js';
+import type { ChatMessage, Project } from './domain.js';
 import { HttpError } from './errors.js';
 import { systemClock, type Clock } from './ids.js';
 import type { WarplanRepository } from './repository.js';
@@ -8,6 +8,14 @@ export interface CreateProjectInput {
   initial_prompt: string;
   repo_url?: string;
   starting_ref?: string;
+}
+
+export interface ProjectPatch {
+  title?: string;
+  repo_url?: string;
+  starting_ref?: string;
+  map_x?: number;
+  map_y?: number;
 }
 
 export class ProjectsService {
@@ -63,14 +71,49 @@ export class ProjectsService {
   }
 
   async updateTitle(projectId: string, title: string): Promise<Project> {
+    return this.update(projectId, { title });
+  }
+
+  async update(projectId: string, patch: ProjectPatch): Promise<Project> {
     const project = await this.require(projectId);
-    const next = title.trim();
-    if (!next) throw new HttpError(400, 'title is required.');
-    if (next.length > 100) throw new HttpError(400, 'title must be 100 characters or fewer.');
-    project.title = next;
+    const changes: string[] = [];
+    if (patch.title !== undefined) {
+      const next = patch.title.trim();
+      if (!next) throw new HttpError(400, 'title is required.');
+      if (next.length > 100) throw new HttpError(400, 'title must be 100 characters or fewer.');
+      if (next !== project.title) changes.push(`Title: ${next}`);
+      project.title = next;
+    }
+    if (patch.repo_url !== undefined) {
+      const next = patch.repo_url.trim();
+      if (next !== (project.repo_url ?? '')) changes.push(`Repository: ${next || 'cleared'}`);
+      project.repo_url = next || undefined;
+    }
+    if (patch.starting_ref !== undefined) {
+      const next = patch.starting_ref.trim();
+      if (next !== (project.starting_ref ?? '')) changes.push(`Base branch: ${next || 'main'}`);
+      project.starting_ref = next || undefined;
+    }
+    if (patch.map_x !== undefined) project.map_x = patch.map_x;
+    if (patch.map_y !== undefined) project.map_y = patch.map_y;
     project.updated_at = this.clock.nowIso();
     await this.repo.saveProject(project);
+    if (changes.length > 0) {
+      await this.repo.saveMessage(this.changeNote(project, changes.join('\n')));
+    }
     return project;
+  }
+
+  private changeNote(project: Project, content: string): ChatMessage {
+    return {
+      message_id: this.clock.newId(),
+      scope: 'project',
+      project_id: project.project_id,
+      role: 'change',
+      content,
+      created_at: this.clock.nowIso(),
+      intent: 'chat',
+    };
   }
 
   async remove(projectId: string): Promise<void> {

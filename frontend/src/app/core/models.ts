@@ -11,6 +11,8 @@ export interface Project {
   latest_run_id?: string;
   repo_url?: string;
   starting_ref?: string;
+  map_x?: number;
+  map_y?: number;
   created_at: string;
   updated_at: string;
 }
@@ -24,6 +26,8 @@ export interface ProjectTask {
   status: TaskStatus;
   output_type: OutputType;
   order: number;
+  map_x?: number;
+  map_y?: number;
   cursor_agent_id?: string;
   cursor_chat_link?: string;
   latest_run_id?: string;
@@ -49,11 +53,12 @@ export interface ChatMessage {
   scope: 'project' | 'task';
   project_id: string;
   task_id?: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'change';
   content: string;
   created_at: string;
   run_id?: string;
   intent?: 'chat' | 'generate_tasks' | 'feedback' | 'approve';
+  cursor_agent_id?: string;
 }
 
 export interface ChatArtifact {

@@ -5,6 +5,7 @@ import {
   dispatch,
   jsonBody,
   rejectUnsigned,
+  optionalNumber,
   optionalString,
   requireString,
   type Route,
@@ -42,7 +43,16 @@ function routes(deps: ServiceDeps): Route[] {
       path: '/projects/{projectId}',
       handler: async (request, params) => {
         const body = jsonBody(request.body);
-        return { statusCode: 200, body: await service.updateTitle(params.projectId, requireString(body, 'title')) };
+        return {
+          statusCode: 200,
+          body: await service.update(params.projectId, {
+            title: optionalString(body, 'title'),
+            repo_url: body.repo_url === undefined ? undefined : optionalString(body, 'repo_url') ?? '',
+            starting_ref: body.starting_ref === undefined ? undefined : optionalString(body, 'starting_ref') ?? '',
+            map_x: optionalNumber(body, 'map_x'),
+            map_y: optionalNumber(body, 'map_y'),
+          }),
+        };
       },
     },
     {

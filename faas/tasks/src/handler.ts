@@ -7,6 +7,7 @@ import {
   rejectUnsigned,
   isTaskStatus,
   jsonBody,
+  optionalNumber,
   optionalString,
   requireString,
   type OutputType,
@@ -81,6 +82,8 @@ function routes(deps: ServiceDeps): Route[] {
             dependencies: dependencies === undefined ? undefined : stringArray(dependencies, 'dependencies'),
             status: body.status === undefined ? undefined : statusOf(body.status),
             manual: body.manual === true,
+            map_x: optionalNumber(body, 'map_x'),
+            map_y: optionalNumber(body, 'map_y'),
           }),
         };
       },
