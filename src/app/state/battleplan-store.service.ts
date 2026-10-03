@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   ConversationPage,
   OutputType,
+  PendingChange,
   Project,
   ProjectTask,
   Selection,
@@ -13,12 +14,24 @@ import type {
   TaskResearchOutput,
   TaskStatus,
 } from '../core/models';
+import { RELEASE_CHANGES_MESSAGE } from '../core/pending-changes';
 import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
 import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
 
 const POLL_INTERVAL_MS = 3000;
 const POLL_ATTEMPTS = 300;
+
+export interface ProjectTabSnapshot {
+  selection: Selection;
+  tasks: ProjectTask[];
+  messages: ChatMessage[];
+  artifacts: ChatArtifact[];
+  codeOutputs: Record<string, TaskCodeOutput | null>;
+  researchOutputs: Record<string, TaskResearchOutput | null>;
+  pendingChanges: PendingChange[];
+  paneWidth: number;
+}
 
 @Injectable({ providedIn: 'root' })
 export class BattleplanStore {
@@ -39,6 +52,8 @@ export class BattleplanStore {
   readonly pendingReply = signal(false);
   readonly editorLoading = signal(false);
   readonly chatActionPending = signal<'send' | 'execute' | 'merge' | null>(null);
+  readonly pendingChanges = signal<PendingChange[]>([]);
+  readonly openTabs = signal<string[]>([]);
 
   readonly project = computed(() => this.projects().find((item) => item.project_id === this.projectId()) ?? null);
   readonly rootProjects = computed(() => this.projects().filter((item) => !item.parent_project_id));
@@ -63,6 +78,7 @@ export class BattleplanStore {
 
   private watchGeneration = 0;
   private watchTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly tabSnapshots = new Map<string, ProjectTabSnapshot>();
 
   async loadProjects(): Promise<void> {
     await this.run(async () => {
@@ -72,9 +88,58 @@ export class BattleplanStore {
       const initial = preferred && projects.some((item) => item.project_id === preferred)
         ? preferred
         : projects[0]?.project_id;
-      if (!this.projectId() && initial) await this.selectProject(initial);
+      if (!this.projectId() && initial) {
+        await this.openProjectTab(initial, this.preferences.paneWidth());
+      }
       if (projects.length === 0) this.selection.set({ kind: 'create' });
     });
+  }
+
+  snapshotWorkspace(paneWidth: number): ProjectTabSnapshot {
+    return {
+      selection: this.selection(),
+      tasks: this.tasks(),
+      messages: this.messages(),
+      artifacts: this.artifacts(),
+      codeOutputs: this.codeOutputs(),
+      researchOutputs: this.researchOutputs(),
+      pendingChanges: this.pendingChanges(),
+      paneWidth,
+    };
+  }
+
+  restoreWorkspace(snapshot: ProjectTabSnapshot): void {
+    this.selection.set(snapshot.selection);
+    this.tasks.set(snapshot.tasks);
+    this.messages.set(snapshot.messages);
+    this.artifacts.set(snapshot.artifacts);
+    this.codeOutputs.set(snapshot.codeOutputs);
+    this.researchOutputs.set(snapshot.researchOutputs);
+    this.pendingChanges.set(snapshot.pendingChanges);
+  }
+
+  async openProjectTab(projectId: string, paneWidth: number): Promise<number> {
+    const currentId = this.projectId();
+    if (currentId && currentId !== projectId) {
+      this.tabSnapshots.set(currentId, this.snapshotWorkspace(paneWidth));
+    }
+    this.openTabs.update((tabs) => tabs.includes(projectId) ? tabs : [...tabs, projectId]);
+    const cached = this.tabSnapshots.get(projectId);
+    if (cached) {
+      this.stopWatch();
+      this.projectId.set(projectId);
+      await this.preferences.setCurrentProjectId(projectId);
+      this.restoreWorkspace(cached);
+      this.resumeWatchForSelection();
+      return cached.paneWidth;
+    }
+    await this.selectProject(projectId);
+    this.tabSnapshots.set(projectId, this.snapshotWorkspace(paneWidth));
+    return paneWidth;
+  }
+
+  async switchProjectTab(projectId: string, paneWidth: number): Promise<number> {
+    return this.openProjectTab(projectId, paneWidth);
   }
 
   async selectProject(projectId: string): Promise<void> {
@@ -86,9 +151,37 @@ export class BattleplanStore {
       await this.run(async () => {
         await this.reloadTasks();
         this.applyConversation(await this.api.listProjectMessages(projectId));
+        await this.refreshPendingChanges();
       });
+      this.openTabs.update((tabs) => tabs.includes(projectId) ? tabs : [...tabs, projectId]);
       this.continueProjectWatch(projectId);
     });
+  }
+
+  async refreshPendingChanges(): Promise<void> {
+    const projectId = this.projectId();
+    const project = this.project();
+    if (!projectId || !project) {
+      this.pendingChanges.set([]);
+      return;
+    }
+    try {
+      const current = await this.api.listPendingChanges(projectId);
+      const synced = await this.api.syncPendingChanges(projectId, {
+        tasks: this.tasks(),
+        codeOutputs: this.codeOutputs(),
+        researchOutputs: this.researchOutputs(),
+        current,
+      });
+      await this.api.savePendingChanges(projectId, synced);
+      this.pendingChanges.set(synced);
+    } catch {
+      this.pendingChanges.set(await this.api.listPendingChanges(projectId));
+    }
+  }
+
+  async releasePendingChanges(): Promise<void> {
+    await this.sendProjectMessage(RELEASE_CHANGES_MESSAGE);
   }
 
   showCreate(): void {
@@ -111,8 +204,12 @@ export class BattleplanStore {
       this.artifacts.set([]);
       this.selection.set({ kind: 'project' });
       this.applyConversation(await this.api.listProjectMessages(project.project_id));
+      await this.refreshPendingChanges();
     });
-    if (projectId && !this.error()) this.continueProjectWatch(projectId);
+    if (projectId && !this.error()) {
+      this.openTabs.update((tabs) => tabs.includes(projectId) ? tabs : [...tabs, projectId]);
+      this.continueProjectWatch(projectId);
+    }
   }
 
   async saveProject(patch: { title: string; repo_url: string; starting_ref: string; dar: string; initial_prompt?: string }): Promise<void> {
@@ -772,6 +869,15 @@ export class BattleplanStore {
     }));
     this.codeOutputs.set(code);
     this.researchOutputs.set(research);
+    await this.refreshPendingChanges();
+  }
+
+  private resumeWatchForSelection(): void {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    const selection = this.selection();
+    if (selection.kind === 'project') this.continueProjectWatch(projectId);
+    else if (selection.kind === 'task' || selection.kind === 'subproject') this.continueTaskWatch(selection.taskId);
   }
 
   private async refreshOutput(task: ProjectTask): Promise<void> {

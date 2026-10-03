@@ -1,6 +1,7 @@
 import type {
   ChatArtifact,
   ChatMessage,
+  PendingChange,
   Project,
   ProjectTask,
   TaskCodeOutput,
@@ -30,4 +31,7 @@ export interface BattleplanRepository {
 
   listArtifacts(scope: 'project' | 'task', ownerId: string): Promise<ChatArtifact[]>;
   saveArtifact(artifact: ChatArtifact): Promise<void>;
+
+  listPendingChanges(projectId: string): Promise<PendingChange[]>;
+  savePendingChanges(projectId: string, changes: PendingChange[]): Promise<void>;
 }

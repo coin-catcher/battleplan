@@ -87,4 +87,12 @@ export class IpcRepository implements BattleplanRepository {
   saveArtifact(artifact: ChatArtifact): Promise<void> {
     return bridge().invoke('repo:saveArtifact', artifact);
   }
+
+  listPendingChanges(projectId: string): Promise<import('../core/models').PendingChange[]> {
+    return bridge().invoke('repo:listPendingChanges', projectId);
+  }
+
+  savePendingChanges(projectId: string, changes: import('../core/models').PendingChange[]): Promise<void> {
+    return bridge().invoke('repo:savePendingChanges', projectId, changes);
+  }
 }

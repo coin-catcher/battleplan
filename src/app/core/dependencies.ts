@@ -11,7 +11,7 @@ export function isNormalChildLink(
 }
 
 export function normalChildIds(task: ProjectTask, byId: Map<string, ProjectTask>): string[] {
-  return task.dependencies.filter((id) => isNormalChildLink(byId, task.task_id, id));
+  return task.dependencies.filter((id) => byId.has(id) && isNormalChildLink(byId, task.task_id, id));
 }
 
 export function siblingDependencyIds(task: ProjectTask): string[] {

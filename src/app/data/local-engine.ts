@@ -2,6 +2,7 @@ import type {
   ChatArtifact,
   ChatMessage,
   OutputType,
+  PendingChange,
   Project,
   ProjectTask,
   TaskCodeOutput,
@@ -9,6 +10,7 @@ import type {
   TaskResearchOutput,
   TaskStatus,
 } from '../core/models';
+import { syncPendingChangesForProject } from '../core/pending-changes';
 import { TASK_STATUSES } from '../core/models';
 import type { CursorClient, CursorRun } from './cursor-browser';
 import { normalizeRepoUrl } from './cursor-browser';
@@ -471,6 +473,30 @@ export class LocalEngine {
       messages: await this.repo.listProjectMessages(projectId),
       artifacts: await this.repo.listArtifacts('project', projectId),
     };
+  }
+
+  listPendingChanges(projectId: string): Promise<PendingChange[]> {
+    return this.repo.listPendingChanges(projectId);
+  }
+
+  savePendingChanges(projectId: string, changes: PendingChange[]): Promise<void> {
+    return this.repo.savePendingChanges(projectId, changes);
+  }
+
+  async syncPendingChanges(projectId: string, input: {
+    tasks: ProjectTask[];
+    codeOutputs: Record<string, TaskCodeOutput | null>;
+    researchOutputs: Record<string, TaskResearchOutput | null>;
+    current: PendingChange[];
+  }): Promise<PendingChange[]> {
+    const project = await this.requireProject(projectId);
+    return syncPendingChangesForProject({
+      project,
+      tasks: input.tasks,
+      codeOutputs: input.codeOutputs,
+      researchOutputs: input.researchOutputs,
+      current: input.current,
+    });
   }
 
   async sendProjectMessage(projectId: string, message: string): Promise<ChatMessage> {
