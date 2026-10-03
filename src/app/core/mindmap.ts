@@ -1,4 +1,10 @@
 import type { ProjectTask, TaskStatus } from './models';
+import {
+  depthByNormalLinks,
+  normalChildIds,
+  rootTaskIds,
+  siblingDependencyIds,
+} from './dependencies';
 
 export type MindmapShape = 'project' | 'code' | 'research' | 'subproject';
 
@@ -120,23 +126,12 @@ export function layoutMindmap(
   projectPin?: { x: number; y: number },
 ): MindmapLayout {
   const byId = new Map(tasks.map((task) => [task.task_id, task]));
-  const depth = new Map<string, number>();
-  const visiting = new Set<string>();
-  const depthOf = (taskId: string): number => {
-    const known = depth.get(taskId);
-    if (known !== undefined) return known;
-    if (visiting.has(taskId)) return 0;
-    visiting.add(taskId);
-    const dependencies = (byId.get(taskId)?.dependencies ?? []).filter((id) => byId.has(id) && id !== taskId);
-    const value = dependencies.length === 0 ? 0 : Math.max(...dependencies.map((id) => depthOf(id))) + 1;
-    visiting.delete(taskId);
-    depth.set(taskId, value);
-    return value;
-  };
-  for (const task of tasks) depthOf(task.task_id);
+  const depth = depthByNormalLinks(tasks);
+  const depthOf = (taskId: string): number => depth.get(taskId) ?? 0;
 
+  const rootIds = new Set(rootTaskIds(tasks));
   const direct = tasks
-    .filter((task) => task.dependencies.every((id) => !byId.has(id) || id === task.task_id))
+    .filter((task) => rootIds.has(task.task_id))
     .sort((left, right) => left.order - right.order || left.title.localeCompare(right.title));
   const angleOf = new Map<string, number>();
   const rootCount = Math.max(direct.length, 1);
@@ -148,16 +143,13 @@ export function layoutMindmap(
 
   const childrenOf = new Map<string, ProjectTask[]>();
   for (const task of tasks) {
-    const dependencies = task.dependencies.filter((id) => byId.has(id) && id !== task.task_id);
-    if (dependencies.length === 0) continue;
-    const parentId = [...dependencies].sort((left, right) => {
-      const byDepth = depthOf(right) - depthOf(left);
-      if (byDepth !== 0) return byDepth;
-      return (byId.get(left)?.order ?? 0) - (byId.get(right)?.order ?? 0);
-    })[0];
-    const children = childrenOf.get(parentId) ?? [];
-    children.push(task);
-    childrenOf.set(parentId, children);
+    for (const childId of normalChildIds(task, byId)) {
+      const child = byId.get(childId);
+      if (!child) continue;
+      const children = childrenOf.get(task.task_id) ?? [];
+      children.push(child);
+      childrenOf.set(task.task_id, children);
+    }
   }
   const placed = new Set(direct.map((task) => task.task_id));
   let progressed = true;
@@ -233,12 +225,17 @@ export function layoutMindmap(
     }
   }
   for (const task of tasks) {
-    const target = nodeById.get(task.task_id);
-    if (!target) continue;
-    for (const dependencyId of task.dependencies) {
-      const source = nodeById.get(dependencyId);
-      if (!source || source.id === target.id) continue;
-      edges.push(drawEdge(source, target, true));
+    const parent = nodeById.get(task.task_id);
+    if (!parent) continue;
+    for (const childId of normalChildIds(task, byId)) {
+      const child = nodeById.get(childId);
+      if (!child || child.id === parent.id) continue;
+      edges.push(drawEdge(parent, child, false));
+    }
+    for (const siblingId of siblingDependencyIds(task)) {
+      const sibling = nodeById.get(siblingId);
+      if (!sibling || sibling.id === parent.id) continue;
+      edges.push(drawEdge(parent, sibling, true));
     }
   }
   return {

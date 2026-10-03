@@ -20,6 +20,7 @@ import {
 import { MarkdownComponent } from 'ngx-markdown';
 import { editorPanelDirty } from './core/editor-dirty';
 import { taskDar, taskInitialPrompt } from './core/task-fields';
+import { normalChildIds } from './core/dependencies';
 import { BattleplanStore } from './state/battleplan-store.service';
 
 @Component({
@@ -98,6 +99,8 @@ export class AppComponent implements OnInit {
   subprojectInitialPrompt = '';
   outputType: OutputType = 'code';
   dependencies: string[] = [];
+  siblingDependencies: string[] = [];
+  readonly executeChildrenPrompt = signal<string | null>(null);
   codeRepo = '';
   codeBranch = '';
   codeMessage = '';
@@ -176,6 +179,7 @@ export class AppComponent implements OnInit {
       this.taskInitialPrompt = taskInitialPrompt(task);
       this.outputType = task.output_type;
       this.dependencies = [...task.dependencies];
+      this.siblingDependencies = [...(task.sibling_dependencies ?? [])];
     });
 
     effect(() => {
@@ -299,6 +303,7 @@ export class AppComponent implements OnInit {
         initial_prompt: this.taskInitialPrompt,
         output_type: this.outputType,
         dependencies: this.dependencies,
+        sibling_dependencies: this.siblingDependencies,
       },
       project,
       this.store.selectedTask(),
@@ -338,6 +343,7 @@ export class AppComponent implements OnInit {
         initial_prompt: this.taskInitialPrompt,
         output_type: this.outputType,
         dependencies: this.dependencies,
+        sibling_dependencies: this.siblingDependencies,
       });
     } else {
       return true;
@@ -490,6 +496,31 @@ export class AppComponent implements OnInit {
     return this.store.tasks().filter((task) => task.task_id !== current?.task_id);
   }
 
+  taskHasChildren(taskId: string): boolean {
+    const tasks = this.store.tasks();
+    const task = tasks.find((item) => item.task_id === taskId);
+    if (!task) return false;
+    const byId = new Map(tasks.map((item) => [item.task_id, item]));
+    return normalChildIds(task, byId).length > 0;
+  }
+
+  playChildrenPoint(node: MindmapNode): { x: number; y: number } {
+    return { x: node.x + node.width / 2 - 10, y: node.y - node.height / 2 + 10 };
+  }
+
+  requestExecuteChildren(taskId: string, event: Event): void {
+    event.stopPropagation();
+    event.preventDefault();
+    this.executeChildrenPrompt.set(taskId);
+  }
+
+  answerExecuteChildren(yes: boolean): void {
+    const taskId = this.executeChildrenPrompt();
+    this.executeChildrenPrompt.set(null);
+    if (!yes || !taskId) return;
+    void this.store.executeChildren(taskId);
+  }
+
   isMapSelected(node: MindmapNode): boolean {
     const selection = this.store.selection();
     if (node.kind === 'project') return selection.kind === 'project';
@@ -624,7 +655,7 @@ export class AppComponent implements OnInit {
 
   onStagePointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .zoom-controls')) return;
+    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-play-children, .zoom-controls')) return;
     if (this.connectPanel()) {
       this.dismissConnectPanel();
       return;
@@ -649,7 +680,7 @@ export class AppComponent implements OnInit {
 
   onNodePointerDown(node: MindmapNode, event: PointerEvent): void {
     if (this.editingNodeId() === node.id) return;
-    if ((event.target as HTMLElement).closest('.map-edge-arrow, .map-connect-panel')) return;
+    if ((event.target as HTMLElement).closest('.map-edge-arrow, .map-connect-panel, .map-play-children')) return;
     event.stopPropagation();
     const startX = event.clientX;
     const startY = event.clientY;
@@ -836,7 +867,7 @@ export class AppComponent implements OnInit {
 
   onMapDismissPointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-connect-panel, .map-convert-panel, .map-edge-arrow, .map-convert-handle')) return;
+    if (target.closest('.map-connect-panel, .map-convert-panel, .map-edge-arrow, .map-convert-handle, .map-play-children')) return;
     this.dismissConnectPanel();
     this.convertPanel.set(null);
   }
@@ -929,11 +960,11 @@ export class AppComponent implements OnInit {
     void this.store.openOutput(taskId, 'research');
   }
 
-  toggleDependency(taskId: string, event: Event): void {
+  toggleSiblingDependency(taskId: string, event: Event): void {
     const checked = (event.target as HTMLInputElement).checked;
-    this.dependencies = checked
-      ? [...this.dependencies, taskId]
-      : this.dependencies.filter((id) => id !== taskId);
+    this.siblingDependencies = checked
+      ? [...this.siblingDependencies, taskId]
+      : this.siblingDependencies.filter((id) => id !== taskId);
     this.onEditorFieldAutoSave();
   }
 
@@ -980,6 +1011,7 @@ export class AppComponent implements OnInit {
       initial_prompt: this.taskInitialPrompt,
       output_type: this.outputType,
       dependencies: this.dependencies,
+      sibling_dependencies: this.siblingDependencies,
     });
   }
 

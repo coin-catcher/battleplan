@@ -15,6 +15,7 @@ export interface TaskEditorForm {
   initial_prompt: string;
   output_type: OutputType;
   dependencies: string[];
+  sibling_dependencies: string[];
 }
 
 export function projectEditorDirty(form: ProjectEditorForm, project: Project | null): boolean {
@@ -35,6 +36,8 @@ export function taskEditorDirty(form: TaskEditorForm, task: ProjectTask | null):
   if (!task) return false;
   const deps = [...form.dependencies].sort();
   const saved = [...task.dependencies].sort();
+  const siblings = [...form.sibling_dependencies].sort();
+  const savedSiblings = [...(task.sibling_dependencies ?? [])].sort();
   const initialDirty = !task.cursor_agent_id
     && form.initial_prompt.trim() !== taskInitialPrompt(task);
   return form.title !== task.title
@@ -42,7 +45,9 @@ export function taskEditorDirty(form: TaskEditorForm, task: ProjectTask | null):
     || form.output_type !== task.output_type
     || initialDirty
     || deps.length !== saved.length
-    || deps.some((id, index) => id !== saved[index]);
+    || deps.some((id, index) => id !== saved[index])
+    || siblings.length !== savedSiblings.length
+    || siblings.some((id, index) => id !== savedSiblings[index]);
 }
 
 export function editorPanelDirty(

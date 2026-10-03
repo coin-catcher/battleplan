@@ -27,8 +27,15 @@ describe('collectTaskDarSections', () => {
       created_at: '2026-10-02T00:00:00.000Z',
       updated_at: '2026-10-02T00:00:00.000Z',
     };
-    const parent = task({ task_id: 't-parent', title: 'Parent', dar: 'Parent rules', prompt: 'Parent rules', order: 0 });
-    const current = task({ task_id: 't-child', title: 'Child', dar: 'Child rules', prompt: 'Child rules', order: 1, dependencies: ['t-parent'] });
+    const parent = task({
+      task_id: 't-parent',
+      title: 'Parent',
+      dar: 'Parent rules',
+      prompt: 'Parent rules',
+      order: 0,
+      dependencies: ['t-child'],
+    });
+    const current = task({ task_id: 't-child', title: 'Child', dar: 'Child rules', prompt: 'Child rules', order: 1 });
     const lookup = {
       async getProject() { return project; },
       async getTask(id: string) {

@@ -18,12 +18,12 @@ function task(partial: Partial<ProjectTask> & Pick<ProjectTask, 'task_id' | 'tit
 }
 
 describe('task tree', () => {
-  it('nests each task under its deepest dependency and sorts siblings by order', () => {
+  it('nests each task under the parent that depends on it and sorts siblings by order', () => {
     const forest = buildTaskForest([
-      task({ task_id: 'a', title: 'Research', order: 2, output_type: 'research' }),
-      task({ task_id: 'c', title: 'Review notes', order: 1, dependencies: ['a'] }),
-      task({ task_id: 'b', title: 'Implement', order: 0, dependencies: ['a'] }),
-      task({ task_id: 'd', title: 'Ship', order: 3, dependencies: ['b', 'c'] }),
+      task({ task_id: 'a', title: 'Research', order: 2, output_type: 'research', dependencies: ['b', 'c'] }),
+      task({ task_id: 'b', title: 'Implement', order: 0 }),
+      task({ task_id: 'c', title: 'Review notes', order: 1, dependencies: ['d'] }),
+      task({ task_id: 'd', title: 'Ship', order: 3 }),
     ]);
 
     expect(forest.map((node) => node.task.task_id)).toEqual(['a']);
@@ -32,10 +32,10 @@ describe('task tree', () => {
     expect(review.children.map((node) => node.task.task_id)).toEqual(['d']);
   });
 
-  it('keeps a cyclic dependency from looping forever', () => {
+  it('keeps a sibling-only pair as separate roots', () => {
     const forest = buildTaskForest([
-      task({ task_id: 'a', title: 'A', order: 0, dependencies: ['b'] }),
-      task({ task_id: 'b', title: 'B', order: 1, dependencies: ['a'] }),
+      task({ task_id: 'a', title: 'A', order: 0, sibling_dependencies: ['b'] }),
+      task({ task_id: 'b', title: 'B', order: 1, sibling_dependencies: ['a'] }),
     ]);
     const count = (nodes: ReturnType<typeof buildTaskForest>): number =>
       nodes.reduce((sum, node) => sum + 1 + count(node.children), 0);
@@ -44,9 +44,9 @@ describe('task tree', () => {
 
   it('reorders a task among its siblings', () => {
     const tasks = [
-      task({ task_id: 'a', title: 'A', order: 0 }),
+      task({ task_id: 'a', title: 'A', order: 0, dependencies: ['c'] }),
       task({ task_id: 'b', title: 'B', order: 1 }),
-      task({ task_id: 'c', title: 'C', order: 2, dependencies: ['a'] }),
+      task({ task_id: 'c', title: 'C', order: 2 }),
     ];
     expect(reorderTaskIds(tasks, 'b', -1)).toEqual(['b', 'a', 'c']);
     expect(reorderTaskIds(tasks, 'c', 1)).toBe('edge');

@@ -79,6 +79,7 @@ describe('taskEditorDirty', () => {
       initial_prompt: 'Go',
       output_type: 'code',
       dependencies: ['t0'],
+      sibling_dependencies: [],
     }, task)).toBe(false);
     expect(taskEditorDirty({
       title: 'Task',
@@ -86,6 +87,7 @@ describe('taskEditorDirty', () => {
       initial_prompt: 'Go',
       output_type: 'code',
       dependencies: ['t0'],
+      sibling_dependencies: [],
     }, task)).toBe(true);
     expect(taskEditorDirty({
       title: 'Task',
@@ -93,6 +95,7 @@ describe('taskEditorDirty', () => {
       initial_prompt: 'Updated',
       output_type: 'code',
       dependencies: ['t0'],
+      sibling_dependencies: [],
     }, task)).toBe(true);
     expect(taskEditorDirty({
       title: 'Task',
@@ -100,6 +103,7 @@ describe('taskEditorDirty', () => {
       initial_prompt: 'Go',
       output_type: 'code',
       dependencies: [],
+      sibling_dependencies: [],
     }, task)).toBe(true);
   });
 
@@ -111,6 +115,7 @@ describe('taskEditorDirty', () => {
       initial_prompt: 'Changed',
       output_type: 'code',
       dependencies: ['t0'],
+      sibling_dependencies: [],
     }, task)).toBe(false);
   });
 });
