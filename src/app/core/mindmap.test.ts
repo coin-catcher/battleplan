@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectTask } from './models';
-import { layoutMindmap } from './mindmap';
+import {
+  cardinalAnchor,
+  layoutMindmap,
+  pickCardinalEdge,
+  pointerToWorld,
+  positionConnectedNode,
+} from './mindmap';
 
 function task(id: string, dependencies: string[], order = 0): ProjectTask {
   return {
@@ -47,6 +53,39 @@ describe('mindmap', () => {
     const after = pair.nodes.find((node) => node.id === 'survey');
     expect(before && after).toBeTruthy();
     expect(Math.hypot(after!.x - before!.x, after!.y - before!.y)).toBeGreaterThan(40);
+  });
+
+  it('places cardinal anchors on project circle and task rectangle', () => {
+    const layout = layoutMindmap('Plan', [task('survey', [])]);
+    const project = layout.nodes.find((node) => node.id === 'project')!;
+    const survey = layout.nodes.find((node) => node.id === 'survey')!;
+    const north = cardinalAnchor(project, 'north');
+    expect(north.y).toBeLessThan(project.y);
+    expect(north.x).toBeCloseTo(project.x, 0);
+    const east = cardinalAnchor(survey, 'east');
+    expect(east.x).toBeGreaterThan(survey.x);
+  });
+
+  it('picks the nearest cardinal edge within threshold', () => {
+    const layout = layoutMindmap('Plan', []);
+    const project = layout.nodes.find((node) => node.id === 'project')!;
+    const northAnchor = cardinalAnchor(project, 'north');
+    expect(pickCardinalEdge(project, northAnchor.x, northAnchor.y, 24)).toBe('north');
+    expect(pickCardinalEdge(project, project.x + 500, project.y, 24)).toBeNull();
+  });
+
+  it('offsets a connected node outward from the source', () => {
+    const layout = layoutMindmap('Plan', []);
+    const project = layout.nodes.find((node) => node.id === 'project')!;
+    const placed = positionConnectedNode(project, 'east', 80);
+    expect(placed.x).toBeGreaterThan(project.x);
+    expect(placed.y).toBeCloseTo(project.y, 0);
+  });
+
+  it('converts pointer coordinates to world space', () => {
+    const rect = { left: 10, top: 10, width: 800, height: 600 } as DOMRect;
+    const world = pointerToWorld(110, 210, rect, 100, 50, 2);
+    expect(world).toEqual({ x: 100, y: 125 });
   });
 
   it('keeps a dragged task in place and rebalances the others', () => {

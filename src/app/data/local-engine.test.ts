@@ -77,6 +77,22 @@ describe('LocalEngine', () => {
     expect(repo.projects.size).toBe(1);
   });
 
+  it('persists map coordinates when creating a task', async () => {
+    const repo = new MemoryRepository();
+    const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const task = await engine.createTask('p1', { map_x: 120, map_y: 340 });
+    expect(task.map_x).toBe(120);
+    expect(task.map_y).toBe(340);
+  });
+
   it('marks a task BLOCKED without calling Cursor', async () => {
     const repo = new MemoryRepository();
     const client = cursor();
