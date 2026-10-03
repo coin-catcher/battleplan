@@ -9,6 +9,7 @@ const baseProject = (): Project => ({
   cursor_chat_link: 'https://cursor.com',
   repo_url: 'https://github.com/org/repo',
   starting_ref: 'main',
+  dar: 'Rules',
   created_at: '2026-01-01T00:00:00.000Z',
   updated_at: '2026-01-01T00:00:00.000Z',
 });
@@ -17,7 +18,9 @@ const baseTask = (): ProjectTask => ({
   task_id: 't1',
   project_id: 'p1',
   title: 'Task',
-  prompt: 'Do work',
+  prompt: 'Legacy',
+  dar: 'Rules',
+  initial_prompt: 'Go',
   output_type: 'code',
   status: 'TODO',
   dependencies: ['t0'],
@@ -33,44 +36,81 @@ describe('projectEditorDirty', () => {
       title: 'Alpha',
       repo_url: 'https://github.com/org/repo',
       starting_ref: 'main',
+      dar: 'Rules',
     }, project)).toBe(false);
   });
 
-  it('detects title and branch changes', () => {
+  it('detects title, branch, dar, and initial prompt changes', () => {
     const project = baseProject();
     expect(projectEditorDirty({
       title: 'Beta',
       repo_url: 'https://github.com/org/repo',
       starting_ref: 'main',
+      dar: 'Rules',
     }, project)).toBe(true);
     expect(projectEditorDirty({
       title: 'Alpha',
       repo_url: 'https://github.com/org/repo',
       starting_ref: 'develop',
+      dar: 'Rules',
+    }, project)).toBe(true);
+    expect(projectEditorDirty({
+      title: 'Alpha',
+      repo_url: 'https://github.com/org/repo',
+      starting_ref: 'main',
+      dar: 'New rules',
+    }, project)).toBe(true);
+    expect(projectEditorDirty({
+      title: 'Alpha',
+      repo_url: 'https://github.com/org/repo',
+      starting_ref: 'main',
+      dar: 'Rules',
+      initial_prompt: 'Updated',
     }, project)).toBe(true);
   });
 });
 
 describe('taskEditorDirty', () => {
-  it('detects prompt and dependency changes', () => {
+  it('detects dar, initial prompt, and dependency changes', () => {
     const task = baseTask();
     expect(taskEditorDirty({
       title: 'Task',
-      prompt: 'Do work',
+      dar: 'Rules',
+      initial_prompt: 'Go',
       output_type: 'code',
       dependencies: ['t0'],
     }, task)).toBe(false);
     expect(taskEditorDirty({
       title: 'Task',
-      prompt: 'Updated',
+      dar: 'Updated',
+      initial_prompt: 'Go',
       output_type: 'code',
       dependencies: ['t0'],
     }, task)).toBe(true);
     expect(taskEditorDirty({
       title: 'Task',
-      prompt: 'Do work',
+      dar: 'Rules',
+      initial_prompt: 'Updated',
+      output_type: 'code',
+      dependencies: ['t0'],
+    }, task)).toBe(true);
+    expect(taskEditorDirty({
+      title: 'Task',
+      dar: 'Rules',
+      initial_prompt: 'Go',
       output_type: 'code',
       dependencies: [],
     }, task)).toBe(true);
+  });
+
+  it('ignores initial prompt after the agent has started', () => {
+    const task = { ...baseTask(), cursor_agent_id: 'agent-1' };
+    expect(taskEditorDirty({
+      title: 'Task',
+      dar: 'Rules',
+      initial_prompt: 'Changed',
+      output_type: 'code',
+      dependencies: ['t0'],
+    }, task)).toBe(false);
   });
 });
