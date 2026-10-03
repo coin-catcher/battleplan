@@ -1,6 +1,12 @@
 import { BrowserWindow, Menu, MenuItemConstructorOptions } from 'electron';
 
-export type MenuAction = 'new-project' | 'import-project' | 'export-project' | 'cursor-api-key';
+export type MenuAction =
+  | 'new-project'
+  | 'import-project'
+  | 'export-project'
+  | 'save'
+  | 'check-for-updates'
+  | 'cursor-api-key';
 
 function sendMenuAction(window: BrowserWindow | null, action: MenuAction): void {
   window?.webContents.send('menu:action', action);
@@ -27,6 +33,20 @@ export function buildApplicationMenu(getWindow: () => BrowserWindow | null): voi
     },
     { type: 'separator' },
     {
+      id: 'save',
+      label: 'Save',
+      accelerator: 'CmdOrCtrl+S',
+      enabled: false,
+      click: () => sendMenuAction(getWindow(), 'save'),
+    },
+    { type: 'separator' },
+    {
+      id: 'check-for-updates',
+      label: 'Check for Updates',
+      click: () => sendMenuAction(getWindow(), 'check-for-updates'),
+    },
+    { type: 'separator' },
+    {
       id: 'cursor-api-key',
       label: 'Cursor API Key',
       click: () => sendMenuAction(getWindow(), 'cursor-api-key'),
@@ -50,5 +70,10 @@ export function buildApplicationMenu(getWindow: () => BrowserWindow | null): voi
 
 export function setExportProjectEnabled(enabled: boolean): void {
   const item = Menu.getApplicationMenu()?.getMenuItemById('export-project');
+  if (item) item.enabled = enabled;
+}
+
+export function setSaveEnabled(enabled: boolean): void {
+  const item = Menu.getApplicationMenu()?.getMenuItemById('save');
   if (item) item.enabled = enabled;
 }

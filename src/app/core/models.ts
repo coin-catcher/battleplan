@@ -1,6 +1,6 @@
 export const TASK_STATUSES = ['TODO', 'DOING', 'REVIEW', 'BLOCKED', 'DONE', 'ABANDONED'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
-export type OutputType = 'code' | 'research';
+export type OutputType = 'code' | 'research' | 'subproject';
 
 export interface Project {
   project_id: string;
@@ -13,6 +13,11 @@ export interface Project {
   starting_ref?: string;
   map_x?: number;
   map_y?: number;
+  /** When set, this project is nested under another project or task. */
+  parent_project_id?: string;
+  parent_task_id?: string;
+  /** Child projects attached directly to this project. */
+  subproject_ids?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -25,6 +30,10 @@ export interface ProjectTask {
   dependencies: string[];
   status: TaskStatus;
   output_type: OutputType;
+  /** Nested project opened by a subproject task. */
+  subproject_id?: string;
+  /** Child projects attached to this task. */
+  subproject_ids?: string[];
   order: number;
   map_x?: number;
   map_y?: number;
@@ -92,5 +101,6 @@ export type Selection =
   | { kind: 'create' }
   | { kind: 'project' }
   | { kind: 'task'; taskId: string }
+  | { kind: 'subproject'; taskId: string }
   | { kind: 'code'; taskId: string }
   | { kind: 'research'; taskId: string };

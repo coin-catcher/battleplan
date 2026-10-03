@@ -174,8 +174,10 @@ export class LocalEngine {
     const existing = await this.repo.listTasks(projectId);
     const title = input.title?.trim() || 'New task';
     const prompt = input.prompt?.trim() || 'Describe what this task should do.';
-    const outputType = input.output_type ?? 'code';
-    if (outputType !== 'code' && outputType !== 'research') throw new Error('output_type must be code or research.');
+    const outputType = input.output_type ?? 'research';
+    if (outputType !== 'code' && outputType !== 'research' && outputType !== 'subproject') {
+      throw new Error('output_type must be code, research, or subproject.');
+    }
     const dependencies = input.depends_on ? [input.depends_on] : [];
     if (dependencies.some((id) => !existing.some((task) => task.task_id === id))) {
       throw new Error('depends_on must be a task in this project.');
@@ -195,6 +197,18 @@ export class LocalEngine {
     };
     if (input.map_x !== undefined) task.map_x = input.map_x;
     if (input.map_y !== undefined) task.map_y = input.map_y;
+    if (outputType === 'subproject') {
+      const nested = await this.createNestedProject(projectId, {
+        title,
+        parentTaskId: dependencies[0],
+      });
+      task.subproject_id = nested.project_id;
+      await this.attachSubproject(
+        projectId,
+        nested.project_id,
+        dependencies[0] ? { kind: 'task', taskId: dependencies[0] } : { kind: 'project' },
+      );
+    }
     assertAcyclic([...existing, task]);
     await this.repo.saveTask(task);
     const parent = dependencies[0] ? existing.find((item) => item.task_id === dependencies[0]) : undefined;
@@ -253,14 +267,24 @@ export class LocalEngine {
       task.prompt = prompt;
     }
     if (patch.output_type !== undefined) {
-      if (patch.output_type !== 'code' && patch.output_type !== 'research') {
-        throw new Error('output_type must be code or research.');
+      if (patch.output_type !== 'code' && patch.output_type !== 'research' && patch.output_type !== 'subproject') {
+        throw new Error('output_type must be code, research, or subproject.');
       }
       if (patch.output_type !== task.output_type) {
-        const other = task.output_type === 'code'
-          ? await this.repo.getResearchOutput(taskId)
-          : await this.repo.getCodeOutput(taskId);
-        if (other) throw new Error('Split mixed outputs into two tasks instead of changing output_type.');
+        if (patch.output_type !== 'subproject' && task.output_type !== 'subproject') {
+          const other = task.output_type === 'code'
+            ? await this.repo.getResearchOutput(taskId)
+            : await this.repo.getCodeOutput(taskId);
+          if (other) throw new Error('Split mixed outputs into two tasks instead of changing output_type.');
+        }
+        if (patch.output_type === 'subproject' && !task.subproject_id) {
+          const nested = await this.createNestedProject(projectId, {
+            title: task.title,
+            parentTaskId: task.task_id,
+          });
+          task.subproject_id = nested.project_id;
+          await this.attachSubproject(projectId, nested.project_id, { kind: 'task', taskId: task.task_id });
+        }
         changes.push(`Output: ${patch.output_type}`);
       }
       task.output_type = patch.output_type;
@@ -420,26 +444,49 @@ export class LocalEngine {
     };
   }
 
+  async convertTask(projectId: string, taskId: string, to: 'code' | 'subproject'): Promise<ProjectTask> {
+    const task = await this.requireTask(projectId, taskId);
+    if (task.output_type !== 'research') {
+      throw new Error('Only research tasks can be converted from the mindmap.');
+    }
+    return this.updateTask(projectId, taskId, { output_type: to });
+  }
+
   async sendTaskMessage(taskId: string, text: string): Promise<ChatMessage> {
     const task = await this.requireTaskById(taskId);
     const feedback = text.trim();
     if (!feedback) throw new Error('message is required.');
-    if (!task.cursor_agent_id) throw new Error('Start the task before sending feedback.');
-    if (task.status === 'REVIEW') {
-      assertCanTransition('REVIEW', 'DOING', false);
-      task.status = 'DOING';
-      task.pending_action = undefined;
+    if (task.output_type === 'subproject' && task.subproject_id) {
+      return this.sendProjectMessage(task.subproject_id, feedback);
     }
-    const run = await this.cursor.createRun(task.cursor_agent_id, {
-      text: feedbackPrompt(task, feedback),
+    if (!task.cursor_agent_id) {
+      task.prompt = feedback;
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
+      await this.transition(task.project_id, taskId, 'DOING', true);
+      const started = await this.requireTaskById(taskId);
+      if (!started.cursor_agent_id) throw new Error('Could not start this task.');
+      const messages = await this.repo.listTaskMessages(taskId);
+      const initial = [...messages].reverse().find((message) => message.role === 'user' && message.run_id);
+      if (initial) return initial;
+    }
+    const active = await this.requireTaskById(taskId);
+    if (!active.cursor_agent_id) throw new Error('Start the task before sending feedback.');
+    if (active.status === 'REVIEW') {
+      assertCanTransition('REVIEW', 'DOING', false);
+      active.status = 'DOING';
+      active.pending_action = undefined;
+    }
+    const run = await this.cursor.createRun(active.cursor_agent_id!, {
+      text: feedbackPrompt(active, feedback),
       mode: 'agent',
     });
-    task.latest_run_id = run.id;
-    task.updated_at = this.now();
-    await this.repo.saveTask(task);
+    active.latest_run_id = run.id;
+    active.updated_at = this.now();
+    await this.repo.saveTask(active);
     return this.record({
       scope: 'task',
-      project_id: task.project_id,
+      project_id: active.project_id,
       task_id: taskId,
       role: 'user',
       content: feedback,
@@ -659,7 +706,7 @@ export class LocalEngine {
 
   private async applyStatus(task: ProjectTask, status: TaskStatus, manual: boolean): Promise<void> {
     assertCanTransition(task.status, status, manual);
-    if (status === 'DOING' && !task.cursor_agent_id) {
+    if (status === 'DOING' && !task.cursor_agent_id && task.output_type !== 'subproject') {
       if (!manual) await this.assertDependenciesDone(task);
       await this.launch(task);
     }
@@ -723,6 +770,50 @@ export class LocalEngine {
       run_id: created.run.id,
       intent: 'chat',
     });
+  }
+
+  private async createNestedProject(
+    rootProjectId: string,
+    input: { title: string; parentTaskId?: string },
+  ): Promise<Project> {
+    const root = await this.requireProject(rootProjectId);
+    const timestamp = this.now();
+    const nested: Project = {
+      project_id: this.newId(),
+      title: input.title,
+      initial_prompt: `Subproject of ${root.title}.`,
+      cursor_chat_link: '',
+      parent_project_id: rootProjectId,
+      parent_task_id: input.parentTaskId,
+      subproject_ids: [],
+      repo_url: root.repo_url,
+      starting_ref: root.starting_ref,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    await this.repo.saveProject(nested);
+    return nested;
+  }
+
+  private async attachSubproject(
+    parentProjectId: string,
+    subprojectId: string,
+    attachTo: { kind: 'project' } | { kind: 'task'; taskId: string },
+  ): Promise<void> {
+    const parentProject = await this.requireProject(parentProjectId);
+    const projectIds = new Set(parentProject.subproject_ids ?? []);
+    projectIds.add(subprojectId);
+    parentProject.subproject_ids = [...projectIds];
+    parentProject.updated_at = this.now();
+    await this.repo.saveProject(parentProject);
+    if (attachTo.kind === 'task') {
+      const parentTask = await this.requireTask(parentProjectId, attachTo.taskId);
+      const taskIds = new Set(parentTask.subproject_ids ?? []);
+      taskIds.add(subprojectId);
+      parentTask.subproject_ids = [...taskIds];
+      parentTask.updated_at = this.now();
+      await this.repo.saveTask(parentTask);
+    }
   }
 
   private taskNote(task: ProjectTask, content: string): ChatMessage {

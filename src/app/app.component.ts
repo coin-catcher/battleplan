@@ -1,4 +1,4 @@
-import { Component, computed, effect, ElementRef, inject, NgZone, OnInit, signal, viewChild } from '@angular/core';
+import { Component, computed, effect, ElementRef, HostListener, inject, NgZone, OnInit, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { ChatArtifact, ChatMessage, OutputType, ProjectTask, TaskStatus } from './core/models';
 import { TASK_STATUSES } from './core/models';
@@ -12,6 +12,7 @@ import {
   cardinalAnchor,
   layoutMindmap,
   pickCardinalEdge,
+  pickNorthWestCorner,
   pointerToWorld,
   type CardinalDirection,
   type MindmapNode,
@@ -39,11 +40,15 @@ export class AppComponent implements OnInit {
   readonly dragPins = signal<Record<string, { x: number; y: number }>>({});
   readonly hoveredConnect = signal<{ nodeId: string; direction: CardinalDirection } | null>(null);
   readonly connectPanel = signal<{ sourceId: string; sourceKind: 'project' | 'task'; direction: CardinalDirection } | null>(null);
+  readonly convertPanel = signal<{ taskId: string } | null>(null);
+  readonly hoveredConvert = signal<string | null>(null);
   readonly editingNodeId = signal<string | null>(null);
   readonly editDraft = signal('');
   readonly mapDraggingNodeId = signal<string | null>(null);
   readonly mapStage = viewChild<ElementRef<HTMLElement>>('mapStage');
   private edgeHoldTimer: ReturnType<typeof setTimeout> | undefined;
+  private convertHoldTimer: ReturnType<typeof setTimeout> | undefined;
+  private edgeLongPressFired = false;
   private mapHoverFrame = 0;
   private readonly connectHoldMs = 250;
   private readonly onMapPointerMoveCapture = (event: PointerEvent): void => {
@@ -118,8 +123,9 @@ export class AppComponent implements OnInit {
       onCleanup(() => window.removeEventListener('pointerdown', this.onMapDismissCapture, true));
     });
     effect(() => {
-      const project = this.store.project();
-      const signature = project ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}` : '';
+      const selection = this.store.selection();
+      const project = selection.kind === 'subproject' ? this.store.editorProject() : this.store.project();
+      const signature = project ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}:${selection.kind}` : '';
       if (signature === this.titleSignature) return;
       this.titleSignature = signature;
       this.title = project?.title ?? '';
@@ -159,8 +165,17 @@ export class AppComponent implements OnInit {
 
     effect(() => {
       if (!this.desktop) return;
+      const selection = this.store.selection();
       const exportEnabled = Boolean(this.store.project());
-      void electronBridge()?.invoke('menu:sync-state', { exportEnabled });
+      const saveEnabled = (selection.kind === 'project' && Boolean(this.title.trim()))
+        || (selection.kind === 'subproject' && Boolean(this.title.trim()))
+        || selection.kind === 'task';
+      void electronBridge()?.invoke('menu:sync-state', { exportEnabled, saveEnabled });
+    });
+    effect((onCleanup) => {
+      if (!this.convertPanel()) return;
+      window.addEventListener('pointerdown', this.onMapDismissCapture, true);
+      onCleanup(() => window.removeEventListener('pointerdown', this.onMapDismissCapture, true));
     });
 
     effect(() => {
@@ -204,6 +219,18 @@ export class AppComponent implements OnInit {
     electronBridge()?.on('menu:action', (action) => {
       this.zone.run(() => this.handleMenuAction(String(action)));
     });
+    electronBridge()?.on('update:status', (payload) => {
+      const info = payload as { upToDate?: boolean; current?: string };
+      if (info.upToDate) this.zone.run(() => this.store.notice.set(`Battleplan ${info.current ?? ''} is up to date.`));
+    });
+  }
+
+  @HostListener('document:keydown', ['$event'])
+  onDocumentKeydown(event: KeyboardEvent): void {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      this.saveCurrent();
+    }
   }
 
   private handleMenuAction(action: string): void {
@@ -217,12 +244,42 @@ export class AppComponent implements OnInit {
       case 'export-project':
         this.exportProject();
         break;
+      case 'save':
+        this.saveCurrent();
+        break;
+      case 'check-for-updates':
+        this.checkForUpdates();
+        break;
       case 'cursor-api-key':
         this.openCursorKey();
         break;
       default:
         break;
     }
+  }
+
+  saveCurrent(): void {
+    const selection = this.store.selection();
+    if (selection.kind === 'project') this.saveProject();
+    else if (selection.kind === 'subproject') this.saveSubproject();
+    else if (selection.kind === 'task') void this.saveTask();
+  }
+
+  checkForUpdates(): void {
+    if (!this.desktop) {
+      this.store.notice.set('Updates are only available in the desktop app.');
+      return;
+    }
+    void electronBridge()?.invoke<{ ok: boolean; upToDate?: boolean; message?: string; current?: string; latest?: string }>('update:check')
+      .then((result) => {
+        if (!result.ok) {
+          this.store.error.set(result.message ?? 'Could not check for updates.');
+          return;
+        }
+        if (result.upToDate) {
+          this.store.notice.set(`Battleplan ${result.current ?? ''} is up to date.`);
+        }
+      });
   }
 
   chooseTheme(event: Event): void {
@@ -323,7 +380,7 @@ export class AppComponent implements OnInit {
   isMapSelected(node: MindmapNode): boolean {
     const selection = this.store.selection();
     if (node.kind === 'project') return selection.kind === 'project';
-    return (selection.kind === 'task' || selection.kind === 'code' || selection.kind === 'research')
+    return (selection.kind === 'task' || selection.kind === 'subproject' || selection.kind === 'code' || selection.kind === 'research')
       && selection.taskId === node.id;
   }
 
@@ -348,6 +405,14 @@ export class AppComponent implements OnInit {
 
   saveProject(): void {
     void this.store.saveProject({
+      title: this.title.trim(),
+      repo_url: this.projectRepo.trim(),
+      starting_ref: this.projectBranch.trim() || 'main',
+    });
+  }
+
+  saveSubproject(): void {
+    void this.store.saveEditorProject({
       title: this.title.trim(),
       repo_url: this.projectRepo.trim(),
       starting_ref: this.projectBranch.trim() || 'main',
@@ -419,7 +484,7 @@ export class AppComponent implements OnInit {
 
   onStagePointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .zoom-controls')) return;
+    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .zoom-controls')) return;
     if (this.connectPanel()) {
       this.dismissConnectPanel();
       return;
@@ -504,7 +569,7 @@ export class AppComponent implements OnInit {
   }
 
   onMapPointerMove(event: PointerEvent): void {
-    if (this.connectPanel() || this.editingNodeId() || this.mapDraggingNodeId()) return;
+    if (this.connectPanel() || this.convertPanel() || this.editingNodeId() || this.mapDraggingNodeId()) return;
     const target = event.target as HTMLElement;
     if (target.closest('.map-connect-panel')) return;
     cancelAnimationFrame(this.mapHoverFrame);
@@ -529,6 +594,17 @@ export class AppComponent implements OnInit {
         }
       }
       this.hoveredConnect.set(match);
+      const selection = this.store.selection();
+      const selected = this.map().nodes.find((item) => {
+        if (selection.kind === 'project') return item.id === 'project';
+        if ('taskId' in selection) return item.id === selection.taskId;
+        return false;
+      });
+      if (selected?.shape === 'research') {
+        this.hoveredConvert.set(pickNorthWestCorner(selected, world.x, world.y, threshold) ? selected.id : null);
+      } else {
+        this.hoveredConvert.set(null);
+      }
     });
   }
 
@@ -536,7 +612,9 @@ export class AppComponent implements OnInit {
     event.stopPropagation();
     event.preventDefault();
     this.clearEdgeHoldTimer();
+    this.edgeLongPressFired = false;
     this.edgeHoldTimer = setTimeout(() => {
+      this.edgeLongPressFired = true;
       this.connectPanel.set({
         sourceId: node.id,
         sourceKind: node.kind,
@@ -544,19 +622,69 @@ export class AppComponent implements OnInit {
       });
       this.hoveredConnect.set({ nodeId: node.id, direction });
     }, this.connectHoldMs);
-    const cancel = (): void => {
+    const onUp = (): void => {
       this.clearEdgeHoldTimer();
-      window.removeEventListener('pointerup', cancel);
-      window.removeEventListener('pointercancel', cancel);
+      if (!this.edgeLongPressFired && !this.connectPanel()) {
+        void this.quickAddResearchTask(node, direction);
+      }
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
     };
-    window.addEventListener('pointerup', cancel);
-    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+
+  onConvertPointerDown(node: MindmapNode, event: PointerEvent): void {
+    event.stopPropagation();
+    event.preventDefault();
+    this.clearConvertHoldTimer();
+    this.convertHoldTimer = setTimeout(() => {
+      this.convertPanel.set({ taskId: node.id });
+    }, this.connectHoldMs);
+    const onUp = (): void => {
+      this.clearConvertHoldTimer();
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+
+  convertHandlePoint(nodeId: string): { x: number; y: number } {
+    const node = this.map().nodes.find((item) => item.id === nodeId);
+    if (!node) return { x: 0, y: 0 };
+    return { x: node.x - node.width / 2, y: node.y - node.height / 2 };
+  }
+
+  showConvertHandle(node: MindmapNode): boolean {
+    if (node.shape !== 'research') return false;
+    if (this.convertPanel()?.taskId === node.id) return true;
+    return this.hoveredConvert() === node.id;
+  }
+
+  async confirmConvertTask(to: 'code' | 'subproject', event: Event): Promise<void> {
+    event.stopPropagation();
+    const panel = this.convertPanel();
+    if (!panel) return;
+    this.convertPanel.set(null);
+    await this.store.convertTask(panel.taskId, to);
+  }
+
+  private async quickAddResearchTask(node: MindmapNode, direction: CardinalDirection): Promise<void> {
+    const taskId = await this.store.addConnectedTask({
+      sourceId: node.id,
+      sourceKind: node.kind,
+      direction,
+      output_type: 'research',
+    });
+    if (taskId) this.startInlineEdit(taskId, 'New research task');
   }
 
   onMapDismissPointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-connect-panel, .map-edge-arrow')) return;
+    if (target.closest('.map-connect-panel, .map-convert-panel, .map-edge-arrow, .map-convert-handle')) return;
     this.dismissConnectPanel();
+    this.convertPanel.set(null);
   }
 
   dismissConnectPanel(): void {
@@ -564,17 +692,23 @@ export class AppComponent implements OnInit {
     this.connectPanel.set(null);
   }
 
-  async confirmAddConnectedTask(event: Event): Promise<void> {
+  async confirmAddConnectedTask(outputType: 'code' | 'research' | 'subproject', event: Event): Promise<void> {
     event.stopPropagation();
     const panel = this.connectPanel();
     if (!panel) return;
     this.dismissConnectPanel();
+    const labels: Record<typeof outputType, string> = {
+      code: 'New code task',
+      research: 'New research task',
+      subproject: 'New subproject',
+    };
     const taskId = await this.store.addConnectedTask({
       sourceId: panel.sourceId,
       sourceKind: panel.sourceKind,
       direction: panel.direction,
+      output_type: outputType,
     });
-    if (taskId) this.startInlineEdit(taskId, 'New task');
+    if (taskId) this.startInlineEdit(taskId, labels[outputType]);
   }
 
   onNodeDblClick(node: MindmapNode, event: MouseEvent): void {
@@ -626,6 +760,11 @@ export class AppComponent implements OnInit {
     this.edgeHoldTimer = undefined;
   }
 
+  private clearConvertHoldTimer(): void {
+    if (this.convertHoldTimer) clearTimeout(this.convertHoldTimer);
+    this.convertHoldTimer = undefined;
+  }
+
   openCode(taskId: string): void {
     void this.store.openOutput(taskId, 'code');
   }
@@ -670,7 +809,7 @@ export class AppComponent implements OnInit {
     const message = this.chatDraft.trim();
     if (!message) return;
     const selection = this.store.selection();
-    if (selection.kind === 'task') await this.store.sendTaskMessage(message);
+    if (selection.kind === 'task' || selection.kind === 'subproject') await this.store.sendTaskMessage(message);
     else await this.store.sendProjectMessage(message);
     if (!this.store.error()) this.chatDraft = '';
   }
