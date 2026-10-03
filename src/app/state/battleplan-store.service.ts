@@ -13,7 +13,7 @@ import type {
   TaskStatus,
 } from '../core/models';
 import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
-import { parseGeneratedTaskList } from '../core/parse-tasks';
+import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
 
 const POLL_INTERVAL_MS = 3000;
@@ -189,13 +189,21 @@ export class BattleplanStore {
     if (!runId || this.error()) return;
     if (taskId) await this.watchTask(taskId, runId);
     else await this.watchProject(projectId, runId);
+    await this.run(async () => {
+      if (taskId) {
+        const refreshed = await this.api.listTaskMessages(taskId);
+        this.applyTaskConversation(refreshed);
+      } else {
+        this.applyConversation(await this.api.listProjectMessages(projectId));
+      }
+    });
     const reply = this.messages().find((message) => message.run_id === runId && message.role === 'assistant');
     if (!reply) {
       this.error.set('The Cursor agent has not replied yet.');
       return;
     }
     await this.run(async () => {
-      const drafts = parseGeneratedTaskList(reply.content);
+      const drafts = parseGeneratedTaskListFromSources(reply.content, this.artifacts());
       await this.api.createTasks(projectId, drafts);
       await this.reloadTasks();
       const note = `Created ${drafts.length} task${drafts.length === 1 ? '' : 's'} from this conversation.`;

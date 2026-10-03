@@ -47,6 +47,7 @@ export interface CursorClient {
   createRun(agentId: string, input: { text: string; mode?: 'agent' | 'plan' }): Promise<CursorRun>;
   listRuns(agentId: string): Promise<CursorRun[]>;
   getRun(agentId: string, runId: string): Promise<CursorRun>;
+  streamRunText(agentId: string, runId: string): Promise<string | undefined>;
   listArtifacts(agentId: string): Promise<CursorArtifact[]>;
   downloadArtifact(agentId: string, path: string): Promise<ArtifactDownload>;
 }
@@ -142,6 +143,46 @@ export class BrowserCursor implements CursorClient {
     ));
   }
 
+  async streamRunText(agentId: string, runId: string): Promise<string | undefined> {
+    const apiKey = this.apiKey().trim();
+    if (!apiKey) return undefined;
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://api.cursor.com/v1/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(runId)}/stream`,
+        {
+          headers: {
+            authorization: `Basic ${btoa(`${apiKey}:`)}`,
+            accept: 'text/event-stream',
+          },
+        },
+      );
+    } catch {
+      return undefined;
+    }
+    if (!response.ok) return undefined;
+    const body = await response.text();
+    let assistant = '';
+    let resultText = '';
+    for (const chunk of body.split('\n\n')) {
+      const lines = chunk.split('\n');
+      let event = '';
+      for (const line of lines) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        if (!line.startsWith('data:')) continue;
+        try {
+          const data = JSON.parse(line.slice(5).trim()) as Record<string, unknown>;
+          if (event === 'assistant' && typeof data['text'] === 'string') assistant += data['text'];
+          if (event === 'result' && typeof data['text'] === 'string') resultText = data['text'];
+        } catch {
+          continue;
+        }
+      }
+    }
+    const combined = resultText.trim() || assistant.trim();
+    return combined || undefined;
+  }
+
   async listArtifacts(agentId: string): Promise<CursorArtifact[]> {
     const payload = await this.request<Record<string, unknown>>(
       'GET',
@@ -155,7 +196,7 @@ export class BrowserCursor implements CursorClient {
         sizeBytes: Number(record['sizeBytes'] ?? 0),
         updatedAt: String(record['updatedAt'] ?? ''),
       };
-    }).filter((item) => item.path.startsWith('artifacts/'));
+    }).filter((item) => item.path.length > 0);
   }
 
   async downloadArtifact(agentId: string, path: string): Promise<ArtifactDownload> {
