@@ -5,7 +5,7 @@ export interface TaskNode {
   children: TaskNode[];
 }
 
-export function buildTaskForest(tasks: ProjectTask[]): TaskNode[] {
+export function buildTaskParentMap(tasks: ProjectTask[]): Map<string, string | null> {
   const byId = new Map(tasks.map((task) => [task.task_id, task]));
   const depth = new Map<string, number>();
   const visiting = new Set<string>();
@@ -51,6 +51,13 @@ export function buildTaskForest(tasks: ProjectTask[]): TaskNode[] {
       current = parentOf.get(current) ?? null;
     }
   }
+
+  return parentOf;
+}
+
+export function buildTaskForest(tasks: ProjectTask[]): TaskNode[] {
+  const byId = new Map(tasks.map((task) => [task.task_id, task]));
+  const parentOf = buildTaskParentMap(tasks);
 
   const nodes = new Map<string, TaskNode>(tasks.map((task) => [task.task_id, { task, children: [] }]));
   const roots: TaskNode[] = [];
