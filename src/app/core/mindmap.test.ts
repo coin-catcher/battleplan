@@ -32,18 +32,28 @@ describe('mindmap', () => {
     expect(layout.nodes.find((node) => node.id === 'project')?.kind).toBe('project');
   });
 
-  it('draws a dashed arrow from a dependency to the task that depends on it', () => {
-    const layout = layoutMindmap('Plan', [task('survey', []), task('build', ['survey'], 1)]);
-    const dashed = layout.edges.filter((edge) => edge.dashed);
-    expect(dashed).toEqual([expect.objectContaining({ from: 'survey', to: 'build', dashed: true })]);
-    expect(layout.edges.some((edge) => edge.to === 'build' && !edge.dashed)).toBe(false);
+  it('draws a solid arrow from parent to child when the parent lists the child', () => {
+    const survey = task('survey', ['build']);
+    const build = task('build', []);
+    const layout = layoutMindmap('Plan', [survey, build]);
+    const taskEdges = layout.edges.filter((edge) => !edge.dashed && edge.from !== 'project');
+    expect(taskEdges).toEqual([expect.objectContaining({ from: 'survey', to: 'build', dashed: false, bidirectional: false })]);
     const project = layout.nodes.find((node) => node.id === 'project');
-    const survey = layout.nodes.find((node) => node.id === 'survey');
-    const build = layout.nodes.find((node) => node.id === 'build');
-    expect(project && survey && build).toBeTruthy();
-    const surveyDistance = Math.hypot(survey!.x - project!.x, survey!.y - project!.y);
-    const buildDistance = Math.hypot(build!.x - project!.x, build!.y - project!.y);
+    const surveyNode = layout.nodes.find((node) => node.id === 'survey');
+    const buildNode = layout.nodes.find((node) => node.id === 'build');
+    expect(project && surveyNode && buildNode).toBeTruthy();
+    const surveyDistance = Math.hypot(surveyNode!.x - project!.x, surveyNode!.y - project!.y);
+    const buildDistance = Math.hypot(buildNode!.x - project!.x, buildNode!.y - project!.y);
     expect(buildDistance).toBeGreaterThan(surveyDistance);
+  });
+
+  it('draws a dashed bidirectional arrow for union dependencies', () => {
+    const left = task('alpha', ['beta']);
+    const right = task('beta', ['alpha'], 1);
+    const layout = layoutMindmap('Plan', [left, right]);
+    const union = layout.edges.filter((edge) => edge.bidirectional);
+    expect(union).toHaveLength(1);
+    expect(union[0]).toMatchObject({ from: 'alpha', to: 'beta', dashed: true, bidirectional: true });
   });
 
   it('moves an unpinned root when another root is added', () => {

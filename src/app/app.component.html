@@ -52,6 +52,7 @@
                 [attr.x2]="edge.x2"
                 [attr.y2]="edge.y2"
                 [class.dashed]="edge.dashed"
+                [attr.marker-start]="edge.bidirectional ? 'url(#arrow-dashed)' : null"
                 [attr.marker-end]="edge.dashed ? 'url(#arrow-dashed)' : 'url(#arrow-solid)'"
               />
             }
@@ -351,7 +352,8 @@
               </div>
             }
             <fieldset class="deps">
-              <legend>Dependencies</legend>
+              <legend>Links and dependencies</legend>
+              <p class="hint">Check tasks this one links to. One-way links draw a solid arrow from this task to the other. Check both tasks to create a union (dashed, two-way) link.</p>
               @for (other of otherTasks(); track other.task_id) {
                 <label>
                   <input
@@ -362,7 +364,7 @@
                   {{ other.title }}
                 </label>
               } @empty {
-                <p>No other tasks to depend on.</p>
+                <p>No other tasks to link.</p>
               }
             </fieldset>
             <div class="transcript" aria-live="polite">

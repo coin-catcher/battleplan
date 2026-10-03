@@ -224,6 +224,90 @@ describe('LocalEngine', () => {
       depends_on: [],
     }]);
     expect(tasks.map((task) => task.title)).toEqual(['Survey vendors (research)', 'Survey vendors (code)']);
-    expect(tasks[1].dependencies).toEqual([tasks[0].task_id]);
+    expect(tasks[0].dependencies).toEqual([tasks[1].task_id]);
+    expect(tasks[1].dependencies).toEqual([]);
+  });
+
+  it('links a connected task on the source task instead of the new task', async () => {
+    const repo = new MemoryRepository();
+    let tick = 0;
+    const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => `task-${tick++}`);
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const parent = await engine.createTask('p1', { title: 'Parent' });
+    const child = await engine.createTask('p1', { title: 'Child', depends_on: parent.task_id });
+    const savedParent = await repo.getTask(parent.task_id);
+    const savedChild = await repo.getTask(child.task_id);
+    expect(savedParent?.dependencies).toEqual([child.task_id]);
+    expect(savedChild?.dependencies).toEqual([]);
+  });
+
+  it('allows a child task to execute while its parent is still TODO', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    let tick = 0;
+    const engine = new LocalEngine(repo, client, () => '2026-10-02T00:00:00.000Z', () => `task-${tick++}`);
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      starting_ref: 'main',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const parent = await engine.createTask('p1', { title: 'Parent', output_type: 'code' });
+    const child = await engine.createTask('p1', {
+      title: 'Child',
+      output_type: 'code',
+      depends_on: parent.task_id,
+      initial_prompt: 'Go',
+    });
+    expect((await repo.getTask(parent.task_id))?.dependencies).toContain(child.task_id);
+    await engine.executeTask(child.task_id);
+    expect(client.prompts.length).toBe(1);
+  });
+
+  it('abandons child tasks when a parent is abandoned', async () => {
+    const repo = new MemoryRepository();
+    let tick = 0;
+    const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => `task-${tick++}`);
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const parent = await engine.createTask('p1', { title: 'Parent' });
+    const child = await engine.createTask('p1', { title: 'Child', depends_on: parent.task_id });
+    await engine.transition('p1', parent.task_id, 'ABANDONED', true);
+    const savedChild = await repo.getTask(child.task_id);
+    expect(savedChild?.status).toBe('ABANDONED');
+  });
+
+  it('blocks execution for abandoned tasks', async () => {
+    const repo = new MemoryRepository();
+    const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const task = await engine.createTask('p1', { title: 'Work', output_type: 'code', initial_prompt: 'Go' });
+    await engine.transition('p1', task.task_id, 'ABANDONED', true);
+    await expect(engine.executeTask(task.task_id)).rejects.toThrow(/abandoned/i);
   });
 });

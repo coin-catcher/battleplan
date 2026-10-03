@@ -14,6 +14,12 @@ import type { CursorClient, CursorRun } from './cursor-browser';
 import { normalizeRepoUrl } from './cursor-browser';
 import type { BattleplanRepository } from './repository';
 import { collectProjectDarSections, collectTaskDarSections, joinDarSections } from '../core/dar';
+import {
+  assertAcyclicNormalLinks,
+  migrateLegacyDependencies,
+  normalChildIds,
+  unionPartnerIds,
+} from '../core/dependencies';
 import { defaultDarForOutputType, taskDar, taskInitialPrompt } from '../core/task-fields';
 
 const TERMINAL_RUN = new Set(['FINISHED', 'ERROR', 'CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED']);
@@ -107,6 +113,12 @@ export class LocalEngine {
 
   async executeProjectChat(projectId: string): Promise<{ message: ChatMessage; project: Project }> {
     const project = await this.requireProject(projectId);
+    if (project.parent_task_id) {
+      const parentTask = await this.repo.getTask(project.parent_task_id);
+      if (parentTask?.status === 'ABANDONED') {
+        throw new Error('This subproject is abandoned and cannot be executed.');
+      }
+    }
     if (project.cursor_agent_id) throw new Error('This project already has a Cursor agent.');
     const initial = project.initial_prompt?.trim();
     if (!initial) throw new Error('Initial prompt is required.');
@@ -206,7 +218,11 @@ export class LocalEngine {
 
   async listTasks(projectId: string): Promise<ProjectTask[]> {
     await this.requireProject(projectId);
-    return this.repo.listTasks(projectId);
+    const tasks = await this.repo.listTasks(projectId);
+    if (migrateLegacyDependencies(tasks)) {
+      await this.repo.saveTasks(tasks);
+    }
+    return tasks;
   }
 
   async createTask(projectId: string, input: {
@@ -227,8 +243,8 @@ export class LocalEngine {
     if (outputType !== 'code' && outputType !== 'research' && outputType !== 'subproject') {
       throw new Error('output_type must be code, research, or subproject.');
     }
-    const dependencies = input.depends_on ? [input.depends_on] : [];
-    if (dependencies.some((id) => !existing.some((task) => task.task_id === id))) {
+    const parentId = input.depends_on?.trim();
+    if (parentId && !existing.some((task) => task.task_id === parentId)) {
       throw new Error('depends_on must be a task in this project.');
     }
     const timestamp = this.now();
@@ -239,7 +255,7 @@ export class LocalEngine {
       prompt: dar,
       dar: dar || undefined,
       initial_prompt: initialPrompt || undefined,
-      dependencies,
+      dependencies: [],
       status: 'TODO',
       output_type: outputType,
       order: existing.length,
@@ -251,18 +267,29 @@ export class LocalEngine {
     if (outputType === 'subproject') {
       const nested = await this.createNestedProject(projectId, {
         title,
-        parentTaskId: dependencies[0],
+        parentTaskId: parentId,
       });
       task.subproject_id = nested.project_id;
       await this.attachSubproject(
         projectId,
         nested.project_id,
-        dependencies[0] ? { kind: 'task', taskId: dependencies[0] } : { kind: 'project' },
+        parentId ? { kind: 'task', taskId: parentId } : { kind: 'project' },
       );
     }
-    assertAcyclic([...existing, task]);
+    if (parentId) {
+      const parent = existing.find((item) => item.task_id === parentId);
+      if (parent) {
+        parent.dependencies = [...new Set([...parent.dependencies, task.task_id])];
+        parent.updated_at = timestamp;
+      }
+    }
+    assertAcyclicNormalLinks([...existing, task]);
+    if (parentId) {
+      const parent = existing.find((item) => item.task_id === parentId);
+      if (parent) await this.repo.saveTask(parent);
+    }
     await this.repo.saveTask(task);
-    const parent = dependencies[0] ? existing.find((item) => item.task_id === dependencies[0]) : undefined;
+    const parent = parentId ? existing.find((item) => item.task_id === parentId) : undefined;
     await this.repo.saveMessage(this.taskNote(
       task,
       parent ? `Created task connected to "${parent.title}".` : 'Created task connected to the project.',
@@ -294,8 +321,8 @@ export class LocalEngine {
     };
     });
     bindDependencies(existing, created, normalized);
-    assertAcyclic([...existing, ...created]);
-    await this.repo.saveTasks(created);
+    assertAcyclicNormalLinks([...existing, ...created]);
+    await this.repo.saveTasks([...existing, ...created]);
     return created;
   }
 
@@ -358,12 +385,15 @@ export class LocalEngine {
       if (nextDependencies.join(',') !== task.dependencies.join(',')) changes.push('Dependencies updated.');
       task.dependencies = nextDependencies;
       const tasks = (await this.repo.listTasks(projectId)).map((item) => item.task_id === task.task_id ? task : item);
-      assertAcyclic(tasks);
+      assertAcyclicNormalLinks(tasks);
     }
     if (patch.status !== undefined) {
       if (!isStatus(patch.status)) throw new Error('Unknown task status.');
       if (patch.status !== task.status) changes.push(`Status: ${patch.status}`);
       await this.applyStatus(task, patch.status, Boolean(patch.manual));
+      if (patch.status === 'ABANDONED') {
+        await this.cascadeAbandonChildren(projectId, task);
+      }
     }
     if (patch.map_x !== undefined) task.map_x = patch.map_x;
     if (patch.map_y !== undefined) task.map_y = patch.map_y;
@@ -524,6 +554,9 @@ export class LocalEngine {
 
   async executeTask(taskId: string): Promise<ChatMessage> {
     const task = await this.requireTaskById(taskId);
+    if (task.status === 'ABANDONED') {
+      throw new Error('An abandoned task cannot be executed.');
+    }
     if (task.output_type === 'subproject') {
       throw new Error('Open the subproject and use Execute there.');
     }
@@ -795,10 +828,10 @@ export class LocalEngine {
   private async assertDependenciesDone(task: ProjectTask): Promise<void> {
     const tasks = await this.repo.listTasks(task.project_id);
     const byId = new Map(tasks.map((item) => [item.task_id, item]));
-    for (const dependency of task.dependencies) {
-      const other = byId.get(dependency);
+    for (const partnerId of unionPartnerIds(task, byId)) {
+      const other = byId.get(partnerId);
       if (!other || other.status !== 'DONE') {
-        throw new Error('Dependencies must be DONE before this task can start.');
+        throw new Error('Union dependencies must be DONE before this task can start.');
       }
     }
   }
@@ -823,8 +856,9 @@ export class LocalEngine {
       lines.push('Implement the task in code and open a pull request.');
     }
     lines.push(`Task title: ${task.title}`);
-    if (task.dependencies.length > 0) {
-      lines.push(`This task depends on these completed task ids: ${task.dependencies.join(', ')}.`);
+    const unionIds = unionPartnerIds(task, new Map((await this.repo.listTasks(task.project_id)).map((item) => [item.task_id, item])));
+    if (unionIds.length > 0) {
+      lines.push(`This task depends on these completed task ids: ${unionIds.join(', ')}.`);
     }
     const dar = joinDarSections(await collectTaskDarSections(task, this.darLookup()));
     const firstChat = joinDarSections([dar, userMessage]);
@@ -905,6 +939,21 @@ export class LocalEngine {
     }
   }
 
+  private async cascadeAbandonChildren(projectId: string, parent: ProjectTask): Promise<void> {
+    const tasks = await this.repo.listTasks(projectId);
+    const byId = new Map(tasks.map((item) => [item.task_id, item]));
+    for (const childId of normalChildIds(parent, byId)) {
+      const child = byId.get(childId);
+      if (!child || child.status === 'ABANDONED') continue;
+      child.status = 'ABANDONED';
+      child.pending_action = undefined;
+      child.updated_at = this.now();
+      await this.repo.saveTask(child);
+      await this.repo.saveMessage(this.taskNote(child, 'Status: ABANDONED (parent task abandoned).'));
+      await this.cascadeAbandonChildren(projectId, child);
+    }
+  }
+
   private taskNote(task: ProjectTask, content: string): ChatMessage {
     return {
       message_id: this.newId(),
@@ -970,37 +1019,6 @@ function assertCanTransition(from: TaskStatus, to: TaskStatus, manual: boolean):
   }
 }
 
-function assertAcyclic(tasks: { task_id: string; dependencies: string[] }[]): void {
-  const ids = new Set(tasks.map((task) => task.task_id));
-  const indegree = new Map<string, number>();
-  const outgoing = new Map<string, string[]>();
-  for (const task of tasks) {
-    indegree.set(task.task_id, indegree.get(task.task_id) ?? 0);
-    outgoing.set(task.task_id, []);
-  }
-  for (const task of tasks) {
-    for (const dependency of task.dependencies) {
-      if (dependency === task.task_id) throw new Error('A task cannot depend on itself.');
-      if (!ids.has(dependency)) throw new Error(`Dependency ${dependency} is not a task in this project.`);
-      outgoing.get(dependency)?.push(task.task_id);
-      indegree.set(task.task_id, (indegree.get(task.task_id) ?? 0) + 1);
-    }
-  }
-  const queue = [...indegree.entries()].filter(([, degree]) => degree === 0).map(([id]) => id);
-  let seen = 0;
-  while (queue.length > 0) {
-    const id = queue.shift();
-    if (!id) break;
-    seen += 1;
-    for (const next of outgoing.get(id) ?? []) {
-      const degree = (indegree.get(next) ?? 1) - 1;
-      indegree.set(next, degree);
-      if (degree === 0) queue.push(next);
-    }
-  }
-  if (seen !== tasks.length) throw new Error('Task dependencies contain a cycle.');
-}
-
 function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
   if (raw.length === 0) throw new Error('The task list is empty.');
   const normalized: NormalizedDraft[] = [];
@@ -1056,13 +1074,19 @@ function bindDependencies(existing: ProjectTask[], created: ProjectTask[], draft
     ids.push(task.task_id);
     titles.set(task.title, ids);
   }
+  const byId = new Map([...existing, ...created].map((task) => [task.task_id, task]));
+  created.forEach((task) => {
+    task.dependencies = [];
+  });
   created.forEach((task, index) => {
-    task.dependencies = drafts[index].depends_on.map((title) => {
+    for (const title of drafts[index].depends_on) {
       const matches = titles.get(title) ?? [];
       if (matches.length === 0) throw new Error(`Unknown dependency "${title}".`);
       if (matches.length > 1) throw new Error(`Dependency "${title}" matches more than one task.`);
-      return matches[0];
-    });
+      const parent = byId.get(matches[0]);
+      if (!parent) throw new Error(`Unknown dependency "${title}".`);
+      parent.dependencies = [...new Set([...parent.dependencies, task.task_id])];
+    }
   });
 }
 
