@@ -77,6 +77,7 @@ export class BattleplanStore {
   });
 
   private watchGeneration = 0;
+  private editorLoadGeneration = 0;
   private watchTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly tabSnapshots = new Map<string, ProjectTabSnapshot>();
 
@@ -126,6 +127,7 @@ export class BattleplanStore {
     this.openTabs.update((tabs) => tabs.includes(projectId) ? tabs : [...tabs, projectId]);
     const cached = this.tabSnapshots.get(projectId);
     if (cached) {
+      this.cancelEditorLoading();
       this.stopWatch();
       this.projectId.set(projectId);
       await this.preferences.setCurrentProjectId(projectId);
@@ -185,6 +187,7 @@ export class BattleplanStore {
   }
 
   showCreate(): void {
+    this.cancelEditorLoading();
     this.stopWatch();
     this.error.set(null);
     this.selection.set({ kind: 'create' });
@@ -247,6 +250,7 @@ export class BattleplanStore {
   async deleteProject(): Promise<void> {
     const project = this.project();
     if (!project) return;
+    this.cancelEditorLoading();
     this.stopWatch();
     await this.run(async () => {
       await this.api.deleteProject(project.project_id);
@@ -916,12 +920,20 @@ export class BattleplanStore {
     }
   }
 
+  private cancelEditorLoading(): void {
+    this.editorLoadGeneration++;
+    this.editorLoading.set(false);
+  }
+
   private async withEditorLoading(work: () => Promise<void>): Promise<void> {
+    const generation = ++this.editorLoadGeneration;
     this.editorLoading.set(true);
     try {
       await work();
     } finally {
-      this.editorLoading.set(false);
+      if (generation === this.editorLoadGeneration) {
+        this.editorLoading.set(false);
+      }
     }
   }
 }
