@@ -1,6 +1,7 @@
 import type {
   ChatArtifact,
   ChatMessage,
+  PendingChange,
   Project,
   ProjectTask,
   TaskCodeOutput,
@@ -19,6 +20,7 @@ export interface ProjectDocument {
   project: Project;
   messages: ChatMessage[];
   artifacts: StoredArtifact[];
+  pending_changes?: PendingChange[];
 }
 
 export interface TaskDocument {

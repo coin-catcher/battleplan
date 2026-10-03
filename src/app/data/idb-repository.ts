@@ -197,6 +197,14 @@ export class IdbRepository implements BattleplanRepository {
     await this.put('artifacts', record);
   }
 
+  async listPendingChanges(_projectId: string): Promise<import('../core/models').PendingChange[]> {
+    return [];
+  }
+
+  async savePendingChanges(_projectId: string, _changes: import('../core/models').PendingChange[]): Promise<void> {
+    return;
+  }
+
   private async put(store: string, value: unknown): Promise<void> {
     const db = await this.open();
     const transaction = db.transaction(store, 'readwrite');

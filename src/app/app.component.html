@@ -1,3 +1,18 @@
+@if (store.openTabs().length > 0) {
+  <div class="project-tabs" role="tablist" aria-label="Open projects">
+    @for (projectId of store.openTabs(); track projectId) {
+      <button
+        type="button"
+        role="tab"
+        class="project-tab"
+        [class.active]="store.projectId() === projectId"
+        [attr.aria-selected]="store.projectId() === projectId"
+        (click)="activateProjectTab(projectId)"
+      >{{ projectTabTitle(projectId) }}</button>
+    }
+  </div>
+}
+
 <div class="shell" [style.--pane-width.px]="paneWidth()">
   <aside class="sidebar">
     <div class="brand">
@@ -8,26 +23,36 @@
       </div>
     </div>
 
-    <label class="field">
-      <span>Color scheme</span>
-      <select [value]="themeId()" (change)="chooseTheme($event)" aria-label="Color scheme">
-        @for (theme of themes; track theme.id) {
-          <option [value]="theme.id">{{ theme.label }}</option>
-        }
-      </select>
-    </label>
-
-    <label class="field">
-      <span>Project</span>
-      <select [value]="store.projectId() ?? ''" (change)="onProjectChange($event)">
-        <option value="" disabled>Select a project</option>
-        @for (project of store.rootProjects(); track project.project_id) {
-          <option [value]="project.project_id">{{ project.title }}</option>
-        }
-      </select>
-    </label>
-
     @if (store.project()) {
+      <section class="pending-changes">
+        <header class="pending-changes-head">
+          <h2>Pending Changes</h2>
+          <button type="button" class="accent" [disabled]="store.busy()" (click)="releasePendingChanges()">Release Changes</button>
+        </header>
+        <div class="pending-changes-table-wrap">
+          <table class="pending-changes-table">
+            <thead>
+              <tr>
+                <th scope="col">Task</th>
+                <th scope="col">Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of store.pendingChanges(); track row.change_id) {
+                <tr>
+                  <td>{{ row.task_title }}</td>
+                  <td>{{ row.summary }}</td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td colspan="2" class="empty">No changes waiting for main.</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <div class="map-frame">
         <div class="zoom-controls">
           <button type="button" (click)="zoomBy(1.15)" aria-label="Zoom in">+</button>
@@ -128,9 +153,9 @@
               [style.top.px]="connectArrowPoint(panel.sourceId, panel.direction).y + 28"
               (pointerdown)="$event.stopPropagation()"
             >
-              <button type="button" class="primary" (click)="confirmAddConnectedTask('code', $event)">Add Code task</button>
-              <button type="button" class="ghost" (click)="confirmAddConnectedTask('research', $event)">Add Research task</button>
-              <button type="button" class="ghost" (click)="confirmAddConnectedTask('subproject', $event)">Add Subproject task</button>
+              <button type="button" class="map-panel-option primary" (click)="confirmAddConnectedTask('code', $event)">Add Code task</button>
+              <button type="button" class="map-panel-option ghost" (click)="confirmAddConnectedTask('research', $event)">Add Research task</button>
+              <button type="button" class="map-panel-option ghost" (click)="confirmAddConnectedTask('subproject', $event)">Add Subproject task</button>
             </div>
           }
           @if (convertPanel(); as convert) {
@@ -140,8 +165,8 @@
               [style.top.px]="convertHandlePoint(convert.taskId).y - 36"
               (pointerdown)="$event.stopPropagation()"
             >
-              <button type="button" class="primary" (click)="confirmConvertTask('code', $event)">Convert to Code task</button>
-              <button type="button" class="ghost" (click)="confirmConvertTask('subproject', $event)">Convert to Subproject task</button>
+              <button type="button" class="map-panel-option primary" (click)="confirmConvertTask('code', $event)">Convert to Code task</button>
+              <button type="button" class="map-panel-option ghost" (click)="confirmConvertTask('subproject', $event)">Convert to Subproject task</button>
             </div>
           }
             </div>

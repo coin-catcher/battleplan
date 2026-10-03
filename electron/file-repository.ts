@@ -3,6 +3,7 @@ import path from 'node:path';
 import type {
   ChatArtifact,
   ChatMessage,
+  PendingChange,
   Project,
   ProjectTask,
   TaskCodeOutput,
@@ -129,6 +130,16 @@ export class FileRepository implements BattleplanRepository {
   async listProjectMessages(projectId: string): Promise<ChatMessage[]> {
     const doc = await this.readProjectDocument(projectId);
     return (doc?.messages ?? []).filter((message) => message.scope === 'project').sort(byCreated);
+  }
+
+  async listPendingChanges(projectId: string): Promise<PendingChange[]> {
+    const doc = await this.readProjectDocument(projectId);
+    return doc?.pending_changes ?? [];
+  }
+
+  async savePendingChanges(projectId: string, changes: PendingChange[]): Promise<void> {
+    const doc = await this.requireProjectDocument(projectId);
+    await this.writeProjectDocument(projectId, { ...doc, pending_changes: changes });
   }
 
   async listTaskMessages(taskId: string): Promise<ChatMessage[]> {

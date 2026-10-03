@@ -2,6 +2,16 @@ export const TASK_STATUSES = ['TODO', 'DOING', 'REVIEW', 'BLOCKED', 'DONE', 'ABA
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type OutputType = 'code' | 'research' | 'subproject';
 
+export interface PendingChange {
+  change_id: string;
+  task_id: string;
+  task_title: string;
+  summary: string;
+  pr_link?: string;
+  merged_to_develop_at?: string;
+  merged_to_main_at?: string;
+}
+
 export interface Project {
   project_id: string;
   title: string;

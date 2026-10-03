@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { buildApplicationMenu, setExportProjectEnabled, setSaveEnabled } from './application-menu';
+import { buildApplicationMenu, rebuildApplicationMenu, setExportProjectEnabled, setSaveEnabled } from './application-menu';
 import { readJsonFile } from './atomic-write';
 import { exportProject, importProject } from './battleplan-archive';
 import type { AppConfigDocument } from './document-types';
@@ -77,6 +77,11 @@ function registerRepositoryHandlers(): void {
     'repo:listProjectMessages': (projectId) => repo().listProjectMessages(projectId as string),
     'repo:listTaskMessages': (taskId) => repo().listTaskMessages(taskId as string),
     'repo:saveMessage': (message) => repo().saveMessage(message as ChatMessage),
+    'repo:listPendingChanges': (projectId) => repo().listPendingChanges(projectId as string),
+    'repo:savePendingChanges': async (projectId, changes) => {
+      await repo().savePendingChanges(projectId as string, changes as import('../src/app/core/models').PendingChange[]);
+      return { ok: true };
+    },
     'repo:listArtifacts': async (scope, ownerId) => enrichArtifacts(scope as 'project' | 'task', ownerId as string),
     'repo:saveArtifact': (artifact) => repo().saveArtifact(artifact as ChatArtifact),
     'config:read': () => repo().readAppConfig(),
@@ -130,6 +135,18 @@ function registerRepositoryHandlers(): void {
       if (typeof patch.saveEnabled === 'boolean') {
         setSaveEnabled(patch.saveEnabled);
       }
+      return { ok: true };
+    },
+    'menu:rebuild': async (payload) => {
+      const data = payload as {
+        projects?: Array<{ id: string; title: string }>;
+        themeId?: string;
+      };
+      rebuildApplicationMenu(
+        () => mainWindow,
+        data.projects ?? [],
+        data.themeId ?? 'harbor',
+      );
       return { ok: true };
     },
   };

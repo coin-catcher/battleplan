@@ -42,6 +42,8 @@ class MemoryRepository implements BattleplanRepository {
   async saveMessage(message: ChatMessage): Promise<void> { this.messages.push(message); }
   async listArtifacts(): Promise<ChatArtifact[]> { return this.artifacts; }
   async saveArtifact(artifact: ChatArtifact): Promise<void> { this.artifacts.push(artifact); }
+  async listPendingChanges(): Promise<import('../core/models').PendingChange[]> { return []; }
+  async savePendingChanges(): Promise<void> { return; }
 }
 
 function cursor(): CursorClient & { prompts: string[] } {
