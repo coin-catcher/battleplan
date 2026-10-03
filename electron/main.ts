@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { buildApplicationMenu, setExportProjectEnabled } from './application-menu';
+import { buildApplicationMenu, setExportProjectEnabled, setSaveEnabled } from './application-menu';
 import { readJsonFile } from './atomic-write';
 import { exportProject, importProject } from './battleplan-archive';
 import type { AppConfigDocument } from './document-types';
@@ -117,14 +117,18 @@ function registerRepositoryHandlers(): void {
       autoUpdater.quitAndInstall();
       return { ok: true };
     },
+    'update:check': async () => checkForUpdatesFromGitHub(true),
     'shell:openExternal': async (url) => {
       await shell.openExternal(url as string);
       return { ok: true };
     },
     'menu:sync-state': async (state) => {
-      const patch = state as { exportEnabled?: boolean };
+      const patch = state as { exportEnabled?: boolean; saveEnabled?: boolean };
       if (typeof patch.exportEnabled === 'boolean') {
         setExportProjectEnabled(patch.exportEnabled);
+      }
+      if (typeof patch.saveEnabled === 'boolean') {
+        setSaveEnabled(patch.saveEnabled);
       }
       return { ok: true };
     },
@@ -159,8 +163,22 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[^\w.\- ]+/g, '_').trim() || 'battleplan-project';
 }
 
+function normalizeVersion(value: string): string {
+  return value.trim().replace(/^v/i, '');
+}
+
+async function fetchLatestReleaseTag(): Promise<string | null> {
+  const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'battleplan-desktop' },
+  });
+  if (!response.ok) return null;
+  const payload = (await response.json()) as { tag_name?: string };
+  return payload.tag_name ? normalizeVersion(payload.tag_name) : null;
+}
+
 function configureAutoUpdater(): void {
   autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.setFeedURL({
     provider: 'github',
     owner: GITHUB_OWNER,
@@ -168,7 +186,7 @@ function configureAutoUpdater(): void {
   });
 
   autoUpdater.on('update-available', (info) => {
-    pendingUpdateVersion = info.version ?? null;
+    pendingUpdateVersion = info.version ? normalizeVersion(info.version) : pendingUpdateVersion;
     mainWindow?.webContents.send('update:available', {
       version: info.version,
       releaseNotes: info.releaseNotes,
@@ -181,16 +199,46 @@ function configureAutoUpdater(): void {
 
   autoUpdater.on('error', (error) => {
     console.error('Auto-update error', error);
+    mainWindow?.webContents.send('update:error', {
+      message: error instanceof Error ? error.message : 'Update check failed.',
+    });
   });
 }
 
-async function checkForUpdatesOnStartup(): Promise<void> {
-  if (!app.isPackaged) return;
+async function checkForUpdatesFromGitHub(notifyWhenCurrent: boolean): Promise<{
+  ok: boolean;
+  upToDate?: boolean;
+  current?: string;
+  latest?: string;
+  message?: string;
+}> {
+  if (!app.isPackaged) {
+    return { ok: false, message: 'Updates are only available in the packaged desktop app.' };
+  }
+  const current = normalizeVersion(app.getVersion());
+  const latest = await fetchLatestReleaseTag();
+  if (!latest) return { ok: false, message: 'Could not read the latest GitHub release.' };
+  if (latest === current) {
+    if (notifyWhenCurrent) {
+      mainWindow?.webContents.send('update:status', { upToDate: true, current, latest });
+    }
+    return { ok: true, upToDate: true, current, latest };
+  }
+  pendingUpdateVersion = latest;
   try {
     await autoUpdater.checkForUpdates();
   } catch (error) {
     console.error('Could not check for updates', error);
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : 'Update check failed.',
+    };
   }
+  return { ok: true, upToDate: false, current, latest };
+}
+
+async function checkForUpdatesOnStartup(): Promise<void> {
+  await checkForUpdatesFromGitHub(false);
 }
 
 app.whenReady().then(async () => {
