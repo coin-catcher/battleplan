@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { buildApplicationMenu, setExportProjectEnabled } from './application-menu';
 import { readJsonFile } from './atomic-write';
 import { exportProject, importProject } from './battleplan-archive';
 import type { AppConfigDocument } from './document-types';
@@ -120,6 +121,13 @@ function registerRepositoryHandlers(): void {
       await shell.openExternal(url as string);
       return { ok: true };
     },
+    'menu:sync-state': async (state) => {
+      const patch = state as { exportEnabled?: boolean };
+      if (typeof patch.exportEnabled === 'boolean') {
+        setExportProjectEnabled(patch.exportEnabled);
+      }
+      return { ok: true };
+    },
   };
 
   for (const [channel, handler] of Object.entries(handlers)) {
@@ -188,6 +196,7 @@ async function checkForUpdatesOnStartup(): Promise<void> {
 app.whenReady().then(async () => {
   registerRepositoryHandlers();
   configureAutoUpdater();
+  buildApplicationMenu(() => mainWindow);
   createWindow();
   await checkForUpdatesOnStartup();
 

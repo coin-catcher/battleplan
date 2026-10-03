@@ -26,14 +26,6 @@
         }
       </select>
     </label>
-    <button type="button" class="ghost" (click)="store.showCreate()">New project</button>
-    @if (desktop) {
-      <button type="button" class="ghost" (click)="importProject()">Import project</button>
-    }
-    @if (desktop && store.project()) {
-      <button type="button" class="ghost" (click)="exportProject()">Export project</button>
-    }
-    <button type="button" class="ghost" (click)="openCursorKey()">Cursor API key</button>
 
     @if (store.project()) {
       <div class="map-frame">
