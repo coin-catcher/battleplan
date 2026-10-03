@@ -18,6 +18,9 @@ import {
   type MindmapNode,
 } from './core/mindmap';
 import { MarkdownComponent } from 'ngx-markdown';
+import { editorPanelDirty } from './core/editor-dirty';
+import { taskDar, taskInitialPrompt } from './core/task-fields';
+import { normalChildIds } from './core/dependencies';
 import { BattleplanStore } from './state/battleplan-store.service';
 
 @Component({
@@ -78,6 +81,9 @@ export class AppComponent implements OnInit {
   readonly themeId = signal<ThemeId>('harbor');
   readonly paneWidth = signal(640);
   readonly updatePrompt = signal<{ version: string; notes: string } | null>(null);
+  readonly unsavedPromptOpen = signal(false);
+  readonly autoSaveEnabled = signal(false);
+  private pendingNavigation: (() => Promise<void>) | null = null;
 
   title = '';
   initialPrompt = '';
@@ -85,11 +91,16 @@ export class AppComponent implements OnInit {
   startingRef = 'main';
   projectRepo = '';
   projectBranch = 'main';
+  projectDar = '';
   chatDraft = '';
   taskTitle = '';
-  taskPrompt = '';
+  taskDar = '';
+  taskInitialPrompt = '';
+  subprojectInitialPrompt = '';
   outputType: OutputType = 'code';
   dependencies: string[] = [];
+  siblingDependencies: string[] = [];
+  readonly executeChildrenPrompt = signal<string | null>(null);
   codeRepo = '';
   codeBranch = '';
   codeMessage = '';
@@ -125,12 +136,18 @@ export class AppComponent implements OnInit {
     effect(() => {
       const selection = this.store.selection();
       const project = selection.kind === 'subproject' ? this.store.editorProject() : this.store.project();
-      const signature = project ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}:${selection.kind}` : '';
+      const signature = project
+        ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}:${project.dar ?? ''}:${project.initial_prompt}:${project.cursor_agent_id ?? ''}:${selection.kind}`
+        : '';
       if (signature === this.titleSignature) return;
       this.titleSignature = signature;
       this.title = project?.title ?? '';
       this.projectRepo = project?.repo_url ?? '';
       this.projectBranch = project?.starting_ref || 'main';
+      this.projectDar = project?.dar ?? '';
+      if (selection.kind === 'subproject') {
+        this.subprojectInitialPrompt = project?.initial_prompt ?? '';
+      }
     });
     effect(() => {
       const projectId = this.store.project()?.project_id;
@@ -158,18 +175,21 @@ export class AppComponent implements OnInit {
       if (this.boundTaskFormId === task.task_id) return;
       this.boundTaskFormId = task.task_id;
       this.taskTitle = task.title;
-      this.taskPrompt = task.prompt;
+      this.taskDar = taskDar(task);
+      this.taskInitialPrompt = taskInitialPrompt(task);
       this.outputType = task.output_type;
       this.dependencies = [...task.dependencies];
+      this.siblingDependencies = [...(task.sibling_dependencies ?? [])];
     });
 
     effect(() => {
       if (!this.desktop) return;
       const selection = this.store.selection();
       const exportEnabled = Boolean(this.store.project());
-      const saveEnabled = (selection.kind === 'project' && Boolean(this.title.trim()))
+      const saveEnabled = this.editorIsDirty()
+        || ((selection.kind === 'project' && Boolean(this.title.trim()))
         || (selection.kind === 'subproject' && Boolean(this.title.trim()))
-        || selection.kind === 'task';
+        || selection.kind === 'task');
       void electronBridge()?.invoke('menu:sync-state', { exportEnabled, saveEnabled });
     });
     effect((onCleanup) => {
@@ -208,6 +228,7 @@ export class AppComponent implements OnInit {
     await this.preferences.restore();
     this.themeId.set(this.preferences.theme());
     this.paneWidth.set(this.preferences.paneWidth());
+    this.autoSaveEnabled.set(this.preferences.autoSave());
     applyTheme(this.themeId(), !this.desktop);
     if (this.cursorKey.ready()) await this.store.loadProjects();
     electronBridge()?.on('update:available', (payload) => {
@@ -236,7 +257,9 @@ export class AppComponent implements OnInit {
   private handleMenuAction(action: string): void {
     switch (action) {
       case 'new-project':
-        this.store.showCreate();
+        void this.guardUnsavedChanges(async () => {
+          this.store.showCreate();
+        });
         break;
       case 'import-project':
         this.importProject();
@@ -259,10 +282,106 @@ export class AppComponent implements OnInit {
   }
 
   saveCurrent(): void {
+    void this.persistEditorChanges();
+  }
+
+  editorIsDirty(): boolean {
     const selection = this.store.selection();
-    if (selection.kind === 'project') this.saveProject();
-    else if (selection.kind === 'subproject') this.saveSubproject();
-    else if (selection.kind === 'task') void this.saveTask();
+    const project = selection.kind === 'subproject' ? this.store.editorProject() : this.store.project();
+    return editorPanelDirty(
+      selection.kind,
+      {
+        title: this.title,
+        repo_url: this.projectRepo,
+        starting_ref: this.projectBranch,
+        dar: this.projectDar,
+        initial_prompt: selection.kind === 'subproject' ? this.subprojectInitialPrompt : undefined,
+      },
+      {
+        title: this.taskTitle,
+        dar: this.taskDar,
+        initial_prompt: this.taskInitialPrompt,
+        output_type: this.outputType,
+        dependencies: this.dependencies,
+        sibling_dependencies: this.siblingDependencies,
+      },
+      project,
+      this.store.selectedTask(),
+    );
+  }
+
+  onEditorFieldBlur(): void {
+    if (!this.autoSaveEnabled() || !this.editorIsDirty()) return;
+    void this.persistEditorChanges();
+  }
+
+  onEditorFieldAutoSave(): void {
+    this.onEditorFieldBlur();
+  }
+
+  private async persistEditorChanges(): Promise<boolean> {
+    const selection = this.store.selection();
+    if (selection.kind === 'project') {
+      await this.store.saveProject({
+        title: this.title.trim(),
+        repo_url: this.projectRepo.trim(),
+        starting_ref: this.projectBranch.trim() || 'main',
+        dar: this.projectDar,
+      });
+    } else if (selection.kind === 'subproject') {
+      await this.store.saveEditorProject({
+        title: this.title.trim(),
+        repo_url: this.projectRepo.trim(),
+        starting_ref: this.projectBranch.trim() || 'main',
+        dar: this.projectDar,
+        initial_prompt: this.subprojectInitialPrompt,
+      });
+    } else if (selection.kind === 'task') {
+      await this.store.saveTask({
+        title: this.taskTitle,
+        dar: this.taskDar,
+        initial_prompt: this.taskInitialPrompt,
+        output_type: this.outputType,
+        dependencies: this.dependencies,
+        sibling_dependencies: this.siblingDependencies,
+      });
+    } else {
+      return true;
+    }
+    return !this.store.error();
+  }
+
+  private async guardUnsavedChanges(navigate: () => Promise<void>): Promise<void> {
+    if (!this.editorIsDirty()) {
+      await navigate();
+      return;
+    }
+    if (this.autoSaveEnabled()) {
+      if (await this.persistEditorChanges()) await navigate();
+      return;
+    }
+    this.pendingNavigation = navigate;
+    this.unsavedPromptOpen.set(true);
+  }
+
+  unsavedChoice(choice: 'no' | 'yes' | 'yes-always'): void {
+    void this.resolveUnsavedChoice(choice);
+  }
+
+  private async resolveUnsavedChoice(choice: 'no' | 'yes' | 'yes-always'): Promise<void> {
+    const navigate = this.pendingNavigation;
+    this.pendingNavigation = null;
+    this.unsavedPromptOpen.set(false);
+    if (!navigate) return;
+    if (choice === 'no') {
+      await navigate();
+      return;
+    }
+    if (choice === 'yes-always') {
+      this.autoSaveEnabled.set(true);
+      await this.preferences.saveAutoSave(true);
+    }
+    if (await this.persistEditorChanges()) await navigate();
   }
 
   checkForUpdates(): void {
@@ -377,6 +496,31 @@ export class AppComponent implements OnInit {
     return this.store.tasks().filter((task) => task.task_id !== current?.task_id);
   }
 
+  taskHasChildren(taskId: string): boolean {
+    const tasks = this.store.tasks();
+    const task = tasks.find((item) => item.task_id === taskId);
+    if (!task) return false;
+    const byId = new Map(tasks.map((item) => [item.task_id, item]));
+    return normalChildIds(task, byId).length > 0;
+  }
+
+  playChildrenPoint(node: MindmapNode): { x: number; y: number } {
+    return { x: node.x + node.width / 2 - 10, y: node.y - node.height / 2 + 10 };
+  }
+
+  requestExecuteChildren(taskId: string, event: Event): void {
+    event.stopPropagation();
+    event.preventDefault();
+    this.executeChildrenPrompt.set(taskId);
+  }
+
+  answerExecuteChildren(yes: boolean): void {
+    const taskId = this.executeChildrenPrompt();
+    this.executeChildrenPrompt.set(null);
+    if (!yes || !taskId) return;
+    void this.store.executeChildren(taskId);
+  }
+
   isMapSelected(node: MindmapNode): boolean {
     const selection = this.store.selection();
     if (node.kind === 'project') return selection.kind === 'project';
@@ -408,6 +552,7 @@ export class AppComponent implements OnInit {
       title: this.title.trim(),
       repo_url: this.projectRepo.trim(),
       starting_ref: this.projectBranch.trim() || 'main',
+      dar: this.projectDar,
     });
   }
 
@@ -416,7 +561,52 @@ export class AppComponent implements OnInit {
       title: this.title.trim(),
       repo_url: this.projectRepo.trim(),
       starting_ref: this.projectBranch.trim() || 'main',
+      dar: this.projectDar,
+      initial_prompt: this.subprojectInitialPrompt,
     });
+  }
+
+  taskAgentStarted(task: ProjectTask): boolean {
+    return Boolean(task.cursor_agent_id);
+  }
+
+  subprojectAgentStarted(): boolean {
+    return Boolean(this.store.editorProject()?.cursor_agent_id);
+  }
+
+  async executeTask(): Promise<void> {
+    this.store.chatActionPending.set('execute');
+    try {
+      await this.saveTask();
+      if (!this.store.error()) await this.store.executeTask();
+    } finally {
+      this.store.chatActionPending.set(null);
+    }
+  }
+
+  async executeSubproject(): Promise<void> {
+    this.store.chatActionPending.set('execute');
+    try {
+      await this.store.saveEditorProject({
+        title: this.title.trim(),
+        repo_url: this.projectRepo.trim(),
+        starting_ref: this.projectBranch.trim() || 'main',
+        dar: this.projectDar,
+        initial_prompt: this.subprojectInitialPrompt,
+      });
+      if (!this.store.error()) await this.store.executeSubprojectChat();
+    } finally {
+      this.store.chatActionPending.set(null);
+    }
+  }
+
+  approveTask(): void {
+    this.store.chatActionPending.set('merge');
+    void this.store.approve().finally(() => this.store.chatActionPending.set(null));
+  }
+
+  chatActionsLocked(): boolean {
+    return this.store.chatActionPending() !== null || this.store.busy();
   }
 
   deleteProject(): void {
@@ -484,7 +674,7 @@ export class AppComponent implements OnInit {
 
   onStagePointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .zoom-controls')) return;
+    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-play-children, .zoom-controls')) return;
     if (this.connectPanel()) {
       this.dismissConnectPanel();
       return;
@@ -509,7 +699,7 @@ export class AppComponent implements OnInit {
 
   onNodePointerDown(node: MindmapNode, event: PointerEvent): void {
     if (this.editingNodeId() === node.id) return;
-    if ((event.target as HTMLElement).closest('.map-edge-arrow, .map-connect-panel')) return;
+    if ((event.target as HTMLElement).closest('.map-edge-arrow, .map-connect-panel, .map-play-children')) return;
     event.stopPropagation();
     const startX = event.clientX;
     const startY = event.clientY;
@@ -546,8 +736,18 @@ export class AppComponent implements OnInit {
   }
 
   selectMapNode(node: MindmapNode): void {
-    if (node.kind === 'project') void this.store.openProjectChat();
-    else void this.store.openTask(node.id);
+    if (this.isSameMapSelection(node)) return;
+    void this.guardUnsavedChanges(async () => {
+      if (node.kind === 'project') await this.store.openProjectChat();
+      else await this.store.openTask(node.id);
+    });
+  }
+
+  private isSameMapSelection(node: MindmapNode): boolean {
+    const selection = this.store.selection();
+    if (node.kind === 'project') return selection.kind === 'project';
+    return (selection.kind === 'task' || selection.kind === 'subproject' || selection.kind === 'code' || selection.kind === 'research')
+      && selection.taskId === node.id;
   }
 
   connectArrowClass(direction: CardinalDirection): string {
@@ -667,22 +867,26 @@ export class AppComponent implements OnInit {
     const panel = this.convertPanel();
     if (!panel) return;
     this.convertPanel.set(null);
-    await this.store.convertTask(panel.taskId, to);
+    await this.guardUnsavedChanges(async () => {
+      await this.store.convertTask(panel.taskId, to);
+    });
   }
 
   private async quickAddResearchTask(node: MindmapNode, direction: CardinalDirection): Promise<void> {
-    const taskId = await this.store.addConnectedTask({
-      sourceId: node.id,
-      sourceKind: node.kind,
-      direction,
-      output_type: 'research',
+    await this.guardUnsavedChanges(async () => {
+      const taskId = await this.store.addConnectedTask({
+        sourceId: node.id,
+        sourceKind: node.kind,
+        direction,
+        output_type: 'research',
+      });
+      if (taskId) this.startInlineEdit(taskId, 'New research task');
     });
-    if (taskId) this.startInlineEdit(taskId, 'New research task');
   }
 
   onMapDismissPointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-connect-panel, .map-convert-panel, .map-edge-arrow, .map-convert-handle')) return;
+    if (target.closest('.map-connect-panel, .map-convert-panel, .map-edge-arrow, .map-convert-handle, .map-play-children')) return;
     this.dismissConnectPanel();
     this.convertPanel.set(null);
   }
@@ -702,13 +906,15 @@ export class AppComponent implements OnInit {
       research: 'New research task',
       subproject: 'New subproject',
     };
-    const taskId = await this.store.addConnectedTask({
-      sourceId: panel.sourceId,
-      sourceKind: panel.sourceKind,
-      direction: panel.direction,
-      output_type: outputType,
+    await this.guardUnsavedChanges(async () => {
+      const taskId = await this.store.addConnectedTask({
+        sourceId: panel.sourceId,
+        sourceKind: panel.sourceKind,
+        direction: panel.direction,
+        output_type: outputType,
+      });
+      if (taskId) this.startInlineEdit(taskId, labels[outputType]);
     });
-    if (taskId) this.startInlineEdit(taskId, labels[outputType]);
   }
 
   onNodeDblClick(node: MindmapNode, event: MouseEvent): void {
@@ -773,20 +979,23 @@ export class AppComponent implements OnInit {
     void this.store.openOutput(taskId, 'research');
   }
 
-  start(taskId: string): void {
-    void this.store.transition(taskId, 'DOING', false);
-  }
-
-  toggleDependency(taskId: string, event: Event): void {
+  toggleSiblingDependency(taskId: string, event: Event): void {
     const checked = (event.target as HTMLInputElement).checked;
-    this.dependencies = checked
-      ? [...this.dependencies, taskId]
-      : this.dependencies.filter((id) => id !== taskId);
+    this.siblingDependencies = checked
+      ? [...this.siblingDependencies, taskId]
+      : this.siblingDependencies.filter((id) => id !== taskId);
+    this.onEditorFieldAutoSave();
   }
 
   async onProjectChange(event: Event): Promise<void> {
-    const projectId = (event.target as HTMLSelectElement).value;
-    if (projectId) await this.store.selectProject(projectId);
+    const select = event.target as HTMLSelectElement;
+    const projectId = select.value;
+    const current = this.store.projectId() ?? '';
+    if (!projectId || projectId === current) return;
+    select.value = current;
+    await this.guardUnsavedChanges(async () => {
+      await this.store.selectProject(projectId);
+    });
   }
 
   async onStatusChange(taskId: string, event: Event): Promise<void> {
@@ -808,18 +1017,25 @@ export class AppComponent implements OnInit {
   async sendChat(): Promise<void> {
     const message = this.chatDraft.trim();
     if (!message) return;
-    const selection = this.store.selection();
-    if (selection.kind === 'task' || selection.kind === 'subproject') await this.store.sendTaskMessage(message);
-    else await this.store.sendProjectMessage(message);
-    if (!this.store.error()) this.chatDraft = '';
+    this.store.chatActionPending.set('send');
+    try {
+      const selection = this.store.selection();
+      if (selection.kind === 'task' || selection.kind === 'subproject') await this.store.sendTaskMessage(message);
+      else await this.store.sendProjectMessage(message);
+      if (!this.store.error()) this.chatDraft = '';
+    } finally {
+      this.store.chatActionPending.set(null);
+    }
   }
 
   async saveTask(): Promise<void> {
     await this.store.saveTask({
       title: this.taskTitle,
-      prompt: this.taskPrompt,
+      dar: this.taskDar,
+      initial_prompt: this.taskInitialPrompt,
       output_type: this.outputType,
       dependencies: this.dependencies,
+      sibling_dependencies: this.siblingDependencies,
     });
   }
 

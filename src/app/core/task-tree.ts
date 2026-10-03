@@ -1,42 +1,15 @@
 import type { ProjectTask } from './models';
+import { pickPrimaryParentId } from './dependencies';
 
 export interface TaskNode {
   task: ProjectTask;
   children: TaskNode[];
 }
 
-export function buildTaskForest(tasks: ProjectTask[]): TaskNode[] {
-  const byId = new Map(tasks.map((task) => [task.task_id, task]));
-  const depth = new Map<string, number>();
-  const visiting = new Set<string>();
-
-  const depthOf = (taskId: string): number => {
-    const known = depth.get(taskId);
-    if (known !== undefined) return known;
-    if (visiting.has(taskId)) return 0;
-    visiting.add(taskId);
-    const dependencies = (byId.get(taskId)?.dependencies ?? []).filter((id) => byId.has(id) && id !== taskId);
-    const value = dependencies.length === 0 ? 0 : Math.max(...dependencies.map((id) => depthOf(id))) + 1;
-    visiting.delete(taskId);
-    depth.set(taskId, value);
-    return value;
-  };
-
-  for (const task of tasks) depthOf(task.task_id);
-
+export function buildTaskParentMap(tasks: ProjectTask[]): Map<string, string | null> {
   const parentOf = new Map<string, string | null>();
   for (const task of tasks) {
-    const dependencies = task.dependencies.filter((id) => byId.has(id) && id !== task.task_id);
-    if (dependencies.length === 0) {
-      parentOf.set(task.task_id, null);
-      continue;
-    }
-    const parentId = [...dependencies].sort((left, right) => {
-      const byDepth = (depth.get(left) ?? 0) - (depth.get(right) ?? 0);
-      if (byDepth !== 0) return byDepth;
-      return (byId.get(left)?.order ?? 0) - (byId.get(right)?.order ?? 0);
-    }).at(-1);
-    parentOf.set(task.task_id, parentId ?? null);
+    parentOf.set(task.task_id, pickPrimaryParentId(task.task_id, tasks));
   }
 
   for (const task of tasks) {
@@ -51,6 +24,12 @@ export function buildTaskForest(tasks: ProjectTask[]): TaskNode[] {
       current = parentOf.get(current) ?? null;
     }
   }
+
+  return parentOf;
+}
+
+export function buildTaskForest(tasks: ProjectTask[]): TaskNode[] {
+  const parentOf = buildTaskParentMap(tasks);
 
   const nodes = new Map<string, TaskNode>(tasks.map((task) => [task.task_id, { task, children: [] }]));
   const roots: TaskNode[] = [];

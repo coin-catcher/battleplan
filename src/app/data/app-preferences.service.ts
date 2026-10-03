@@ -8,12 +8,14 @@ export interface AppPreferencesDocument {
   cursor_api_key: string;
   theme: ThemeId;
   pane_width: number;
+  auto_save: boolean;
 }
 
 const CURSOR_KEY = 'battleplan-cursor-api-key';
 const THEME_KEY = 'battleplan-theme';
 const PANE_KEY = 'battleplan-pane-width';
 const CURRENT_PROJECT_KEY = 'battleplan-current-project';
+const AUTO_SAVE_KEY = 'battleplan-auto-save';
 
 @Injectable({ providedIn: 'root' })
 export class AppPreferences {
@@ -23,6 +25,7 @@ export class AppPreferences {
     cursor_api_key: '',
     theme: 'harbor',
     pane_width: 420,
+    auto_save: false,
   };
 
   async restore(): Promise<void> {
@@ -33,6 +36,7 @@ export class AppPreferences {
         cursor_api_key: config.cursor_api_key ?? '',
         theme: normalizeTheme(config.theme),
         pane_width: normalizePaneWidth(config.pane_width),
+        auto_save: Boolean(config.auto_save),
       };
     } else {
       this.cached = {
@@ -40,6 +44,7 @@ export class AppPreferences {
         cursor_api_key: localStorage.getItem(CURSOR_KEY) ?? '',
         theme: normalizeTheme(localStorage.getItem(THEME_KEY)),
         pane_width: normalizePaneWidth(Number(localStorage.getItem(PANE_KEY))),
+        auto_save: localStorage.getItem(AUTO_SAVE_KEY) === '1',
       };
     }
     this.ready.set(this.cached.cursor_api_key.trim().length > 0);
@@ -90,6 +95,15 @@ export class AppPreferences {
     await this.persist({ pane_width: this.cached.pane_width });
   }
 
+  autoSave(): boolean {
+    return this.cached.auto_save;
+  }
+
+  async saveAutoSave(enabled: boolean): Promise<void> {
+    this.cached.auto_save = enabled;
+    await this.persist({ auto_save: enabled });
+  }
+
   private async persist(patch: Partial<AppPreferencesDocument>): Promise<void> {
     if (isElectronApp()) {
       await electronBridge()!.invoke('config:write', patch);
@@ -105,6 +119,10 @@ export class AppPreferences {
     }
     if (patch.theme !== undefined) localStorage.setItem(THEME_KEY, patch.theme);
     if (patch.pane_width !== undefined) localStorage.setItem(PANE_KEY, String(patch.pane_width));
+    if (patch.auto_save !== undefined) {
+      if (patch.auto_save) localStorage.setItem(AUTO_SAVE_KEY, '1');
+      else localStorage.removeItem(AUTO_SAVE_KEY);
+    }
   }
 }
 

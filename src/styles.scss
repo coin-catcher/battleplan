@@ -337,10 +337,22 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .map-node.code { border-radius: 16px; }
 .map-node.cloud {
-  border-radius: 46% 54% 50% 50% / 52% 44% 56% 48%;
-  background: var(--status-review);
-  border-color: #5b3f96;
+  border: 0;
+  border-radius: 0;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 168 96' preserveAspectRatio='none'%3E%3Cpath d='M28 62 Q12 62 12 48 Q12 32 30 28 Q32 12 50 12 Q62 4 80 10 Q98 4 112 16 Q128 12 142 26 Q156 30 158 44 Q164 48 164 60 Q164 74 150 76 L30 76 Q14 74 14 60 Q14 48 28 62 Z' fill='black'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 168 96' preserveAspectRatio='none'%3E%3Cpath d='M28 62 Q12 62 12 48 Q12 32 30 28 Q32 12 50 12 Q62 4 80 10 Q98 4 112 16 Q128 12 142 26 Q156 30 158 44 Q164 48 164 60 Q164 74 150 76 L30 76 Q14 74 14 60 Q14 48 28 62 Z' fill='black'/%3E%3C/svg%3E");
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  filter: drop-shadow(0 0 0 #5b3f96) drop-shadow(0 0 0 #5b3f96);
 }
+.map-node.cloud[data-status="TODO"] { filter: drop-shadow(0 0 0 #1d4ed8) drop-shadow(0 0 0 #1d4ed8); }
+.map-node.cloud[data-status="DOING"] { filter: drop-shadow(0 0 0 #c99600) drop-shadow(0 0 0 #c99600); }
+.map-node.cloud[data-status="REVIEW"] { filter: drop-shadow(0 0 0 #5b3f96) drop-shadow(0 0 0 #5b3f96); }
+.map-node.cloud[data-status="DONE"] { filter: drop-shadow(0 0 0 #1f6b42) drop-shadow(0 0 0 #1f6b42); }
+.map-node.cloud[data-status="BLOCKED"] { filter: drop-shadow(0 0 0 #a32626) drop-shadow(0 0 0 #a32626); }
+.map-node.cloud[data-status="ABANDONED"] { filter: drop-shadow(0 0 0 #111) drop-shadow(0 0 0 #111); }
 .map-node.subproject {
   background: #2a2118;
   border-color: var(--accent);
@@ -365,6 +377,26 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .map-convert-handle::before {
   content: '↻';
   display: block;
+}
+
+.map-play-children {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  z-index: 2;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.18);
+  color: #f4efe6;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+.map-play-children::before {
+  content: '▶';
+  display: block;
+  margin-left: 2px;
 }
 
 .map-node.editing { cursor: text; }
@@ -420,6 +452,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 }
 
 .editor {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -427,6 +460,47 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   overflow: auto;
   overscroll-behavior: contain;
   padding: 28px;
+}
+
+.editor-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgb(8 18 24 / 0.55);
+  color: var(--panel);
+  pointer-events: all;
+}
+
+.editor-loading p {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+}
+
+.loading-spinner,
+.inline-spinner {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgb(255 255 255 / 0.25);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: battleplan-spin 0.75s linear infinite;
+}
+
+.inline-spinner {
+  width: 22px;
+  height: 22px;
+  border-width: 2px;
+}
+
+@keyframes battleplan-spin {
+  to { transform: rotate(360deg); }
 }
 .panel {
   background: var(--panel);

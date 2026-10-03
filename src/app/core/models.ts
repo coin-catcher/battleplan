@@ -6,6 +6,8 @@ export interface Project {
   project_id: string;
   title: string;
   initial_prompt: string;
+  /** Persistent Data and Rules for this project, separate from chat history. */
+  dar?: string;
   cursor_chat_link: string;
   cursor_agent_id?: string;
   latest_run_id?: string;
@@ -26,8 +28,15 @@ export interface ProjectTask {
   task_id: string;
   project_id: string;
   title: string;
+  /** Legacy mirror of `dar`; kept for older saved projects. */
   prompt: string;
+  /** Persistent Data and Rules for this task, separate from chat. */
+  dar?: string;
+  /** Saved instruction used once when starting the Cursor agent. */
+  initial_prompt?: string;
   dependencies: string[];
+  /** One-way sibling links: this task depends on the listed task ids (dashed mindmap arrows). */
+  sibling_dependencies?: string[];
   status: TaskStatus;
   output_type: OutputType;
   /** Nested project opened by a subproject task. */

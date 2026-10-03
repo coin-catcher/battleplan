@@ -36,6 +36,8 @@ export class BattleplanApi {
     title?: string;
     repo_url?: string;
     starting_ref?: string;
+    dar?: string;
+    initial_prompt?: string;
     map_x?: number;
     map_y?: number;
   }): Promise<Project> {
@@ -57,7 +59,8 @@ export class BattleplanApi {
   createTask(projectId: string, input: {
     depends_on?: string;
     title?: string;
-    prompt?: string;
+    dar?: string;
+    initial_prompt?: string;
     output_type?: OutputType;
     map_x?: number;
     map_y?: number;
@@ -68,8 +71,10 @@ export class BattleplanApi {
   updateTask(projectId: string, taskId: string, patch: Record<string, unknown>): Promise<ProjectTask> {
     return this.engine.updateTask(projectId, taskId, {
       title: typeof patch['title'] === 'string' ? patch['title'] : undefined,
-      prompt: typeof patch['prompt'] === 'string' ? patch['prompt'] : undefined,
+      dar: typeof patch['dar'] === 'string' ? patch['dar'] : undefined,
+      initial_prompt: typeof patch['initial_prompt'] === 'string' ? patch['initial_prompt'] : undefined,
       dependencies: Array.isArray(patch['dependencies']) ? patch['dependencies'] as string[] : undefined,
+      sibling_dependencies: Array.isArray(patch['sibling_dependencies']) ? patch['sibling_dependencies'] as string[] : undefined,
       output_type: patch['output_type'] === 'code' || patch['output_type'] === 'research' || patch['output_type'] === 'subproject'
         ? patch['output_type']
         : undefined,
@@ -138,6 +143,18 @@ export class BattleplanApi {
 
   sendTaskMessage(taskId: string, message: string): Promise<ChatMessage> {
     return this.engine.sendTaskMessage(taskId, message);
+  }
+
+  executeTask(taskId: string): Promise<ChatMessage> {
+    return this.engine.executeTask(taskId);
+  }
+
+  executeChildren(projectId: string, parentTaskId: string): Promise<ProjectTask[]> {
+    return this.engine.executeChildren(projectId, parentTaskId);
+  }
+
+  executeProjectChat(projectId: string): Promise<{ message: ChatMessage; project: Project }> {
+    return this.engine.executeProjectChat(projectId);
   }
 
   convertTask(projectId: string, taskId: string, to: 'code' | 'subproject'): Promise<ProjectTask> {

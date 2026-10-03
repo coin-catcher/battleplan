@@ -78,6 +78,16 @@
                 (pointerdown)="onConvertPointerDown(node, $event)"
               ></button>
             }
+            @if (node.kind === 'task' && taskHasChildren(node.id)) {
+              <button
+                type="button"
+                class="map-play-children"
+                [style.left.px]="playChildrenPoint(node).x"
+                [style.top.px]="playChildrenPoint(node).y"
+                aria-label="Execute child tasks"
+                (pointerdown)="requestExecuteChildren(node.id, $event)"
+              ></button>
+            }
             <div
               class="map-node"
               [class.circle]="node.shape === 'project' || node.shape === 'subproject'"
@@ -153,6 +163,12 @@
   <div class="divider" role="separator" aria-orientation="vertical" aria-label="Resize panes" (pointerdown)="startResize($event)"></div>
 
   <main class="editor">
+    @if (store.editorLoading()) {
+      <div class="editor-loading" role="status" aria-live="polite" aria-busy="true">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <p>Loading...</p>
+      </div>
+    }
     @if (store.error()) {
       <p class="banner error" role="alert">{{ store.error() }}</p>
     }
@@ -235,18 +251,22 @@
             <div class="config">
               <label class="field">
                 <span>Title</span>
-                <input [(ngModel)]="title" name="title" />
+                <input [(ngModel)]="title" name="title" (blur)="onEditorFieldBlur()" />
               </label>
               <label class="field">
                 <span>Repository</span>
-                <input [(ngModel)]="projectRepo" name="projectRepo" placeholder="https://github.com/org/repo" />
+                <input [(ngModel)]="projectRepo" name="projectRepo" placeholder="https://github.com/org/repo" (blur)="onEditorFieldBlur()" />
               </label>
               <label class="field">
                 <span>Base branch</span>
-                <input [(ngModel)]="projectBranch" name="projectBranch" placeholder="main" />
+                <input [(ngModel)]="projectBranch" name="projectBranch" placeholder="main" (blur)="onEditorFieldBlur()" />
               </label>
             </div>
             <p class="pending">New task branches are created from this branch, and approved pull requests merge back into it.</p>
+            <label class="field">
+              <span>Data and Rules</span>
+              <textarea rows="4" [(ngModel)]="projectDar" name="projectDar" placeholder="Persistent context for this project. Not part of chat history." (blur)="onEditorFieldBlur()"></textarea>
+            </label>
             <div class="transcript" aria-live="polite">
               @for (item of timeline(); track item.id) {
                 @if (item.kind === 'message') {
@@ -277,7 +297,11 @@
               <label class="sr-only" for="project-chat">Message</label>
               <textarea id="project-chat" rows="3" [(ngModel)]="chatDraft" name="chatDraft" placeholder="Continue the battleplan conversation."></textarea>
               <div class="composer-actions">
-                <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+                @if (store.chatActionPending() === 'send') {
+                  <span class="inline-spinner" aria-label="Sending message"></span>
+                } @else {
+                  <button type="button" class="primary" [disabled]="chatActionsLocked() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+                }
               </div>
             </div>
           </section>
@@ -289,11 +313,12 @@
             <div class="toolbar">
               <button type="button" class="danger" [disabled]="store.busy()" (click)="deleteTask(task)">Delete</button>
               <button type="button" class="accent" [disabled]="store.busy()" (click)="store.generateTasks()">Generate Tasks</button>
-              @if (task.status === 'TODO') {
-                <button type="button" class="accent" [disabled]="store.busy()" (click)="start(task.task_id)">Start</button>
-              }
               @if (task.status === 'REVIEW') {
-                <button type="button" class="accent" [disabled]="store.busy()" (click)="store.approve()">Approve and merge</button>
+                @if (store.chatActionPending() === 'merge') {
+                  <span class="inline-spinner" aria-label="Merging pull request"></span>
+                } @else {
+                  <button type="button" class="accent" [disabled]="chatActionsLocked()" (click)="approveTask()">Approve and merge</button>
+                }
               }
               @if (store.codeOutput(task.task_id)) {
                 <button type="button" class="ghost" (click)="openCode(task.task_id)">Code output</button>
@@ -317,11 +342,11 @@
             <div class="config">
               <label class="field">
                 <span>Title</span>
-                <input [(ngModel)]="taskTitle" [name]="'taskTitle-' + task.task_id" (focus)="onTaskFieldFocus()" />
+                <input [(ngModel)]="taskTitle" [name]="'taskTitle-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" />
               </label>
               <label class="field">
                 <span>Output</span>
-                <select [(ngModel)]="outputType" name="outputType">
+                <select [(ngModel)]="outputType" name="outputType" (change)="onEditorFieldAutoSave()">
                   <option value="code">code</option>
                   <option value="research">research</option>
                   <option value="subproject">subproject</option>
@@ -337,22 +362,39 @@
               </label>
             </div>
             <label class="field">
-              <span>Prompt</span>
-              <textarea rows="3" [(ngModel)]="taskPrompt" [name]="'taskPrompt-' + task.task_id" (focus)="onTaskFieldFocus()"></textarea>
+              <span>Data and Rules</span>
+              <textarea rows="4" [(ngModel)]="taskDar" [name]="'taskDar-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Persistent context for this task. Prepended when the agent chat starts."></textarea>
             </label>
+            @if (!taskAgentStarted(task)) {
+              <label class="field">
+                <span>Initial Prompt</span>
+                <textarea rows="4" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this task. Save and return anytime before starting the agent."></textarea>
+              </label>
+              <div class="composer-actions">
+                @if (store.chatActionPending() === 'execute') {
+                  <span class="inline-spinner" aria-label="Executing task"></span>
+                } @else {
+                  <button type="button" class="accent" [disabled]="chatActionsLocked() || !taskInitialPrompt.trim() || task.status === 'ABANDONED'" (click)="executeTask()">Execute</button>
+                }
+                @if (taskHasChildren(task.task_id)) {
+                  <button type="button" class="ghost" [disabled]="chatActionsLocked()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
+                }
+              </div>
+            }
             <fieldset class="deps">
-              <legend>Dependencies</legend>
+              <legend>Links and dependencies</legend>
+              <p class="eyebrow">Solid child links come from the mindmap. Check a sibling to depend on it (dashed arrow).</p>
               @for (other of otherTasks(); track other.task_id) {
                 <label>
                   <input
                     type="checkbox"
-                    [checked]="dependencies.includes(other.task_id)"
-                    (change)="toggleDependency(other.task_id, $event)"
+                    [checked]="siblingDependencies.includes(other.task_id)"
+                    (change)="toggleSiblingDependency(other.task_id, $event)"
                   />
                   {{ other.title }}
                 </label>
               } @empty {
-                <p>No other tasks to depend on.</p>
+                <p>No other tasks to link.</p>
               }
             </fieldset>
             <div class="transcript" aria-live="polite">
@@ -381,13 +423,19 @@
                 <p class="pending">Waiting for Cursor…</p>
               }
             </div>
-            <div class="composer">
-              <label class="sr-only" for="task-chat">Message</label>
-              <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat."></textarea>
-              <div class="composer-actions">
-                <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+            @if (taskAgentStarted(task)) {
+              <div class="composer">
+                <label class="sr-only" for="task-chat">Message</label>
+                <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat."></textarea>
+                <div class="composer-actions">
+                  @if (store.chatActionPending() === 'send') {
+                    <span class="inline-spinner" aria-label="Sending message"></span>
+                  } @else {
+                    <button type="button" class="primary" [disabled]="chatActionsLocked() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+                  }
+                </div>
               </div>
-            </div>
+            }
           </section>
         }
       }
@@ -410,17 +458,37 @@
             <div class="config">
               <label class="field">
                 <span>Title</span>
-                <input [(ngModel)]="title" name="subprojectTitle" />
+                <input [(ngModel)]="title" name="subprojectTitle" (blur)="onEditorFieldBlur()" />
               </label>
               <label class="field">
                 <span>Repository</span>
-                <input [(ngModel)]="projectRepo" name="subprojectRepo" placeholder="https://github.com/org/repo" />
+                <input [(ngModel)]="projectRepo" name="subprojectRepo" placeholder="https://github.com/org/repo" (blur)="onEditorFieldBlur()" />
               </label>
               <label class="field">
                 <span>Base branch</span>
-                <input [(ngModel)]="projectBranch" name="subprojectBranch" placeholder="main" />
+                <input [(ngModel)]="projectBranch" name="subprojectBranch" placeholder="main" (blur)="onEditorFieldBlur()" />
               </label>
             </div>
+            <label class="field">
+              <span>Data and Rules</span>
+              <textarea rows="4" [(ngModel)]="projectDar" name="subprojectDar" placeholder="Persistent context for this subproject. Not part of chat history." (blur)="onEditorFieldBlur()"></textarea>
+            </label>
+            @if (!subprojectAgentStarted()) {
+              <label class="field">
+                <span>Initial Prompt</span>
+                <textarea rows="4" [(ngModel)]="subprojectInitialPrompt" name="subprojectInitialPrompt" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this subproject chat."></textarea>
+              </label>
+              <div class="composer-actions">
+                @if (store.chatActionPending() === 'execute') {
+                  <span class="inline-spinner" aria-label="Executing subproject"></span>
+                } @else {
+                  <button type="button" class="accent" [disabled]="chatActionsLocked() || !subprojectInitialPrompt.trim()" (click)="executeSubproject()">Execute</button>
+                }
+                @if (taskHasChildren(task.task_id)) {
+                  <button type="button" class="ghost" [disabled]="chatActionsLocked()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
+                }
+              </div>
+            }
             <div class="transcript" aria-live="polite">
               @for (item of timeline(); track item.id) {
                 @if (item.kind === 'message') {
@@ -447,13 +515,19 @@
                 <p class="pending">Waiting for Cursor…</p>
               }
             </div>
-            <div class="composer">
-              <label class="sr-only" for="subproject-chat">Message</label>
-              <textarea id="subproject-chat" rows="3" [(ngModel)]="chatDraft" name="subprojectChat" placeholder="Continue this subproject chat."></textarea>
-              <div class="composer-actions">
-                <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+            @if (subprojectAgentStarted()) {
+              <div class="composer">
+                <label class="sr-only" for="subproject-chat">Message</label>
+                <textarea id="subproject-chat" rows="3" [(ngModel)]="chatDraft" name="subprojectChat" placeholder="Continue this subproject chat."></textarea>
+                <div class="composer-actions">
+                  @if (store.chatActionPending() === 'send') {
+                    <span class="inline-spinner" aria-label="Sending message"></span>
+                  } @else {
+                    <button type="button" class="primary" [disabled]="chatActionsLocked() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+                  }
+                </div>
               </div>
-            </div>
+            }
           </section>
           }
         }
@@ -520,6 +594,22 @@
   </main>
 </div>
 
+@if (unsavedPromptOpen()) {
+  <div class="modal-backdrop" role="presentation">
+    <section class="modal" role="dialog" aria-labelledby="unsaved-title" aria-describedby="unsaved-desc">
+      <header class="panel-head">
+        <h2 id="unsaved-title">Unsaved changes!</h2>
+        <p id="unsaved-desc">Do you want to save?</p>
+      </header>
+      <div class="modal-actions">
+        <button type="button" class="ghost" (click)="unsavedChoice('no')">No</button>
+        <button type="button" class="primary" (click)="unsavedChoice('yes')">Yes</button>
+        <button type="button" class="accent" (click)="unsavedChoice('yes-always')">Yes, Always</button>
+      </div>
+    </section>
+  </div>
+}
+
 @if (updatePrompt(); as update) {
   <div class="modal-backdrop" role="presentation">
     <section class="modal" role="dialog" aria-labelledby="update-title">
@@ -531,6 +621,20 @@
       <div class="modal-actions">
         <button type="button" class="ghost" (click)="dismissUpdate()">Not now</button>
         <button type="button" class="primary" (click)="installUpdate()">Download and restart</button>
+      </div>
+    </section>
+  </div>
+}
+
+@if (executeChildrenPrompt()) {
+  <div class="modal-backdrop" role="presentation">
+    <section class="modal" role="dialog" aria-labelledby="execute-children-title">
+      <header class="panel-head">
+        <h2 id="execute-children-title">Execute Children?</h2>
+      </header>
+      <div class="modal-actions">
+        <button type="button" class="ghost" (click)="answerExecuteChildren(false)">No</button>
+        <button type="button" class="primary" (click)="answerExecuteChildren(true)">Yes</button>
       </div>
     </section>
   </div>

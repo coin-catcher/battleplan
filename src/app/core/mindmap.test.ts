@@ -8,47 +8,58 @@ import {
   positionConnectedNode,
 } from './mindmap';
 
-function task(id: string, dependencies: string[], order = 0): ProjectTask {
+function task(id: string, partial: Partial<ProjectTask> = {}, order = 0): ProjectTask {
   return {
     task_id: id,
     project_id: 'project',
     title: id,
     prompt: 'Do the work.',
-    dependencies,
+    dependencies: partial.dependencies ?? [],
+    sibling_dependencies: partial.sibling_dependencies,
     status: 'TODO',
     output_type: 'code',
     order,
     created_at: '2026-09-30T12:00:00.000Z',
     updated_at: '2026-09-30T12:00:00.000Z',
+    ...partial,
   };
 }
 
 describe('mindmap', () => {
   it('points a solid arrow from the project to each root task', () => {
-    const layout = layoutMindmap('Plan', [task('survey', []), task('build', [], 1)]);
+    const layout = layoutMindmap('Plan', [task('survey'), task('build', {}, 1)]);
     const solid = layout.edges.filter((edge) => !edge.dashed);
     expect(solid.map((edge) => edge.to).sort()).toEqual(['build', 'survey']);
     expect(solid.every((edge) => edge.from === 'project')).toBe(true);
     expect(layout.nodes.find((node) => node.id === 'project')?.kind).toBe('project');
   });
 
-  it('draws a dashed arrow from a dependency to the task that depends on it', () => {
-    const layout = layoutMindmap('Plan', [task('survey', []), task('build', ['survey'], 1)]);
-    const dashed = layout.edges.filter((edge) => edge.dashed);
-    expect(dashed).toEqual([expect.objectContaining({ from: 'survey', to: 'build', dashed: true })]);
-    expect(layout.edges.some((edge) => edge.to === 'build' && !edge.dashed)).toBe(false);
+  it('draws a solid arrow from parent to child when the parent lists the child', () => {
+    const survey = task('survey', { dependencies: ['build'] });
+    const build = task('build');
+    const layout = layoutMindmap('Plan', [survey, build]);
+    const taskEdges = layout.edges.filter((edge) => !edge.dashed && edge.from !== 'project');
+    expect(taskEdges).toEqual([expect.objectContaining({ from: 'survey', to: 'build', dashed: false })]);
     const project = layout.nodes.find((node) => node.id === 'project');
-    const survey = layout.nodes.find((node) => node.id === 'survey');
-    const build = layout.nodes.find((node) => node.id === 'build');
-    expect(project && survey && build).toBeTruthy();
-    const surveyDistance = Math.hypot(survey!.x - project!.x, survey!.y - project!.y);
-    const buildDistance = Math.hypot(build!.x - project!.x, build!.y - project!.y);
+    const surveyNode = layout.nodes.find((node) => node.id === 'survey');
+    const buildNode = layout.nodes.find((node) => node.id === 'build');
+    expect(project && surveyNode && buildNode).toBeTruthy();
+    const surveyDistance = Math.hypot(surveyNode!.x - project!.x, surveyNode!.y - project!.y);
+    const buildDistance = Math.hypot(buildNode!.x - project!.x, buildNode!.y - project!.y);
     expect(buildDistance).toBeGreaterThan(surveyDistance);
   });
 
+  it('draws a dashed one-way arrow for sibling dependencies', () => {
+    const left = task('alpha', { sibling_dependencies: ['beta'] });
+    const right = task('beta', {}, 1);
+    const layout = layoutMindmap('Plan', [left, right]);
+    const sibling = layout.edges.filter((edge) => edge.dashed);
+    expect(sibling).toEqual([expect.objectContaining({ from: 'alpha', to: 'beta', dashed: true })]);
+  });
+
   it('moves an unpinned root when another root is added', () => {
-    const alone = layoutMindmap('Plan', [task('survey', [])]);
-    const pair = layoutMindmap('Plan', [task('survey', []), task('notes', [], 1)]);
+    const alone = layoutMindmap('Plan', [task('survey')]);
+    const pair = layoutMindmap('Plan', [task('survey'), task('notes', {}, 1)]);
     const before = alone.nodes.find((node) => node.id === 'survey');
     const after = pair.nodes.find((node) => node.id === 'survey');
     expect(before && after).toBeTruthy();
@@ -56,7 +67,7 @@ describe('mindmap', () => {
   });
 
   it('places cardinal anchors on project circle and task rectangle', () => {
-    const layout = layoutMindmap('Plan', [task('survey', [])]);
+    const layout = layoutMindmap('Plan', [task('survey')]);
     const project = layout.nodes.find((node) => node.id === 'project')!;
     const survey = layout.nodes.find((node) => node.id === 'survey')!;
     const north = cardinalAnchor(project, 'north');
@@ -89,11 +100,11 @@ describe('mindmap', () => {
   });
 
   it('keeps a dragged task in place and rebalances the others', () => {
-    const pinned = task('survey', []);
+    const pinned = task('survey');
     pinned.map_x = 400;
     pinned.map_y = 500;
-    const before = layoutMindmap('Plan', [pinned, task('notes', [], 1)]);
-    const after = layoutMindmap('Plan', [pinned, task('notes', [], 1), task('build', [], 2)]);
+    const before = layoutMindmap('Plan', [pinned, task('notes', {}, 1)]);
+    const after = layoutMindmap('Plan', [pinned, task('notes', {}, 1), task('build', {}, 2)]);
     const stayed = after.nodes.find((node) => node.id === 'survey');
     expect(stayed).toMatchObject({ x: 400, y: 500 });
     const notesBefore = before.nodes.find((node) => node.id === 'notes');

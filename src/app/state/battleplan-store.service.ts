@@ -37,6 +37,8 @@ export class BattleplanStore {
   readonly notice = signal<string | null>(null);
   readonly busy = signal(false);
   readonly pendingReply = signal(false);
+  readonly editorLoading = signal(false);
+  readonly chatActionPending = signal<'send' | 'execute' | 'merge' | null>(null);
 
   readonly project = computed(() => this.projects().find((item) => item.project_id === this.projectId()) ?? null);
   readonly rootProjects = computed(() => this.projects().filter((item) => !item.parent_project_id));
@@ -76,15 +78,17 @@ export class BattleplanStore {
   }
 
   async selectProject(projectId: string): Promise<void> {
-    this.stopWatch();
-    this.projectId.set(projectId);
-    await this.preferences.setCurrentProjectId(projectId);
-    this.selection.set({ kind: 'project' });
-    await this.run(async () => {
-      await this.reloadTasks();
-      this.applyConversation(await this.api.listProjectMessages(projectId));
+    await this.withEditorLoading(async () => {
+      this.stopWatch();
+      this.projectId.set(projectId);
+      await this.preferences.setCurrentProjectId(projectId);
+      this.selection.set({ kind: 'project' });
+      await this.run(async () => {
+        await this.reloadTasks();
+        this.applyConversation(await this.api.listProjectMessages(projectId));
+      });
+      this.continueProjectWatch(projectId);
     });
-    this.continueProjectWatch(projectId);
   }
 
   showCreate(): void {
@@ -111,7 +115,7 @@ export class BattleplanStore {
     if (projectId && !this.error()) this.continueProjectWatch(projectId);
   }
 
-  async saveProject(patch: { title: string; repo_url: string; starting_ref: string }): Promise<void> {
+  async saveProject(patch: { title: string; repo_url: string; starting_ref: string; dar: string; initial_prompt?: string }): Promise<void> {
     const project = this.project();
     if (!project) return;
     await this.run(async () => {
@@ -122,7 +126,13 @@ export class BattleplanStore {
     });
   }
 
-  async saveEditorProject(patch: { title: string; repo_url: string; starting_ref: string }): Promise<void> {
+  async saveEditorProject(patch: {
+    title: string;
+    repo_url: string;
+    starting_ref: string;
+    dar: string;
+    initial_prompt?: string;
+  }): Promise<void> {
     const editor = this.editorProject();
     if (!editor) return;
     await this.run(async () => {
@@ -182,12 +192,14 @@ export class BattleplanStore {
   async openProjectChat(): Promise<void> {
     const projectId = this.projectId();
     if (!projectId) return;
-    this.stopWatch();
-    this.selection.set({ kind: 'project' });
-    await this.run(async () => {
-      this.applyConversation(await this.api.listProjectMessages(projectId));
+    await this.withEditorLoading(async () => {
+      this.stopWatch();
+      this.selection.set({ kind: 'project' });
+      await this.run(async () => {
+        this.applyConversation(await this.api.listProjectMessages(projectId));
+      });
+      this.continueProjectWatch(projectId);
     });
-    this.continueProjectWatch(projectId);
   }
 
   async sendProjectMessage(message: string): Promise<void> {
@@ -199,7 +211,10 @@ export class BattleplanStore {
       runId = sent.run_id;
       this.rememberMessage(sent);
     });
-    if (runId && !this.error()) await this.watchProject(projectId, runId);
+    if (runId && !this.error()) {
+      await this.syncProjectUserRun(projectId, runId);
+      void this.watchProject(projectId, runId);
+    }
   }
 
   async generateTasks(): Promise<void> {
@@ -243,40 +258,44 @@ export class BattleplanStore {
   }
 
   async openTask(taskId: string): Promise<void> {
-    this.stopWatch();
-    const existing = this.tasks().find((item) => item.task_id === taskId);
-    const kind = existing?.output_type === 'subproject' ? 'subproject' : 'task';
-    this.selection.set({ kind, taskId });
-    await this.run(async () => {
-      if (kind === 'subproject' && existing?.subproject_id) {
-        this.applyConversation(await this.api.listProjectMessages(existing.subproject_id));
-        return;
-      }
-      const result = await this.api.listTaskMessages(taskId);
-      this.applyTaskConversation(result);
-      await this.refreshOutput(result.task);
+    await this.withEditorLoading(async () => {
+      this.stopWatch();
+      const existing = this.tasks().find((item) => item.task_id === taskId);
+      const kind = existing?.output_type === 'subproject' ? 'subproject' : 'task';
+      this.selection.set({ kind, taskId });
+      await this.run(async () => {
+        if (kind === 'subproject' && existing?.subproject_id) {
+          this.applyConversation(await this.api.listProjectMessages(existing.subproject_id));
+          return;
+        }
+        const result = await this.api.listTaskMessages(taskId);
+        this.applyTaskConversation(result);
+        await this.refreshOutput(result.task);
+      });
+      if (kind === 'task') this.continueTaskWatch(taskId);
+      else if (existing?.subproject_id) this.continueProjectWatch(existing.subproject_id);
     });
-    if (kind === 'task') this.continueTaskWatch(taskId);
-    else if (existing?.subproject_id) this.continueProjectWatch(existing.subproject_id);
   }
 
   async convertTask(taskId: string, to: 'code' | 'subproject'): Promise<void> {
     const projectId = this.projectId();
     if (!projectId) return;
-    await this.run(async () => {
-      const updated = await this.api.convertTask(projectId, taskId, to);
-      await this.reloadProjects();
-      this.replaceTask(updated);
-      if (to === 'subproject') {
-        this.selection.set({ kind: 'subproject', taskId });
-        if (updated.subproject_id) {
-          this.applyConversation(await this.api.listProjectMessages(updated.subproject_id));
+    await this.withEditorLoading(async () => {
+      await this.run(async () => {
+        const updated = await this.api.convertTask(projectId, taskId, to);
+        await this.reloadProjects();
+        this.replaceTask(updated);
+        if (to === 'subproject') {
+          this.selection.set({ kind: 'subproject', taskId });
+          if (updated.subproject_id) {
+            this.applyConversation(await this.api.listProjectMessages(updated.subproject_id));
+          }
+        } else {
+          this.selection.set({ kind: 'task', taskId });
+          this.applyTaskConversation(await this.api.listTaskMessages(taskId));
         }
-      } else {
-        this.selection.set({ kind: 'task', taskId });
-        this.applyTaskConversation(await this.api.listTaskMessages(taskId));
-      }
-      this.notice.set(`Converted to ${to} task.`);
+        this.notice.set(`Converted to ${to} task.`);
+      });
     });
   }
 
@@ -312,24 +331,26 @@ export class BattleplanStore {
     const depends_on = input.sourceKind === 'task' ? input.sourceId : undefined;
     this.stopWatch();
     let taskId = '';
-    await this.run(async () => {
-      const task = await this.api.createTask(projectId, {
-        depends_on,
-        map_x,
-        map_y,
-        output_type: input.output_type ?? 'research',
+    await this.withEditorLoading(async () => {
+      await this.run(async () => {
+        const task = await this.api.createTask(projectId, {
+          depends_on,
+          map_x,
+          map_y,
+          output_type: input.output_type ?? 'research',
+        });
+        taskId = task.task_id;
+        await this.reloadProjects();
+        await this.reloadTasks();
+        const kind = task.output_type === 'subproject' ? 'subproject' : 'task';
+        this.selection.set({ kind, taskId: task.task_id });
+        if (kind === 'subproject' && task.subproject_id) {
+          this.applyConversation(await this.api.listProjectMessages(task.subproject_id));
+        }
+        const result = await this.api.listTaskMessages(task.task_id);
+        this.applyTaskConversation(result);
+        this.notice.set('Task added. Fill in the details.');
       });
-      taskId = task.task_id;
-      await this.reloadProjects();
-      await this.reloadTasks();
-      const kind = task.output_type === 'subproject' ? 'subproject' : 'task';
-      this.selection.set({ kind, taskId: task.task_id });
-      if (kind === 'subproject' && task.subproject_id) {
-        this.applyConversation(await this.api.listProjectMessages(task.subproject_id));
-      }
-      const result = await this.api.listTaskMessages(task.task_id);
-      this.applyTaskConversation(result);
-      this.notice.set('Task added. Fill in the details.');
     });
     if (taskId) this.continueTaskWatch(taskId);
     return taskId || null;
@@ -358,19 +379,23 @@ export class BattleplanStore {
   }
 
   async openOutput(taskId: string, kind: 'code' | 'research'): Promise<void> {
-    this.stopWatch();
-    this.selection.set({ kind, taskId });
-    await this.run(async () => {
-      const task = this.tasks().find((item) => item.task_id === taskId);
-      if (task) await this.refreshOutput(task);
+    await this.withEditorLoading(async () => {
+      this.stopWatch();
+      this.selection.set({ kind, taskId });
+      await this.run(async () => {
+        const task = this.tasks().find((item) => item.task_id === taskId);
+        if (task) await this.refreshOutput(task);
+      });
     });
   }
 
   async saveTask(patch: {
     title: string;
-    prompt: string;
+    dar: string;
+    initial_prompt: string;
     output_type: OutputType;
     dependencies: string[];
+    sibling_dependencies: string[];
   }): Promise<void> {
     const task = this.selectedTask();
     if (!task) return;
@@ -397,6 +422,61 @@ export class BattleplanStore {
     if (this.selection().kind === 'task') this.continueTaskWatch(taskId);
   }
 
+  async executeTask(): Promise<void> {
+    const task = this.selectedTask();
+    if (!task) return;
+    let runId: string | undefined;
+    await this.run(async () => {
+      const sent = await this.api.executeTask(task.task_id);
+      runId = sent.run_id;
+      this.rememberMessage(sent);
+      this.applyTaskConversation(await this.api.listTaskMessages(task.task_id));
+    });
+    if (runId && !this.error()) {
+      await this.syncTaskUserRun(task.task_id, runId);
+      void this.watchTask(task.task_id, runId);
+    }
+  }
+
+  async executeChildren(parentTaskId: string): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    await this.run(async () => {
+      const started = await this.api.executeChildren(projectId, parentTaskId);
+      await this.reloadTasks();
+      if (started.length === 0) {
+        this.notice.set('No child tasks are ready to execute.');
+      } else {
+        this.notice.set(`Started ${started.length} child task${started.length === 1 ? '' : 's'}.`);
+      }
+      const selection = this.selection();
+      if (selection.kind === 'task' || selection.kind === 'subproject') {
+        this.applyTaskConversation(await this.api.listTaskMessages(selection.taskId));
+      }
+    });
+  }
+
+  async executeSubprojectChat(): Promise<void> {
+    const editor = this.editorProject();
+    if (!editor) return;
+    let runId: string | undefined;
+    let projectId = editor.project_id;
+    await this.run(async () => {
+      const result = await this.api.executeProjectChat(editor.project_id);
+      runId = result.message.run_id;
+      projectId = result.project.project_id;
+      this.rememberMessage(result.message);
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === result.project.project_id ? result.project : item
+      )));
+      this.applyConversation(await this.api.listProjectMessages(editor.project_id));
+    });
+    if (runId && !this.error()) {
+      await this.syncProjectUserRun(projectId, runId);
+      void this.watchProject(projectId, runId);
+    }
+  }
+
   async sendTaskMessage(message: string): Promise<void> {
     const task = this.selectedTask();
     if (!task) return;
@@ -414,22 +494,34 @@ export class BattleplanStore {
       }
     });
     if (runId && !this.error()) {
-      if (watchProjectId) await this.watchProject(watchProjectId, runId);
-      else await this.watchTask(task.task_id, runId);
+      if (watchProjectId) {
+        await this.syncProjectUserRun(watchProjectId, runId);
+        void this.watchProject(watchProjectId, runId);
+      } else {
+        await this.syncTaskUserRun(task.task_id, runId);
+        void this.watchTask(task.task_id, runId);
+      }
     }
   }
 
   async approve(): Promise<void> {
     const task = this.selectedTask();
     if (!task) return;
+    let runId: string | undefined;
     await this.run(async () => {
       const merging = await this.api.approve(task.task_id);
+      runId = merging.latest_run_id ?? undefined;
       this.replaceTask(merging);
       const refreshed = await this.api.listTaskMessages(task.task_id);
       this.applyTaskConversation(refreshed);
       this.notice.set(refreshed.task.status === 'DONE' ? 'Pull request merged. Task is DONE.' : 'Merge requested.');
     });
-    this.continueTaskWatch(task.task_id);
+    if (runId && !this.error()) {
+      await this.syncTaskUserRun(task.task_id, runId);
+      void this.watchTask(task.task_id, runId);
+    } else {
+      this.continueTaskWatch(task.task_id);
+    }
   }
 
   async move(taskId: string, direction: -1 | 1): Promise<void> {
@@ -506,6 +598,50 @@ export class BattleplanStore {
   private continueTaskWatch(taskId: string): void {
     const runId = unansweredRun(this.messages());
     if (runId) void this.watchTask(taskId, runId);
+  }
+
+  private syncProjectUserRun(projectId: string, runId: string): Promise<void> {
+    return this.pollSync(async () => {
+      if (!this.watchingProjectChat(projectId)) return true;
+      const page = await this.api.listProjectMessages(projectId);
+      if (!this.watchingProjectChat(projectId)) return true;
+      this.applyConversation(page);
+      return hasUserRun(page.messages, runId);
+    });
+  }
+
+  private syncTaskUserRun(taskId: string, runId: string): Promise<void> {
+    return this.pollSync(async () => {
+      const selection = this.selection();
+      if (!this.watchingTaskChat(taskId, selection)) return true;
+      const result = await this.api.listTaskMessages(taskId);
+      const current = this.selection();
+      if (!this.watchingTaskChat(taskId, current)) return true;
+      this.applyTaskConversation(result);
+      return hasUserRun(result.messages, runId);
+    });
+  }
+
+  private pollSync(load: () => Promise<boolean>): Promise<void> {
+    return new Promise((resolve) => {
+      const tick = (attempt: number) => {
+        void (async () => {
+          let done = false;
+          try {
+            done = await load();
+          } catch {
+            resolve();
+            return;
+          }
+          if (done || attempt + 1 >= POLL_ATTEMPTS) {
+            resolve();
+            return;
+          }
+          setTimeout(() => tick(attempt + 1), POLL_INTERVAL_MS);
+        })();
+      };
+      tick(0);
+    });
   }
 
   private watchProject(projectId: string, runId: string): Promise<void> {
@@ -673,6 +809,15 @@ export class BattleplanStore {
       this.busy.set(false);
     }
   }
+
+  private async withEditorLoading(work: () => Promise<void>): Promise<void> {
+    this.editorLoading.set(true);
+    try {
+      await work();
+    } finally {
+      this.editorLoading.set(false);
+    }
+  }
 }
 
 function unansweredRun(messages: ChatMessage[]): string | undefined {
@@ -682,6 +827,10 @@ function unansweredRun(messages: ChatMessage[]): string | undefined {
 
 function hasAssistant(messages: ChatMessage[], runId: string): boolean {
   return messages.some((message) => message.run_id === runId && message.role === 'assistant');
+}
+
+function hasUserRun(messages: ChatMessage[], runId: string): boolean {
+  return messages.some((message) => message.run_id === runId && message.role === 'user');
 }
 
 export type { TaskNode };
