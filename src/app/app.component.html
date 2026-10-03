@@ -163,6 +163,12 @@
   <div class="divider" role="separator" aria-orientation="vertical" aria-label="Resize panes" (pointerdown)="startResize($event)"></div>
 
   <main class="editor">
+    @if (store.editorLoading()) {
+      <div class="editor-loading" role="status" aria-live="polite" aria-busy="true">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <p>Loading...</p>
+      </div>
+    }
     @if (store.error()) {
       <p class="banner error" role="alert">{{ store.error() }}</p>
     }
@@ -291,7 +297,11 @@
               <label class="sr-only" for="project-chat">Message</label>
               <textarea id="project-chat" rows="3" [(ngModel)]="chatDraft" name="chatDraft" placeholder="Continue the battleplan conversation."></textarea>
               <div class="composer-actions">
-                <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+                @if (store.chatActionPending() === 'send') {
+                  <span class="inline-spinner" aria-label="Sending message"></span>
+                } @else {
+                  <button type="button" class="primary" [disabled]="chatActionsLocked() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+                }
               </div>
             </div>
           </section>
@@ -304,7 +314,11 @@
               <button type="button" class="danger" [disabled]="store.busy()" (click)="deleteTask(task)">Delete</button>
               <button type="button" class="accent" [disabled]="store.busy()" (click)="store.generateTasks()">Generate Tasks</button>
               @if (task.status === 'REVIEW') {
-                <button type="button" class="accent" [disabled]="store.busy()" (click)="store.approve()">Approve and merge</button>
+                @if (store.chatActionPending() === 'merge') {
+                  <span class="inline-spinner" aria-label="Merging pull request"></span>
+                } @else {
+                  <button type="button" class="accent" [disabled]="chatActionsLocked()" (click)="approveTask()">Approve and merge</button>
+                }
               }
               @if (store.codeOutput(task.task_id)) {
                 <button type="button" class="ghost" (click)="openCode(task.task_id)">Code output</button>
@@ -357,9 +371,13 @@
                 <textarea rows="4" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this task. Save and return anytime before starting the agent."></textarea>
               </label>
               <div class="composer-actions">
-                <button type="button" class="accent" [disabled]="store.busy() || !taskInitialPrompt.trim() || task.status === 'ABANDONED'" (click)="executeTask()">Execute</button>
+                @if (store.chatActionPending() === 'execute') {
+                  <span class="inline-spinner" aria-label="Executing task"></span>
+                } @else {
+                  <button type="button" class="accent" [disabled]="chatActionsLocked() || !taskInitialPrompt.trim() || task.status === 'ABANDONED'" (click)="executeTask()">Execute</button>
+                }
                 @if (taskHasChildren(task.task_id)) {
-                  <button type="button" class="ghost" [disabled]="store.busy()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
+                  <button type="button" class="ghost" [disabled]="chatActionsLocked()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
                 }
               </div>
             }
@@ -410,7 +428,11 @@
                 <label class="sr-only" for="task-chat">Message</label>
                 <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat."></textarea>
                 <div class="composer-actions">
-                  <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+                  @if (store.chatActionPending() === 'send') {
+                    <span class="inline-spinner" aria-label="Sending message"></span>
+                  } @else {
+                    <button type="button" class="primary" [disabled]="chatActionsLocked() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+                  }
                 </div>
               </div>
             }
@@ -457,9 +479,13 @@
                 <textarea rows="4" [(ngModel)]="subprojectInitialPrompt" name="subprojectInitialPrompt" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this subproject chat."></textarea>
               </label>
               <div class="composer-actions">
-                <button type="button" class="accent" [disabled]="store.busy() || !subprojectInitialPrompt.trim()" (click)="executeSubproject()">Execute</button>
+                @if (store.chatActionPending() === 'execute') {
+                  <span class="inline-spinner" aria-label="Executing subproject"></span>
+                } @else {
+                  <button type="button" class="accent" [disabled]="chatActionsLocked() || !subprojectInitialPrompt.trim()" (click)="executeSubproject()">Execute</button>
+                }
                 @if (taskHasChildren(task.task_id)) {
-                  <button type="button" class="ghost" [disabled]="store.busy()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
+                  <button type="button" class="ghost" [disabled]="chatActionsLocked()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
                 }
               </div>
             }
@@ -494,7 +520,11 @@
                 <label class="sr-only" for="subproject-chat">Message</label>
                 <textarea id="subproject-chat" rows="3" [(ngModel)]="chatDraft" name="subprojectChat" placeholder="Continue this subproject chat."></textarea>
                 <div class="composer-actions">
-                  <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+                  @if (store.chatActionPending() === 'send') {
+                    <span class="inline-spinner" aria-label="Sending message"></span>
+                  } @else {
+                    <button type="button" class="primary" [disabled]="chatActionsLocked() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+                  }
                 </div>
               </div>
             }
