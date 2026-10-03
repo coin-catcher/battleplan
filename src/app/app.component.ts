@@ -155,6 +155,12 @@ export class AppComponent implements OnInit {
     });
 
     effect(() => {
+      if (!this.desktop) return;
+      const exportEnabled = Boolean(this.store.project());
+      void electronBridge()?.invoke('menu:sync-state', { exportEnabled });
+    });
+
+    effect(() => {
       const task = this.store.selectedTask();
       const selection = this.store.selection();
       if (!task || (selection.kind !== 'code' && selection.kind !== 'research')) return;
@@ -192,6 +198,28 @@ export class AppComponent implements OnInit {
       const notes = typeof info.releaseNotes === 'string' ? info.releaseNotes : 'A newer Battleplan release is available.';
       this.zone.run(() => this.updatePrompt.set({ version, notes }));
     });
+    electronBridge()?.on('menu:action', (action) => {
+      this.zone.run(() => this.handleMenuAction(String(action)));
+    });
+  }
+
+  private handleMenuAction(action: string): void {
+    switch (action) {
+      case 'new-project':
+        this.store.showCreate();
+        break;
+      case 'import-project':
+        this.importProject();
+        break;
+      case 'export-project':
+        this.exportProject();
+        break;
+      case 'cursor-api-key':
+        this.openCursorKey();
+        break;
+      default:
+        break;
+    }
   }
 
   chooseTheme(event: Event): void {
