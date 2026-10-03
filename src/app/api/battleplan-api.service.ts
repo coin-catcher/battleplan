@@ -59,6 +59,8 @@ export class BattleplanApi {
     title?: string;
     prompt?: string;
     output_type?: OutputType;
+    map_x?: number;
+    map_y?: number;
   }): Promise<ProjectTask> {
     return this.engine.createTask(projectId, input);
   }

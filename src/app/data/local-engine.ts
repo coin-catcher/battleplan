@@ -166,6 +166,8 @@ export class LocalEngine {
     prompt?: string;
     output_type?: OutputType;
     depends_on?: string;
+    map_x?: number;
+    map_y?: number;
   }): Promise<ProjectTask> {
     await this.requireProject(projectId);
     const existing = await this.repo.listTasks(projectId);
@@ -190,6 +192,8 @@ export class LocalEngine {
       created_at: timestamp,
       updated_at: timestamp,
     };
+    if (input.map_x !== undefined) task.map_x = input.map_x;
+    if (input.map_y !== undefined) task.map_y = input.map_y;
     assertAcyclic([...existing, task]);
     await this.repo.saveTask(task);
     const parent = dependencies[0] ? existing.find((item) => item.task_id === dependencies[0]) : undefined;
