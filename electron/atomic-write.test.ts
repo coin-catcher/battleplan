@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { writeFileAtomic } from './atomic-write';
+import { readJsonFile, writeFileAtomic } from './atomic-write';
 
 const tempDirs: string[] = [];
 
@@ -41,5 +41,16 @@ describe('writeFileAtomic', () => {
     await Promise.all(Array.from({ length: 20 }, (_, index) => writeFileAtomic(filePath, `payload-${index}`)));
     const final = await fs.readFile(filePath, 'utf8');
     expect(final.startsWith('payload-')).toBe(true);
+  });
+
+  it('reads JSON while writes are in flight', async () => {
+    const dir = await tempDir();
+    const filePath = path.join(dir, 'task_config.json');
+    await writeFileAtomic(filePath, JSON.stringify({ count: 0 }));
+    await Promise.all(Array.from({ length: 30 }, async (_, index) => {
+      await writeFileAtomic(filePath, JSON.stringify({ count: index }));
+      const doc = await readJsonFile<{ count: number }>(filePath);
+      expect(doc?.count).toBeGreaterThanOrEqual(0);
+    }));
   });
 });

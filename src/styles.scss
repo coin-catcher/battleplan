@@ -337,10 +337,22 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .map-node.code { border-radius: 16px; }
 .map-node.cloud {
-  border-radius: 46% 54% 50% 50% / 52% 44% 56% 48%;
-  background: var(--status-review);
-  border-color: #5b3f96;
+  border: 0;
+  border-radius: 0;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 168 96' preserveAspectRatio='none'%3E%3Cpath d='M28 62 Q12 62 12 48 Q12 32 30 28 Q32 12 50 12 Q62 4 80 10 Q98 4 112 16 Q128 12 142 26 Q156 30 158 44 Q164 48 164 60 Q164 74 150 76 L30 76 Q14 74 14 60 Q14 48 28 62 Z' fill='black'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 168 96' preserveAspectRatio='none'%3E%3Cpath d='M28 62 Q12 62 12 48 Q12 32 30 28 Q32 12 50 12 Q62 4 80 10 Q98 4 112 16 Q128 12 142 26 Q156 30 158 44 Q164 48 164 60 Q164 74 150 76 L30 76 Q14 74 14 60 Q14 48 28 62 Z' fill='black'/%3E%3C/svg%3E");
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  filter: drop-shadow(0 0 0 #5b3f96) drop-shadow(0 0 0 #5b3f96);
 }
+.map-node.cloud[data-status="TODO"] { filter: drop-shadow(0 0 0 #1d4ed8) drop-shadow(0 0 0 #1d4ed8); }
+.map-node.cloud[data-status="DOING"] { filter: drop-shadow(0 0 0 #c99600) drop-shadow(0 0 0 #c99600); }
+.map-node.cloud[data-status="REVIEW"] { filter: drop-shadow(0 0 0 #5b3f96) drop-shadow(0 0 0 #5b3f96); }
+.map-node.cloud[data-status="DONE"] { filter: drop-shadow(0 0 0 #1f6b42) drop-shadow(0 0 0 #1f6b42); }
+.map-node.cloud[data-status="BLOCKED"] { filter: drop-shadow(0 0 0 #a32626) drop-shadow(0 0 0 #a32626); }
+.map-node.cloud[data-status="ABANDONED"] { filter: drop-shadow(0 0 0 #111) drop-shadow(0 0 0 #111); }
 .map-node.subproject {
   background: #2a2118;
   border-color: var(--accent);

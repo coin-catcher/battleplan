@@ -34,6 +34,8 @@ export interface MindmapLayout {
 export const PROJECT_RADIUS = 68;
 export const TASK_WIDTH = 156;
 export const TASK_HEIGHT = 64;
+export const RESEARCH_WIDTH = 168;
+export const RESEARCH_HEIGHT = 96;
 
 export type CardinalDirection = 'north' | 'south' | 'east' | 'west';
 
@@ -199,6 +201,7 @@ export function layoutMindmap(
       : task.output_type === 'subproject'
         ? 'subproject'
         : 'code';
+    const research = shape === 'research';
     nodes.push({
       id: task.task_id,
       kind: 'task',
@@ -207,8 +210,8 @@ export function layoutMindmap(
       status: task.status,
       x: pinned ? task.map_x! : projectX + Math.cos(angle) * radius,
       y: pinned ? task.map_y! : projectY + Math.sin(angle) * radius,
-      width: TASK_WIDTH,
-      height: TASK_HEIGHT,
+      width: research ? RESEARCH_WIDTH : TASK_WIDTH,
+      height: research ? RESEARCH_HEIGHT : TASK_HEIGHT,
     });
   }
   separateUnpinned(nodes, tasks);
