@@ -42,6 +42,8 @@ class MemoryRepository implements BattleplanRepository {
   async saveMessage(message: ChatMessage): Promise<void> { this.messages.push(message); }
   async listArtifacts(): Promise<ChatArtifact[]> { return this.artifacts; }
   async saveArtifact(artifact: ChatArtifact): Promise<void> { this.artifacts.push(artifact); }
+  async listPendingChanges(): Promise<import('../core/models').PendingChange[]> { return []; }
+  async savePendingChanges(): Promise<void> { return; }
 }
 
 function cursor(): CursorClient & { prompts: string[] } {
@@ -186,6 +188,35 @@ describe('LocalEngine', () => {
     expect(client.prompts[0]).toContain('Task rules');
     expect(client.prompts[0]).toContain('Please implement the feature.');
     expect(sent.content).toBe('Please implement the feature.');
+  });
+
+  it('allows DAR updates after the agent starts without resubmitting initial prompt', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    let tick = 0;
+    const engine = new LocalEngine(repo, client, () => `2026-10-02T00:00:0${tick++}.000Z`, () => `id-${tick}`);
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      starting_ref: 'main',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const task = await engine.createTask('p1', {
+      title: 'Implement',
+      output_type: 'code',
+      dar: 'Original rules',
+      initial_prompt: 'Please implement the feature.',
+    });
+    await engine.executeTask(task.task_id);
+    const updated = await engine.updateTask('p1', task.task_id, {
+      dar: 'Revised rules',
+      initial_prompt: 'Please implement the feature.',
+    });
+    expect(updated.dar).toBe('Revised rules');
   });
 
   it('defaults research task DAR and no default for code tasks', async () => {

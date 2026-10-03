@@ -192,6 +192,17 @@ export class AppComponent implements OnInit {
         || selection.kind === 'task');
       void electronBridge()?.invoke('menu:sync-state', { exportEnabled, saveEnabled });
     });
+    effect(() => {
+      if (!this.desktop) return;
+      const projects = this.store.rootProjects().map((project) => ({
+        id: project.project_id,
+        title: project.title,
+      }));
+      void electronBridge()?.invoke('menu:rebuild', {
+        projects,
+        themeId: this.themeId(),
+      });
+    });
     effect((onCleanup) => {
       if (!this.convertPanel()) return;
       window.addEventListener('pointerdown', this.onMapDismissCapture, true);
@@ -239,6 +250,16 @@ export class AppComponent implements OnInit {
     });
     electronBridge()?.on('menu:action', (action) => {
       this.zone.run(() => this.handleMenuAction(String(action)));
+    });
+    electronBridge()?.on('menu:open-project', (projectId) => {
+      this.zone.run(() => {
+        void this.guardUnsavedChanges(async () => {
+          await this.activateProjectTab(String(projectId));
+        });
+      });
+    });
+    electronBridge()?.on('menu:theme', (themeId) => {
+      this.zone.run(() => this.applyThemeChoice(themeId as ThemeId));
     });
     electronBridge()?.on('update:status', (payload) => {
       const info = payload as { upToDate?: boolean; current?: string };
@@ -402,10 +423,27 @@ export class AppComponent implements OnInit {
   }
 
   chooseTheme(event: Event): void {
-    const theme = (event.target as HTMLSelectElement).value as ThemeId;
+    this.applyThemeChoice((event.target as HTMLSelectElement).value as ThemeId);
+  }
+
+  applyThemeChoice(theme: ThemeId): void {
     this.themeId.set(theme);
     applyTheme(theme, !this.desktop);
     void this.preferences.saveTheme(theme);
+  }
+
+  projectTabTitle(projectId: string): string {
+    return this.store.projects().find((project) => project.project_id === projectId)?.title ?? 'Project';
+  }
+
+  async activateProjectTab(projectId: string): Promise<void> {
+    if (projectId === this.store.projectId()) return;
+    const nextWidth = await this.store.switchProjectTab(projectId, this.paneWidth());
+    this.paneWidth.set(nextWidth);
+  }
+
+  releasePendingChanges(): void {
+    void this.store.releasePendingChanges();
   }
 
   startResize(event: PointerEvent): void {
@@ -988,13 +1026,10 @@ export class AppComponent implements OnInit {
   }
 
   async onProjectChange(event: Event): Promise<void> {
-    const select = event.target as HTMLSelectElement;
-    const projectId = select.value;
-    const current = this.store.projectId() ?? '';
-    if (!projectId || projectId === current) return;
-    select.value = current;
+    const projectId = (event.target as HTMLSelectElement).value;
+    if (!projectId || projectId === this.store.projectId()) return;
     await this.guardUnsavedChanges(async () => {
-      await this.store.selectProject(projectId);
+      await this.activateProjectTab(projectId);
     });
   }
 

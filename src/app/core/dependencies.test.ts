@@ -18,6 +18,12 @@ function task(partial: Partial<ProjectTask> & Pick<ProjectTask, 'task_id'>): Pro
 }
 
 describe('dependencies', () => {
+  it('ignores deleted child ids when listing normal children', () => {
+    const tasks = [task({ task_id: 'parent', dependencies: ['missing', 'child'] }), task({ task_id: 'child' })];
+    const byId = new Map(tasks.map((item) => [item.task_id, item]));
+    expect(normalChildIds(tasks[0], byId)).toEqual(['child']);
+  });
+
   it('treats dependencies as normal child links', () => {
     const tasks = [
       task({ task_id: 'parent', dependencies: ['child'] }),

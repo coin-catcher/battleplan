@@ -3,6 +3,7 @@ import type {
   ChatMessage,
   ConversationPage,
   OutputType,
+  PendingChange,
   Project,
   ProjectTask,
   TaskCodeOutput,
@@ -115,6 +116,23 @@ export class BattleplanApi {
 
   listProjectMessages(projectId: string): Promise<ConversationPage> {
     return this.engine.listProjectMessages(projectId);
+  }
+
+  listPendingChanges(projectId: string): Promise<PendingChange[]> {
+    return this.engine.listPendingChanges(projectId);
+  }
+
+  savePendingChanges(projectId: string, changes: PendingChange[]): Promise<void> {
+    return this.engine.savePendingChanges(projectId, changes);
+  }
+
+  syncPendingChanges(projectId: string, input: {
+    tasks: ProjectTask[];
+    codeOutputs: Record<string, TaskCodeOutput | null>;
+    researchOutputs: Record<string, TaskResearchOutput | null>;
+    current: PendingChange[];
+  }): Promise<PendingChange[]> {
+    return this.engine.syncPendingChanges(projectId, input);
   }
 
   sendProjectMessage(projectId: string, message: string): Promise<ChatMessage> {
