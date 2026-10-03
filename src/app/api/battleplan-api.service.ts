@@ -70,7 +70,9 @@ export class BattleplanApi {
       title: typeof patch['title'] === 'string' ? patch['title'] : undefined,
       prompt: typeof patch['prompt'] === 'string' ? patch['prompt'] : undefined,
       dependencies: Array.isArray(patch['dependencies']) ? patch['dependencies'] as string[] : undefined,
-      output_type: patch['output_type'] === 'code' || patch['output_type'] === 'research' ? patch['output_type'] : undefined,
+      output_type: patch['output_type'] === 'code' || patch['output_type'] === 'research' || patch['output_type'] === 'subproject'
+        ? patch['output_type']
+        : undefined,
       status: typeof patch['status'] === 'string' ? patch['status'] as TaskStatus : undefined,
       manual: typeof patch['manual'] === 'boolean' ? patch['manual'] : undefined,
       map_x: typeof patch['map_x'] === 'number' ? patch['map_x'] : undefined,
@@ -136,6 +138,10 @@ export class BattleplanApi {
 
   sendTaskMessage(taskId: string, message: string): Promise<ChatMessage> {
     return this.engine.sendTaskMessage(taskId, message);
+  }
+
+  convertTask(projectId: string, taskId: string, to: 'code' | 'subproject'): Promise<ProjectTask> {
+    return this.engine.convertTask(projectId, taskId, to);
   }
 
   approve(taskId: string): Promise<ProjectTask> {

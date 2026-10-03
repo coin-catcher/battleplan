@@ -1,8 +1,11 @@
 import type { ProjectTask, TaskStatus } from './models';
 
+export type MindmapShape = 'project' | 'code' | 'research' | 'subproject';
+
 export interface MindmapNode {
   id: string;
   kind: 'project' | 'task';
+  shape: MindmapShape;
   label: string;
   status?: TaskStatus;
   x: number;
@@ -48,6 +51,17 @@ export function cardinalAnchor(node: MindmapNode, direction: CardinalDirection):
   return borderPoint(node, ux, uy);
 }
 
+export function pickNorthWestCorner(
+  node: MindmapNode,
+  worldX: number,
+  worldY: number,
+  thresholdPx: number,
+): boolean {
+  const cornerX = node.x - node.width / 2;
+  const cornerY = node.y - node.height / 2;
+  return Math.hypot(worldX - cornerX, worldY - cornerY) <= thresholdPx;
+}
+
 export function pickCardinalEdge(
   node: MindmapNode,
   worldX: number,
@@ -74,8 +88,9 @@ export function positionConnectedNode(
 ): { x: number; y: number } {
   const anchor = cardinalAnchor(source, direction);
   const { ux, uy } = CARDINAL_UNIT[direction];
-  const halfW = source.kind === 'project' ? source.width / 2 : TASK_WIDTH / 2;
-  const halfH = source.kind === 'project' ? source.height / 2 : TASK_HEIGHT / 2;
+  const circular = source.shape === 'project' || source.shape === 'subproject';
+  const halfW = circular ? source.width / 2 : TASK_WIDTH / 2;
+  const halfH = circular ? source.height / 2 : TASK_HEIGHT / 2;
   const outward = Math.max(halfW, halfH) + gapPx + (direction === 'north' || direction === 'south' ? TASK_HEIGHT / 2 : TASK_WIDTH / 2);
   return { x: anchor.x + ux * outward, y: anchor.y + uy * outward };
 }
@@ -168,6 +183,7 @@ export function layoutMindmap(
   const nodes: MindmapNode[] = [{
     id: 'project',
     kind: 'project',
+    shape: 'project',
     label: title || 'Project',
     x: projectX,
     y: projectY,
@@ -178,9 +194,15 @@ export function layoutMindmap(
     const radius = 200 + depthOf(task.task_id) * 150;
     const angle = angleOf.get(task.task_id) ?? 0;
     const pinned = Number.isFinite(task.map_x) && Number.isFinite(task.map_y);
+    const shape: MindmapShape = task.output_type === 'research'
+      ? 'research'
+      : task.output_type === 'subproject'
+        ? 'subproject'
+        : 'code';
     nodes.push({
       id: task.task_id,
       kind: 'task',
+      shape,
       label: task.title,
       status: task.status,
       x: pinned ? task.map_x! : projectX + Math.cos(angle) * radius,
@@ -228,7 +250,7 @@ function separateUnpinned(nodes: MindmapNode[], tasks: ProjectTask[]): void {
   const pinned = new Set(tasks.filter((task) => Number.isFinite(task.map_x) && Number.isFinite(task.map_y)).map((task) => task.task_id));
   for (let pass = 0; pass < 8; pass += 1) {
     for (const node of nodes) {
-      if (node.kind === 'project' || pinned.has(node.id)) continue;
+      if (node.shape === 'project' || pinned.has(node.id)) continue;
       for (const other of nodes) {
         if (other === node) continue;
         const dx = node.x - other.x;
@@ -264,7 +286,7 @@ function drawEdge(from: MindmapNode, to: MindmapNode, dashed: boolean): MindmapE
 }
 
 function borderPoint(node: MindmapNode, ux: number, uy: number): { x: number; y: number } {
-  if (node.kind === 'project') {
+  if (node.shape === 'project' || node.shape === 'subproject') {
     const radius = node.width / 2;
     return { x: node.x + ux * radius, y: node.y + uy * radius };
   }
