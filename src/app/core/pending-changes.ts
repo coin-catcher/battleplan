@@ -1,9 +1,17 @@
 import type { PendingChange, Project, ProjectTask, TaskCodeOutput, TaskResearchOutput } from './models';
 
+export const DEFAULT_MAIN_BRANCH = 'main';
+export const DEFAULT_DEVELOP_BRANCH = 'develop';
+
 export function parseGithubPullRequest(url: string): { owner: string; repo: string; number: number } | null {
   const match = url.trim().match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/i);
   if (!match) return null;
   return { owner: match[1], repo: match[2].replace(/\.git$/, ''), number: Number(match[3]) };
+}
+
+export function parseMergePullNumber(message: string): number | null {
+  const match = message.match(/Merge pull request #(\d+)/i);
+  return match ? Number(match[1]) : null;
 }
 
 export interface GithubPullRequest {
@@ -11,6 +19,12 @@ export interface GithubPullRequest {
   baseRef: string;
   title: string;
   body: string;
+}
+
+export interface CompareCommit {
+  sha: string;
+  message: string;
+  html_url?: string;
 }
 
 export async function fetchGithubPullRequest(
@@ -22,13 +36,12 @@ export async function fetchGithubPullRequest(
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'battleplan-desktop' },
   });
   if (!response.ok) return null;
-  const payload = response.json() as Promise<{
+  const data = await response.json() as {
     merged?: boolean;
     base?: { ref?: string };
     title?: string;
     body?: string | null;
-  }>;
-  const data = await payload;
+  };
   return {
     merged: Boolean(data.merged),
     baseRef: data.base?.ref ?? '',
@@ -37,14 +50,39 @@ export async function fetchGithubPullRequest(
   };
 }
 
+export async function fetchCommitsOnDevelopNotInMain(
+  owner: string,
+  repo: string,
+  mainBranch = DEFAULT_MAIN_BRANCH,
+  developBranch = DEFAULT_DEVELOP_BRANCH,
+): Promise<CompareCommit[]> {
+  const response = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/compare/${encodeURIComponent(mainBranch)}...${encodeURIComponent(developBranch)}`,
+    { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'battleplan-desktop' } },
+  );
+  if (response.status === 404) return [];
+  if (!response.ok) return [];
+  const data = await response.json() as {
+    ahead_by?: number;
+    commits?: Array<{ sha: string; html_url?: string; commit: { message: string } }>;
+  };
+  if ((data.ahead_by ?? 0) === 0) return [];
+  return (data.commits ?? []).map((item) => ({
+    sha: item.sha,
+    message: item.commit.message,
+    html_url: item.html_url,
+  }));
+}
+
 /** True when develop has no commits that main is missing (develop fully merged into main). */
-export async function isDevelopMergedIntoMain(owner: string, repo: string): Promise<boolean> {
-  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/compare/main...develop`, {
-    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'battleplan-desktop' },
-  });
-  if (!response.ok) return false;
-  const data = await response.json() as { ahead_by?: number };
-  return (data.ahead_by ?? 0) === 0;
+export async function isDevelopMergedIntoMain(
+  owner: string,
+  repo: string,
+  mainBranch = DEFAULT_MAIN_BRANCH,
+  developBranch = DEFAULT_DEVELOP_BRANCH,
+): Promise<boolean> {
+  const commits = await fetchCommitsOnDevelopNotInMain(owner, repo, mainBranch, developBranch);
+  return commits.length === 0;
 }
 
 export function pendingSummary(output: TaskCodeOutput | TaskResearchOutput, pull?: GithubPullRequest): string {
@@ -66,6 +104,42 @@ export function upsertPendingChange(
   return next;
 }
 
+interface TaskPullMatch {
+  taskId: string;
+  title: string;
+  summary: string;
+  prLink: string;
+}
+
+function buildTaskPullIndex(
+  tasks: ProjectTask[],
+  codeOutputs: Record<string, TaskCodeOutput | null>,
+  researchOutputs: Record<string, TaskResearchOutput | null>,
+): Map<number, TaskPullMatch> {
+  const index = new Map<number, TaskPullMatch>();
+  for (const task of tasks) {
+    const output = task.output_type === 'code'
+      ? codeOutputs[task.task_id]
+      : task.output_type === 'research'
+        ? researchOutputs[task.task_id]
+        : null;
+    if (!output?.pr_link) continue;
+    const parsed = parseGithubPullRequest(output.pr_link);
+    if (!parsed) continue;
+    index.set(parsed.number, {
+      taskId: task.task_id,
+      title: task.title,
+      summary: pendingSummary(output),
+      prLink: output.pr_link,
+    });
+  }
+  return index;
+}
+
+function firstLine(message: string): string {
+  return message.split('\n')[0]?.trim() || 'Change';
+}
+
 export async function syncPendingChangesForProject(input: {
   project: Project;
   tasks: ProjectTask[];
@@ -74,41 +148,43 @@ export async function syncPendingChangesForProject(input: {
   current: PendingChange[];
 }): Promise<PendingChange[]> {
   const slug = projectRepoSlug(input.project);
-  if (!slug) return input.current;
+  if (!slug) return [];
   const { owner, repo } = slug;
 
-  if (await isDevelopMergedIntoMain(owner, repo)) return [];
+  const commits = await fetchCommitsOnDevelopNotInMain(owner, repo);
+  if (commits.length === 0) return [];
 
-  let next = [...input.current];
-  for (const task of input.tasks) {
-    const output = task.output_type === 'code'
-      ? input.codeOutputs[task.task_id]
-      : input.researchOutputs[task.task_id];
-    if (!output?.pr_link) continue;
-    const link = parseGithubPullRequest(output.pr_link);
-    if (!link) continue;
-    const pull = await fetchGithubPullRequest(link.owner, link.repo, link.number);
-    if (!pull?.merged) continue;
-    const developBranch = input.project.starting_ref?.trim() || 'develop';
-    const mergedToDevelop = pull.baseRef === developBranch || pull.baseRef === 'develop';
-    const mergedToMain = pull.baseRef === 'main' || pull.baseRef === 'master';
-    const changeId = `${task.task_id}:${link.number}`;
-    if (mergedToMain) {
-      next = next.filter((item) => item.change_id !== changeId);
-      continue;
+  const taskByPull = buildTaskPullIndex(input.tasks, input.codeOutputs, input.researchOutputs);
+  const pullCache = new Map<number, GithubPullRequest | null>();
+  const next: PendingChange[] = [];
+  const timestamp = new Date().toISOString();
+
+  for (const commit of commits) {
+    const prNumber = parseMergePullNumber(commit.message);
+    let pull: GithubPullRequest | null = null;
+    if (prNumber !== null) {
+      if (!pullCache.has(prNumber)) {
+        pullCache.set(prNumber, await fetchGithubPullRequest(owner, repo, prNumber));
+      }
+      pull = pullCache.get(prNumber) ?? null;
     }
-    if (mergedToDevelop) {
-      next = upsertPendingChange(next, {
-        change_id: changeId,
-        task_id: task.task_id,
-        task_title: task.title,
-        summary: pendingSummary(output, pull),
-        pr_link: output.pr_link,
-        merged_to_develop_at: new Date().toISOString(),
-      });
-    }
+
+    const taskMatch = prNumber !== null ? taskByPull.get(prNumber) : undefined;
+    const headline = firstLine(commit.message);
+    const prLink = taskMatch?.prLink
+      ?? (prNumber !== null ? `https://github.com/${owner}/${repo}/pull/${prNumber}` : commit.html_url);
+
+    next.push({
+      change_id: commit.sha,
+      task_id: taskMatch?.taskId ?? '',
+      task_title: taskMatch?.title ?? pull?.title ?? headline,
+      summary: (taskMatch?.summary ?? pull?.title ?? headline).slice(0, 240),
+      pr_link: prLink,
+      merged_to_develop_at: timestamp,
+    });
   }
-  return next;
+
+  return next.sort((left, right) => right.merged_to_develop_at?.localeCompare(left.merged_to_develop_at ?? '') ?? 0);
 }
 
 export function projectRepoSlug(project: Project): { owner: string; repo: string } | null {
