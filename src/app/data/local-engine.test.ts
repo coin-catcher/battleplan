@@ -53,6 +53,7 @@ function cursor(): CursorClient & { prompts: string[] } {
     async createRun() { return { id: 'run-2', agentId: 'agent-1', status: 'RUNNING' }; },
     async listRuns() { return []; },
     async getRun() { return { id: 'run-1', agentId: 'agent-1', status: 'RUNNING' }; },
+    async streamRunText() { return undefined; },
     async listArtifacts() { return []; },
     async downloadArtifact() { return { url: 'https://example.test/file', expiresAt: '2099-01-01T00:00:00.000Z' }; },
   };
@@ -75,6 +76,60 @@ describe('LocalEngine', () => {
     const page = await engine.listProjectMessages(project.project_id);
     expect(page.messages.map((message) => message.content)).toEqual(['Map the deletion landscape']);
     expect(repo.projects.size).toBe(1);
+  });
+
+  it('imports assistant text from a finished run when listRuns omits the result', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    client.listRuns = async () => [{
+      id: 'run-1',
+      agentId: 'agent-1',
+      status: 'FINISHED',
+    }];
+    client.getRun = async () => ({
+      id: 'run-1',
+      agentId: 'agent-1',
+      status: 'FINISHED',
+      result: 'Here is the battleplan summary.',
+    });
+    const engine = new LocalEngine(repo, client, () => '2026-10-02T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      cursor_agent_id: 'agent-1',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    await repo.saveMessage({
+      message_id: 'm-user',
+      scope: 'project',
+      project_id: 'p1',
+      role: 'user',
+      content: 'Plan this feature',
+      created_at: '2026-10-02T00:00:00.000Z',
+      run_id: 'run-1',
+      intent: 'chat',
+    });
+    const page = await engine.listProjectMessages('p1');
+    expect(page.messages.some((message) => message.role === 'assistant' && message.content.includes('battleplan summary'))).toBe(true);
+  });
+
+  it('persists map coordinates when creating a task', async () => {
+    const repo = new MemoryRepository();
+    const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const task = await engine.createTask('p1', { map_x: 120, map_y: 340 });
+    expect(task.map_x).toBe(120);
+    expect(task.map_y).toBe(340);
   });
 
   it('marks a task BLOCKED without calling Cursor', async () => {

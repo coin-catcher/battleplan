@@ -8,7 +8,14 @@ import { AppPreferences } from './data/app-preferences.service';
 import { electronBridge, isElectronApp } from './data/electron-bridge';
 import { CursorKey } from './data/cursor-key.service';
 import { ProjectPortability } from './data/project-portability.service';
-import { layoutMindmap, type MindmapNode } from './core/mindmap';
+import {
+  cardinalAnchor,
+  layoutMindmap,
+  pickCardinalEdge,
+  pointerToWorld,
+  type CardinalDirection,
+  type MindmapNode,
+} from './core/mindmap';
 import { MarkdownComponent } from 'ngx-markdown';
 import { BattleplanStore } from './state/battleplan-store.service';
 
@@ -30,7 +37,21 @@ export class AppComponent implements OnInit {
   readonly signingOpen = signal(false);
   readonly zoom = signal(1);
   readonly dragPins = signal<Record<string, { x: number; y: number }>>({});
+  readonly hoveredConnect = signal<{ nodeId: string; direction: CardinalDirection } | null>(null);
+  readonly connectPanel = signal<{ sourceId: string; sourceKind: 'project' | 'task'; direction: CardinalDirection } | null>(null);
+  readonly editingNodeId = signal<string | null>(null);
+  readonly editDraft = signal('');
+  readonly mapDraggingNodeId = signal<string | null>(null);
   readonly mapStage = viewChild<ElementRef<HTMLElement>>('mapStage');
+  private edgeHoldTimer: ReturnType<typeof setTimeout> | undefined;
+  private mapHoverFrame = 0;
+  private readonly connectHoldMs = 250;
+  private readonly onMapPointerMoveCapture = (event: PointerEvent): void => {
+    this.onMapPointerMove(event);
+  };
+  private readonly onMapDismissCapture = (event: PointerEvent): void => {
+    this.onMapDismissPointerDown(event);
+  };
   readonly map = computed(() => {
     const project = this.store.project();
     const pins = this.dragPins();
@@ -76,7 +97,7 @@ export class AppComponent implements OnInit {
 
   private centeredProject = '';
   private titleSignature = '';
-  private taskSignature = '';
+  private boundTaskFormId = '';
   private outputSignature = '';
   private readonly onMapWheelCapture = (event: WheelEvent): void => {
     this.onMapWheel(event);
@@ -87,7 +108,14 @@ export class AppComponent implements OnInit {
       const stage = this.mapStage()?.nativeElement;
       if (!stage) return;
       stage.addEventListener('wheel', this.onMapWheelCapture, { passive: false });
+      stage.addEventListener('pointermove', this.onMapPointerMoveCapture);
       onCleanup(() => stage.removeEventListener('wheel', this.onMapWheelCapture));
+      onCleanup(() => stage.removeEventListener('pointermove', this.onMapPointerMoveCapture));
+    });
+    effect((onCleanup) => {
+      if (!this.connectPanel()) return;
+      window.addEventListener('pointerdown', this.onMapDismissCapture, true);
+      onCleanup(() => window.removeEventListener('pointerdown', this.onMapDismissCapture, true));
     });
     effect(() => {
       const project = this.store.project();
@@ -115,15 +143,24 @@ export class AppComponent implements OnInit {
     });
 
     effect(() => {
+      const selection = this.store.selection();
       const task = this.store.selectedTask();
-      if (!task || this.store.selection().kind !== 'task') return;
-      const signature = `${task.task_id}:${task.status}:${task.title}:${task.prompt}:${task.output_type}:${task.dependencies.join(',')}`;
-      if (signature === this.taskSignature) return;
-      this.taskSignature = signature;
+      if (selection.kind !== 'task' || !task) {
+        this.boundTaskFormId = '';
+        return;
+      }
+      if (this.boundTaskFormId === task.task_id) return;
+      this.boundTaskFormId = task.task_id;
       this.taskTitle = task.title;
       this.taskPrompt = task.prompt;
       this.outputType = task.output_type;
       this.dependencies = [...task.dependencies];
+    });
+
+    effect(() => {
+      if (!this.desktop) return;
+      const exportEnabled = Boolean(this.store.project());
+      void electronBridge()?.invoke('menu:sync-state', { exportEnabled });
     });
 
     effect(() => {
@@ -164,6 +201,28 @@ export class AppComponent implements OnInit {
       const notes = typeof info.releaseNotes === 'string' ? info.releaseNotes : 'A newer Battleplan release is available.';
       this.zone.run(() => this.updatePrompt.set({ version, notes }));
     });
+    electronBridge()?.on('menu:action', (action) => {
+      this.zone.run(() => this.handleMenuAction(String(action)));
+    });
+  }
+
+  private handleMenuAction(action: string): void {
+    switch (action) {
+      case 'new-project':
+        this.store.showCreate();
+        break;
+      case 'import-project':
+        this.importProject();
+        break;
+      case 'export-project':
+        this.exportProject();
+        break;
+      case 'cursor-api-key':
+        this.openCursorKey();
+        break;
+      default:
+        break;
+    }
   }
 
   chooseTheme(event: Event): void {
@@ -360,7 +419,11 @@ export class AppComponent implements OnInit {
 
   onStagePointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-node, .zoom-controls')) return;
+    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .zoom-controls')) return;
+    if (this.connectPanel()) {
+      this.dismissConnectPanel();
+      return;
+    }
     const stage = this.mapStage()?.nativeElement;
     if (!stage) return;
     const startX = event.clientX;
@@ -380,7 +443,8 @@ export class AppComponent implements OnInit {
   }
 
   onNodePointerDown(node: MindmapNode, event: PointerEvent): void {
-    if ((event.target as HTMLElement).closest('.plus')) return;
+    if (this.editingNodeId() === node.id) return;
+    if ((event.target as HTMLElement).closest('.map-edge-arrow, .map-connect-panel')) return;
     event.stopPropagation();
     const startX = event.clientX;
     const startY = event.clientY;
@@ -392,11 +456,14 @@ export class AppComponent implements OnInit {
       const dy = (ev.clientY - startY) / this.zoom();
       if (!dragged && Math.hypot(dx, dy) < 4) return;
       dragged = true;
+      this.mapDraggingNodeId.set(node.id);
+      this.hoveredConnect.set(null);
       this.dragPins.update((pins) => ({ ...pins, [node.id]: { x: originX + dx, y: originY + dy } }));
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      this.mapDraggingNodeId.set(null);
       const pin = this.dragPins()[node.id];
       if (dragged && pin) {
         void this.store.placeNode(node.id, pin.x, pin.y);
@@ -418,9 +485,145 @@ export class AppComponent implements OnInit {
     else void this.store.openTask(node.id);
   }
 
-  addMapTask(node: MindmapNode, event: Event): void {
+  connectArrowClass(direction: CardinalDirection): string {
+    return `map-edge-arrow dir-${direction}`;
+  }
+
+  connectArrowPoint(nodeId: string, direction: CardinalDirection): { x: number; y: number } {
+    const node = this.map().nodes.find((item) => item.id === nodeId);
+    if (!node) return { x: 0, y: 0 };
+    return cardinalAnchor(node, direction);
+  }
+
+  visibleConnectDirection(nodeId: string): CardinalDirection | null {
+    const panel = this.connectPanel();
+    if (panel?.sourceId === nodeId) return panel.direction;
+    const hover = this.hoveredConnect();
+    if (hover?.nodeId === nodeId) return hover.direction;
+    return null;
+  }
+
+  onMapPointerMove(event: PointerEvent): void {
+    if (this.connectPanel() || this.editingNodeId() || this.mapDraggingNodeId()) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('.map-connect-panel')) return;
+    cancelAnimationFrame(this.mapHoverFrame);
+    this.mapHoverFrame = requestAnimationFrame(() => {
+      const stage = this.mapStage()?.nativeElement;
+      if (!stage) return;
+      const world = pointerToWorld(
+        event.clientX,
+        event.clientY,
+        stage.getBoundingClientRect(),
+        stage.scrollLeft,
+        stage.scrollTop,
+        this.zoom(),
+      );
+      const threshold = 28 / this.zoom();
+      let match: { nodeId: string; direction: CardinalDirection } | null = null;
+      for (const node of [...this.map().nodes].reverse()) {
+        const direction = pickCardinalEdge(node, world.x, world.y, threshold);
+        if (direction) {
+          match = { nodeId: node.id, direction };
+          break;
+        }
+      }
+      this.hoveredConnect.set(match);
+    });
+  }
+
+  onEdgePointerDown(node: MindmapNode, direction: CardinalDirection, event: PointerEvent): void {
     event.stopPropagation();
-    void this.store.addTask(node.kind === 'task' ? node.id : undefined);
+    event.preventDefault();
+    this.clearEdgeHoldTimer();
+    this.edgeHoldTimer = setTimeout(() => {
+      this.connectPanel.set({
+        sourceId: node.id,
+        sourceKind: node.kind,
+        direction,
+      });
+      this.hoveredConnect.set({ nodeId: node.id, direction });
+    }, this.connectHoldMs);
+    const cancel = (): void => {
+      this.clearEdgeHoldTimer();
+      window.removeEventListener('pointerup', cancel);
+      window.removeEventListener('pointercancel', cancel);
+    };
+    window.addEventListener('pointerup', cancel);
+    window.addEventListener('pointercancel', cancel);
+  }
+
+  onMapDismissPointerDown(event: PointerEvent): void {
+    const target = event.target as HTMLElement;
+    if (target.closest('.map-connect-panel, .map-edge-arrow')) return;
+    this.dismissConnectPanel();
+  }
+
+  dismissConnectPanel(): void {
+    this.clearEdgeHoldTimer();
+    this.connectPanel.set(null);
+  }
+
+  async confirmAddConnectedTask(event: Event): Promise<void> {
+    event.stopPropagation();
+    const panel = this.connectPanel();
+    if (!panel) return;
+    this.dismissConnectPanel();
+    const taskId = await this.store.addConnectedTask({
+      sourceId: panel.sourceId,
+      sourceKind: panel.sourceKind,
+      direction: panel.direction,
+    });
+    if (taskId) this.startInlineEdit(taskId, 'New task');
+  }
+
+  onNodeDblClick(node: MindmapNode, event: MouseEvent): void {
+    event.stopPropagation();
+    event.preventDefault();
+    this.startInlineEdit(node.id, node.label);
+  }
+
+  startInlineEdit(nodeId: string, label: string): void {
+    this.dismissConnectPanel();
+    this.hoveredConnect.set(null);
+    this.editingNodeId.set(nodeId);
+    this.editDraft.set(label);
+  }
+
+  onTaskFieldFocus(): void {
+    this.cancelInlineEdit();
+  }
+
+  commitInlineEdit(): void {
+    const nodeId = this.editingNodeId();
+    if (!nodeId) return;
+    const draft = this.editDraft().trim();
+    const node = this.map().nodes.find((item) => item.id === nodeId);
+    const fallback = node?.label ?? '';
+    const next = draft || fallback;
+    this.editingNodeId.set(null);
+    if (nodeId === 'project') this.title = next;
+    else if (this.store.selectedTask()?.task_id === nodeId) this.taskTitle = next;
+    void this.store.saveMapNodeTitle(nodeId, next);
+  }
+
+  cancelInlineEdit(): void {
+    this.editingNodeId.set(null);
+  }
+
+  onEditKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      this.commitInlineEdit();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.cancelInlineEdit();
+    }
+  }
+
+  private clearEdgeHoldTimer(): void {
+    if (this.edgeHoldTimer) clearTimeout(this.edgeHoldTimer);
+    this.edgeHoldTimer = undefined;
   }
 
   openCode(taskId: string): void {

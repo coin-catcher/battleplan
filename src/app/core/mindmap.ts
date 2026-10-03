@@ -28,9 +28,71 @@ export interface MindmapLayout {
   edges: MindmapEdge[];
 }
 
-const PROJECT_RADIUS = 68;
-const TASK_WIDTH = 156;
-const TASK_HEIGHT = 64;
+export const PROJECT_RADIUS = 68;
+export const TASK_WIDTH = 156;
+export const TASK_HEIGHT = 64;
+
+export type CardinalDirection = 'north' | 'south' | 'east' | 'west';
+
+const CARDINAL_UNIT: Record<CardinalDirection, { ux: number; uy: number }> = {
+  north: { ux: 0, uy: -1 },
+  south: { ux: 0, uy: 1 },
+  east: { ux: 1, uy: 0 },
+  west: { ux: -1, uy: 0 },
+};
+
+const CARDINAL_ORDER: CardinalDirection[] = ['north', 'east', 'south', 'west'];
+
+export function cardinalAnchor(node: MindmapNode, direction: CardinalDirection): { x: number; y: number } {
+  const { ux, uy } = CARDINAL_UNIT[direction];
+  return borderPoint(node, ux, uy);
+}
+
+export function pickCardinalEdge(
+  node: MindmapNode,
+  worldX: number,
+  worldY: number,
+  thresholdPx: number,
+): CardinalDirection | null {
+  let best: CardinalDirection | null = null;
+  let bestDistance = thresholdPx;
+  for (const direction of CARDINAL_ORDER) {
+    const anchor = cardinalAnchor(node, direction);
+    const distance = Math.hypot(worldX - anchor.x, worldY - anchor.y);
+    if (distance <= bestDistance) {
+      bestDistance = distance;
+      best = direction;
+    }
+  }
+  return best;
+}
+
+export function positionConnectedNode(
+  source: MindmapNode,
+  direction: CardinalDirection,
+  gapPx = 120,
+): { x: number; y: number } {
+  const anchor = cardinalAnchor(source, direction);
+  const { ux, uy } = CARDINAL_UNIT[direction];
+  const halfW = source.kind === 'project' ? source.width / 2 : TASK_WIDTH / 2;
+  const halfH = source.kind === 'project' ? source.height / 2 : TASK_HEIGHT / 2;
+  const outward = Math.max(halfW, halfH) + gapPx + (direction === 'north' || direction === 'south' ? TASK_HEIGHT / 2 : TASK_WIDTH / 2);
+  return { x: anchor.x + ux * outward, y: anchor.y + uy * outward };
+}
+
+/** Convert a pointer position inside map-stage to layout world coordinates. */
+export function pointerToWorld(
+  clientX: number,
+  clientY: number,
+  stageRect: DOMRect,
+  scrollLeft: number,
+  scrollTop: number,
+  zoom: number,
+): { x: number; y: number } {
+  const localX = clientX - stageRect.left + scrollLeft;
+  const localY = clientY - stageRect.top + scrollTop;
+  return { x: localX / zoom, y: localY / zoom };
+}
 
 const WORLD_X = 1600;
 const WORLD_Y = 1200;

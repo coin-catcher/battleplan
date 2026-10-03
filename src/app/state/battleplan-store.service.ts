@@ -12,7 +12,8 @@ import type {
   TaskResearchOutput,
   TaskStatus,
 } from '../core/models';
-import { parseGeneratedTaskList } from '../core/parse-tasks';
+import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
+import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
 
 const POLL_INTERVAL_MS = 3000;
@@ -188,13 +189,21 @@ export class BattleplanStore {
     if (!runId || this.error()) return;
     if (taskId) await this.watchTask(taskId, runId);
     else await this.watchProject(projectId, runId);
+    await this.run(async () => {
+      if (taskId) {
+        const refreshed = await this.api.listTaskMessages(taskId);
+        this.applyTaskConversation(refreshed);
+      } else {
+        this.applyConversation(await this.api.listProjectMessages(projectId));
+      }
+    });
     const reply = this.messages().find((message) => message.run_id === runId && message.role === 'assistant');
     if (!reply) {
       this.error.set('The Cursor agent has not replied yet.');
       return;
     }
     await this.run(async () => {
-      const drafts = parseGeneratedTaskList(reply.content);
+      const drafts = parseGeneratedTaskListFromSources(reply.content, this.artifacts());
       await this.api.createTasks(projectId, drafts);
       await this.reloadTasks();
       const note = `Created ${drafts.length} task${drafts.length === 1 ? '' : 's'} from this conversation.`;
@@ -216,12 +225,38 @@ export class BattleplanStore {
   }
 
   async addTask(dependsOn?: string): Promise<void> {
+    if (dependsOn) {
+      await this.addConnectedTask({ sourceId: dependsOn, sourceKind: 'task', direction: 'east' });
+      return;
+    }
+    await this.addConnectedTask({ sourceId: 'project', sourceKind: 'project', direction: 'east' });
+  }
+
+  async addConnectedTask(input: {
+    sourceId: string;
+    sourceKind: 'project' | 'task';
+    direction: CardinalDirection;
+  }): Promise<string | null> {
     const projectId = this.projectId();
-    if (!projectId) return;
+    const project = this.project();
+    if (!projectId || !project) return null;
+    const layout = layoutMindmap(
+      project.title,
+      this.tasks(),
+      Number.isFinite(project.map_x) && Number.isFinite(project.map_y)
+        ? { x: project.map_x as number, y: project.map_y as number }
+        : undefined,
+    );
+    const source = layout.nodes.find((node) => node.id === input.sourceId);
+    if (!source) return null;
+    const placement = positionConnectedNode(source, input.direction);
+    const map_x = Math.round(placement.x);
+    const map_y = Math.round(placement.y);
+    const depends_on = input.sourceKind === 'task' ? input.sourceId : undefined;
     this.stopWatch();
     let taskId = '';
     await this.run(async () => {
-      const task = await this.api.createTask(projectId, { depends_on: dependsOn });
+      const task = await this.api.createTask(projectId, { depends_on, map_x, map_y });
       taskId = task.task_id;
       await this.reloadTasks();
       this.selection.set({ kind: 'task', taskId: task.task_id });
@@ -230,6 +265,29 @@ export class BattleplanStore {
       this.notice.set('Task added. Fill in the details.');
     });
     if (taskId) this.continueTaskWatch(taskId);
+    return taskId || null;
+  }
+
+  async saveMapNodeTitle(nodeId: string, title: string): Promise<void> {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    if (nodeId === 'project') {
+      const project = this.project();
+      if (!project) return;
+      await this.run(async () => {
+        const updated = await this.api.updateProject(project.project_id, { title: trimmed });
+        this.projects.update((projects) => projects.map((item) => item.project_id === updated.project_id ? updated : item));
+        this.notice.set('Project title saved.');
+      });
+      return;
+    }
+    const task = this.tasks().find((item) => item.task_id === nodeId);
+    if (!task) return;
+    await this.run(async () => {
+      const updated = await this.api.updateTask(task.project_id, task.task_id, { title: trimmed });
+      this.replaceTask(updated);
+      this.notice.set('Task title saved.');
+    });
   }
 
   async openOutput(taskId: string, kind: 'code' | 'research'): Promise<void> {

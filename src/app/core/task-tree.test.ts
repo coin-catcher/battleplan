@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectTask } from './models';
-import { parseGeneratedTaskList } from './parse-tasks';
+import { parseGeneratedTaskList, parseGeneratedTaskListFromSources } from './parse-tasks';
+import type { ChatArtifact } from './models';
 import { buildTaskForest, reorderTaskIds } from './task-tree';
 
 function task(partial: Partial<ProjectTask> & Pick<ProjectTask, 'task_id' | 'title' | 'order'>): ProjectTask {
@@ -62,5 +63,23 @@ describe('parse generated tasks', () => {
 
   it('rejects prose that is still brainstorming', () => {
     expect(() => parseGeneratedTaskList('Let us keep discussing the scope.')).toThrow(/JSON task array/);
+  });
+
+  it('reads a JSON task list from a text artifact when the reply is empty', () => {
+    const artifacts: ChatArtifact[] = [{
+      scope: 'project',
+      project_id: 'p1',
+      path: 'artifacts/tasks.json',
+      name: 'tasks.json',
+      size_bytes: 120,
+      updated_at: '2026-10-02T00:00:00.000Z',
+      content_type: 'text',
+      text: '[{"title":"Ship","prompt":"Open the PR","output_type":"code","depends_on":[]}]',
+    }];
+    const drafts = parseGeneratedTaskListFromSources(
+      'The agent finished. Attached files are shown with this conversation.',
+      artifacts,
+    );
+    expect(drafts[0]?.title).toBe('Ship');
   });
 });

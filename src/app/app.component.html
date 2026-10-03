@@ -26,14 +26,6 @@
         }
       </select>
     </label>
-    <button type="button" class="ghost" (click)="store.showCreate()">New project</button>
-    @if (desktop) {
-      <button type="button" class="ghost" (click)="importProject()">Import project</button>
-    }
-    @if (desktop && store.project()) {
-      <button type="button" class="ghost" (click)="exportProject()">Export project</button>
-    }
-    <button type="button" class="ghost" (click)="openCursorKey()">Cursor API key</button>
 
     @if (store.project()) {
       <div class="map-frame">
@@ -65,10 +57,22 @@
             }
           </svg>
           @for (node of map().nodes; track node.id) {
+            @if (visibleConnectDirection(node.id); as direction) {
+              <button
+                type="button"
+                class="map-edge-arrow"
+                [class]="connectArrowClass(direction)"
+                [style.left.px]="connectArrowPoint(node.id, direction).x"
+                [style.top.px]="connectArrowPoint(node.id, direction).y"
+                [attr.aria-label]="'Add a task connected to ' + node.label"
+                (pointerdown)="onEdgePointerDown(node, direction, $event)"
+              ></button>
+            }
             <div
               class="map-node"
               [class.circle]="node.kind === 'project'"
               [class.active]="isMapSelected(node)"
+              [class.editing]="editingNodeId() === node.id"
               [attr.data-status]="node.status ?? null"
               [style.left.px]="node.x"
               [style.top.px]="node.y"
@@ -77,15 +81,32 @@
               tabindex="0"
               role="button"
               (pointerdown)="onNodePointerDown(node, $event)"
+              (dblclick)="onNodeDblClick(node, $event)"
               (keydown.enter)="selectMapNode(node)"
             >
-              <span class="map-label">{{ node.label }}</span>
-              <button
-                type="button"
-                class="plus"
-                [attr.aria-label]="'Add a task connected to ' + node.label"
-                (click)="addMapTask(node, $event)"
-              >+</button>
+              @if (editingNodeId() === node.id) {
+                <input
+                  class="map-label-input"
+                  [ngModel]="editDraft()"
+                  (ngModelChange)="editDraft.set($event)"
+                  (blur)="commitInlineEdit()"
+                  (keydown)="onEditKeydown($event)"
+                  (click)="$event.stopPropagation()"
+                  (pointerdown)="$event.stopPropagation()"
+                />
+              } @else {
+                <span class="map-label">{{ node.label }}</span>
+              }
+            </div>
+          }
+          @if (connectPanel(); as panel) {
+            <div
+              class="map-connect-panel"
+              [style.left.px]="connectArrowPoint(panel.sourceId, panel.direction).x"
+              [style.top.px]="connectArrowPoint(panel.sourceId, panel.direction).y + 28"
+              (pointerdown)="$event.stopPropagation()"
+            >
+              <button type="button" class="primary" (click)="confirmAddConnectedTask($event)">Add connected task</button>
             </div>
           }
             </div>
@@ -273,7 +294,7 @@
             <div class="config">
               <label class="field">
                 <span>Title</span>
-                <input [(ngModel)]="taskTitle" name="taskTitle" />
+                <input [(ngModel)]="taskTitle" [name]="'taskTitle-' + task.task_id" (focus)="onTaskFieldFocus()" />
               </label>
               <label class="field">
                 <span>Output</span>
@@ -293,7 +314,7 @@
             </div>
             <label class="field">
               <span>Prompt</span>
-              <textarea rows="3" [(ngModel)]="taskPrompt" name="taskPrompt"></textarea>
+              <textarea rows="3" [(ngModel)]="taskPrompt" [name]="'taskPrompt-' + task.task_id" (focus)="onTaskFieldFocus()"></textarea>
             </label>
             <fieldset class="deps">
               <legend>Dependencies</legend>
