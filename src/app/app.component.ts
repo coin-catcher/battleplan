@@ -575,19 +575,38 @@ export class AppComponent implements OnInit {
   }
 
   async executeTask(): Promise<void> {
-    await this.saveTask();
-    await this.store.executeTask();
+    this.store.chatActionPending.set('execute');
+    try {
+      await this.saveTask();
+      if (!this.store.error()) await this.store.executeTask();
+    } finally {
+      this.store.chatActionPending.set(null);
+    }
   }
 
   async executeSubproject(): Promise<void> {
-    await this.store.saveEditorProject({
-      title: this.title.trim(),
-      repo_url: this.projectRepo.trim(),
-      starting_ref: this.projectBranch.trim() || 'main',
-      dar: this.projectDar,
-      initial_prompt: this.subprojectInitialPrompt,
-    });
-    await this.store.executeSubprojectChat();
+    this.store.chatActionPending.set('execute');
+    try {
+      await this.store.saveEditorProject({
+        title: this.title.trim(),
+        repo_url: this.projectRepo.trim(),
+        starting_ref: this.projectBranch.trim() || 'main',
+        dar: this.projectDar,
+        initial_prompt: this.subprojectInitialPrompt,
+      });
+      if (!this.store.error()) await this.store.executeSubprojectChat();
+    } finally {
+      this.store.chatActionPending.set(null);
+    }
+  }
+
+  approveTask(): void {
+    this.store.chatActionPending.set('merge');
+    void this.store.approve().finally(() => this.store.chatActionPending.set(null));
+  }
+
+  chatActionsLocked(): boolean {
+    return this.store.chatActionPending() !== null || this.store.busy();
   }
 
   deleteProject(): void {
@@ -998,10 +1017,15 @@ export class AppComponent implements OnInit {
   async sendChat(): Promise<void> {
     const message = this.chatDraft.trim();
     if (!message) return;
-    const selection = this.store.selection();
-    if (selection.kind === 'task' || selection.kind === 'subproject') await this.store.sendTaskMessage(message);
-    else await this.store.sendProjectMessage(message);
-    if (!this.store.error()) this.chatDraft = '';
+    this.store.chatActionPending.set('send');
+    try {
+      const selection = this.store.selection();
+      if (selection.kind === 'task' || selection.kind === 'subproject') await this.store.sendTaskMessage(message);
+      else await this.store.sendProjectMessage(message);
+      if (!this.store.error()) this.chatDraft = '';
+    } finally {
+      this.store.chatActionPending.set(null);
+    }
   }
 
   async saveTask(): Promise<void> {
