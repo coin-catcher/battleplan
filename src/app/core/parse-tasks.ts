@@ -1,4 +1,23 @@
-import type { TaskDraft } from './models';
+import type { ChatArtifact, TaskDraft } from './models';
+
+export function parseGeneratedTaskListFromSources(text: string, artifacts: ChatArtifact[]): TaskDraft[] {
+  const errors: string[] = [];
+  try {
+    return parseGeneratedTaskList(text);
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : 'Could not parse agent text.');
+  }
+  for (const artifact of artifacts) {
+    if (artifact.content_type !== 'text' || !artifact.text?.trim()) continue;
+    if (!/\.json$/i.test(artifact.name) && !artifact.text.trim().startsWith('[')) continue;
+    try {
+      return parseGeneratedTaskList(artifact.text);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : 'Could not parse artifact text.');
+    }
+  }
+  throw new Error(errors[0] ?? 'No JSON task array found in the agent response.');
+}
 
 export function parseGeneratedTaskList(text: string): TaskDraft[] {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);

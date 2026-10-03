@@ -15,6 +15,7 @@ import { normalizeRepoUrl } from './cursor-browser';
 import type { BattleplanRepository } from './repository';
 
 const TERMINAL_RUN = new Set(['FINISHED', 'ERROR', 'CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED']);
+const ASSISTANT_PLACEHOLDER = 'The agent finished. Attached files are shown with this conversation.';
 const TEXT_ARTIFACT = /\.(md|markdown|txt|json|csv|ya?ml|html|log|xml|tsv|rst)$/i;
 const IMAGE_ARTIFACT = /\.(png|jpe?g|gif|webp|svg)$/i;
 const MAX_TEXT_BYTES = 200_000;
@@ -506,22 +507,27 @@ export class LocalEngine {
       : await this.repo.listTaskMessages(target.taskId);
     const runs = await this.cursor.listRuns(agentId);
     for (const summary of [...runs].reverse()) {
-      const run = summary.result || TERMINAL_RUN.has(summary.status)
-        ? summary
-        : await this.cursor.getRun(agentId, summary.id);
+      const run = await this.resolveTerminalRun(agentId, summary);
       if (!TERMINAL_RUN.has(run.status)) continue;
-      if (!existing.some((message) => message.run_id === run.id && message.role === 'assistant')) {
-        const user = existing.find((message) => message.run_id === run.id && message.role === 'user');
+      const user = existing.find((message) => message.run_id === run.id && message.role === 'user');
+      const assistant = existing.find((message) => message.run_id === run.id && message.role === 'assistant');
+      const content = await this.assistantText(agentId, run);
+      if (!assistant) {
         const saved = await this.record({
           scope: target.scope,
           project_id: target.projectId,
           task_id: target.scope === 'task' ? target.taskId : undefined,
           role: 'assistant',
-          content: assistantText(run),
+          content,
           run_id: run.id,
           intent: user?.intent ?? 'chat',
         });
         existing.push(saved);
+      } else if (assistant.content !== content && shouldReplaceAssistantText(assistant.content, content)) {
+        const saved = { ...assistant, content };
+        await this.repo.saveMessage(saved);
+        const index = existing.findIndex((message) => message.message_id === assistant.message_id);
+        if (index >= 0) existing[index] = saved;
       }
       if (target.scope === 'task') await this.applyTaskRun(target.taskId, run);
     }
@@ -546,18 +552,27 @@ export class LocalEngine {
         continue;
       }
       if (!TERMINAL_RUN.has(run.status)) continue;
-      if (existing.some((item) => item.role === 'assistant' && item.run_id === run.id)) continue;
-      existing.push(await this.record({
-        scope: 'task',
-        project_id: target.projectId,
-        task_id: target.taskId,
-        role: 'assistant',
-        content: assistantText(run),
-        run_id: run.id,
-        intent: message.intent ?? 'chat',
-        cursor_agent_id: agentId,
-      }));
-      await this.applyTaskRun(target.taskId, run);
+      const resolved = await this.resolveTerminalRun(agentId, run);
+      const content = await this.assistantText(agentId, resolved);
+      const assistant = existing.find((item) => item.role === 'assistant' && item.run_id === resolved.id);
+      if (!assistant) {
+        existing.push(await this.record({
+          scope: 'task',
+          project_id: target.projectId,
+          task_id: target.taskId,
+          role: 'assistant',
+          content,
+          run_id: resolved.id,
+          intent: message.intent ?? 'chat',
+          cursor_agent_id: agentId,
+        }));
+      } else if (assistant.content !== content && shouldReplaceAssistantText(assistant.content, content)) {
+        const saved = { ...assistant, content };
+        await this.repo.saveMessage(saved);
+        const index = existing.findIndex((item) => item.message_id === assistant.message_id);
+        if (index >= 0) existing[index] = saved;
+      }
+      await this.applyTaskRun(target.taskId, resolved);
     }
   }
 
@@ -723,6 +738,21 @@ export class LocalEngine {
     };
   }
 
+  private async resolveTerminalRun(agentId: string, summary: CursorRun): Promise<CursorRun> {
+    if (!TERMINAL_RUN.has(summary.status)) return summary;
+    const detailed = summary.result?.trim() ? summary : await this.cursor.getRun(agentId, summary.id);
+    if (detailed.result?.trim()) return detailed;
+    const streamed = await this.cursor.streamRunText(agentId, summary.id);
+    return streamed ? { ...detailed, result: streamed } : detailed;
+  }
+
+  private async assistantText(agentId: string, run: CursorRun): Promise<string> {
+    const result = run.result?.trim();
+    if (result) return result;
+    if (run.status === 'FINISHED') return ASSISTANT_PLACEHOLDER;
+    return `The agent run ended (${run.status}).`;
+  }
+
   private async record(message: Omit<ChatMessage, 'message_id' | 'created_at'>): Promise<ChatMessage> {
     const saved: ChatMessage = { ...message, message_id: this.newId(), created_at: this.now() };
     await this.repo.saveMessage(saved);
@@ -873,11 +903,10 @@ function mergePrompt(task: ProjectTask, prLink: string, baseBranch: string): str
   ].join('\n');
 }
 
-function assistantText(run: CursorRun): string {
-  const result = run.result?.trim();
-  if (result) return result;
-  if (run.status === 'FINISHED') return 'The agent finished. Attached files are shown with this conversation.';
-  return `The agent run ended (${run.status}).`;
+function shouldReplaceAssistantText(previous: string, next: string): boolean {
+  if (previous === next) return false;
+  if (previous === ASSISTANT_PLACEHOLDER) return true;
+  return !previous.trim() && Boolean(next.trim());
 }
 
 function artifactKind(path: string, sizeBytes: number): ChatArtifact['content_type'] {

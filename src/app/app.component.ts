@@ -97,7 +97,7 @@ export class AppComponent implements OnInit {
 
   private centeredProject = '';
   private titleSignature = '';
-  private taskSignature = '';
+  private boundTaskFormId = '';
   private outputSignature = '';
   private readonly onMapWheelCapture = (event: WheelEvent): void => {
     this.onMapWheel(event);
@@ -143,11 +143,14 @@ export class AppComponent implements OnInit {
     });
 
     effect(() => {
+      const selection = this.store.selection();
       const task = this.store.selectedTask();
-      if (!task || this.store.selection().kind !== 'task') return;
-      const signature = `${task.task_id}:${task.status}:${task.title}:${task.prompt}:${task.output_type}:${task.dependencies.join(',')}`;
-      if (signature === this.taskSignature) return;
-      this.taskSignature = signature;
+      if (selection.kind !== 'task' || !task) {
+        this.boundTaskFormId = '';
+        return;
+      }
+      if (this.boundTaskFormId === task.task_id) return;
+      this.boundTaskFormId = task.task_id;
       this.taskTitle = task.title;
       this.taskPrompt = task.prompt;
       this.outputType = task.output_type;
@@ -585,6 +588,10 @@ export class AppComponent implements OnInit {
     this.hoveredConnect.set(null);
     this.editingNodeId.set(nodeId);
     this.editDraft.set(label);
+  }
+
+  onTaskFieldFocus(): void {
+    this.cancelInlineEdit();
   }
 
   commitInlineEdit(): void {
