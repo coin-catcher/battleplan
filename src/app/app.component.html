@@ -235,15 +235,15 @@
             <div class="config">
               <label class="field">
                 <span>Title</span>
-                <input [(ngModel)]="title" name="title" />
+                <input [(ngModel)]="title" name="title" (blur)="onEditorFieldBlur()" />
               </label>
               <label class="field">
                 <span>Repository</span>
-                <input [(ngModel)]="projectRepo" name="projectRepo" placeholder="https://github.com/org/repo" />
+                <input [(ngModel)]="projectRepo" name="projectRepo" placeholder="https://github.com/org/repo" (blur)="onEditorFieldBlur()" />
               </label>
               <label class="field">
                 <span>Base branch</span>
-                <input [(ngModel)]="projectBranch" name="projectBranch" placeholder="main" />
+                <input [(ngModel)]="projectBranch" name="projectBranch" placeholder="main" (blur)="onEditorFieldBlur()" />
               </label>
             </div>
             <p class="pending">New task branches are created from this branch, and approved pull requests merge back into it.</p>
@@ -317,11 +317,11 @@
             <div class="config">
               <label class="field">
                 <span>Title</span>
-                <input [(ngModel)]="taskTitle" [name]="'taskTitle-' + task.task_id" (focus)="onTaskFieldFocus()" />
+                <input [(ngModel)]="taskTitle" [name]="'taskTitle-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" />
               </label>
               <label class="field">
                 <span>Output</span>
-                <select [(ngModel)]="outputType" name="outputType">
+                <select [(ngModel)]="outputType" name="outputType" (change)="onEditorFieldAutoSave()">
                   <option value="code">code</option>
                   <option value="research">research</option>
                   <option value="subproject">subproject</option>
@@ -338,7 +338,7 @@
             </div>
             <label class="field">
               <span>Prompt</span>
-              <textarea rows="3" [(ngModel)]="taskPrompt" [name]="'taskPrompt-' + task.task_id" (focus)="onTaskFieldFocus()"></textarea>
+              <textarea rows="3" [(ngModel)]="taskPrompt" [name]="'taskPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()"></textarea>
             </label>
             <fieldset class="deps">
               <legend>Dependencies</legend>
@@ -410,15 +410,15 @@
             <div class="config">
               <label class="field">
                 <span>Title</span>
-                <input [(ngModel)]="title" name="subprojectTitle" />
+                <input [(ngModel)]="title" name="subprojectTitle" (blur)="onEditorFieldBlur()" />
               </label>
               <label class="field">
                 <span>Repository</span>
-                <input [(ngModel)]="projectRepo" name="subprojectRepo" placeholder="https://github.com/org/repo" />
+                <input [(ngModel)]="projectRepo" name="subprojectRepo" placeholder="https://github.com/org/repo" (blur)="onEditorFieldBlur()" />
               </label>
               <label class="field">
                 <span>Base branch</span>
-                <input [(ngModel)]="projectBranch" name="subprojectBranch" placeholder="main" />
+                <input [(ngModel)]="projectBranch" name="subprojectBranch" placeholder="main" (blur)="onEditorFieldBlur()" />
               </label>
             </div>
             <div class="transcript" aria-live="polite">
@@ -519,6 +519,22 @@
     } }
   </main>
 </div>
+
+@if (unsavedPromptOpen()) {
+  <div class="modal-backdrop" role="presentation">
+    <section class="modal" role="dialog" aria-labelledby="unsaved-title" aria-describedby="unsaved-desc">
+      <header class="panel-head">
+        <h2 id="unsaved-title">Unsaved changes!</h2>
+        <p id="unsaved-desc">Do you want to save?</p>
+      </header>
+      <div class="modal-actions">
+        <button type="button" class="ghost" (click)="unsavedChoice('no')">No</button>
+        <button type="button" class="primary" (click)="unsavedChoice('yes')">Yes</button>
+        <button type="button" class="accent" (click)="unsavedChoice('yes-always')">Yes, Always</button>
+      </div>
+    </section>
+  </div>
+}
 
 @if (updatePrompt(); as update) {
   <div class="modal-backdrop" role="presentation">

@@ -12,6 +12,7 @@ export interface AppConfigDocument {
   cursor_api_key: string;
   theme: string;
   pane_width: number;
+  auto_save?: boolean;
 }
 
 export interface ProjectDocument {
