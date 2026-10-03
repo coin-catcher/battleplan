@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectTask } from './models';
-import { isUnionPair, migrateLegacyDependencies, normalChildIds } from './dependencies';
+import { migrateLegacyDependencies, migrateMutualLinksToSiblingDependencies, normalChildIds } from './dependencies';
 
 function task(partial: Partial<ProjectTask> & Pick<ProjectTask, 'task_id'>): ProjectTask {
   return {
@@ -18,23 +18,34 @@ function task(partial: Partial<ProjectTask> & Pick<ProjectTask, 'task_id'>): Pro
 }
 
 describe('dependencies', () => {
-  it('detects union pairs', () => {
+  it('treats dependencies as normal child links', () => {
     const tasks = [
-      task({ task_id: 'a', dependencies: ['b'] }),
-      task({ task_id: 'b', dependencies: ['a'] }),
+      task({ task_id: 'parent', dependencies: ['child'] }),
+      task({ task_id: 'child' }),
     ];
     const byId = new Map(tasks.map((item) => [item.task_id, item]));
-    expect(isUnionPair(byId, 'a', 'b')).toBe(true);
-    expect(normalChildIds(tasks[0], byId)).toEqual([]);
+    expect(normalChildIds(tasks[0], byId)).toEqual(['child']);
   });
 
   it('migrates legacy prerequisite lists into parent links', () => {
     const tasks = [
-      task({ task_id: 'parent', title: 'Parent' }),
-      task({ task_id: 'child', title: 'Child', dependencies: ['parent'] }),
+      task({ task_id: 'parent', title: 'Parent', order: 0 }),
+      task({ task_id: 'child', title: 'Child', order: 1, dependencies: ['parent'] }),
     ];
     expect(migrateLegacyDependencies(tasks)).toBe(true);
     expect(tasks[0].dependencies).toEqual(['child']);
     expect(tasks[1].dependencies).toEqual([]);
+  });
+
+  it('migrates mutual dependency links to sibling_dependencies', () => {
+    const tasks = [
+      task({ task_id: 'a', dependencies: ['b'] }),
+      task({ task_id: 'b', dependencies: ['a'] }),
+    ];
+    expect(migrateMutualLinksToSiblingDependencies(tasks)).toBe(true);
+    expect(tasks[0].dependencies).toEqual([]);
+    expect(tasks[0].sibling_dependencies).toEqual(['b']);
+    expect(tasks[1].dependencies).toEqual([]);
+    expect(tasks[1].sibling_dependencies).toEqual(['a']);
   });
 });

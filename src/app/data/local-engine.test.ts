@@ -16,7 +16,13 @@ class MemoryRepository implements BattleplanRepository {
   async getProject(projectId: string): Promise<Project | null> { return this.projects.get(projectId) ?? null; }
   async listProjects(): Promise<Project[]> { return [...this.projects.values()]; }
   async deleteProject(projectId: string): Promise<void> { this.projects.delete(projectId); }
-  async saveTask(task: ProjectTask): Promise<void> { this.tasks.set(task.task_id, { ...task, dependencies: [...task.dependencies] }); }
+  async saveTask(task: ProjectTask): Promise<void> {
+    this.tasks.set(task.task_id, {
+      ...task,
+      dependencies: [...task.dependencies],
+      sibling_dependencies: [...(task.sibling_dependencies ?? [])],
+    });
+  }
   async saveTasks(tasks: ProjectTask[]): Promise<void> { for (const task of tasks) await this.saveTask(task); }
   async getTask(taskId: string): Promise<ProjectTask | null> { return this.tasks.get(taskId) ?? null; }
   async listTasks(projectId: string): Promise<ProjectTask[]> {
@@ -292,6 +298,39 @@ describe('LocalEngine', () => {
     await engine.transition('p1', parent.task_id, 'ABANDONED', true);
     const savedChild = await repo.getTask(child.task_id);
     expect(savedChild?.status).toBe('ABANDONED');
+  });
+
+  it('executes available child tasks in parallel batches', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    let tick = 0;
+    const engine = new LocalEngine(repo, client, () => '2026-10-02T00:00:00.000Z', () => `task-${tick++}`);
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      starting_ref: 'main',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const parent = await engine.createTask('p1', { title: 'Parent', output_type: 'code' });
+    const left = await engine.createTask('p1', {
+      title: 'Left',
+      output_type: 'code',
+      depends_on: parent.task_id,
+      initial_prompt: 'Left go',
+    });
+    const right = await engine.createTask('p1', {
+      title: 'Right',
+      output_type: 'code',
+      depends_on: parent.task_id,
+      initial_prompt: 'Right go',
+    });
+    const started = await engine.executeChildren('p1', parent.task_id);
+    expect(started.map((task) => task.task_id).sort()).toEqual([left.task_id, right.task_id].sort());
+    expect(client.prompts.length).toBe(2);
   });
 
   it('blocks execution for abandoned tasks', async () => {

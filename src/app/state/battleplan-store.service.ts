@@ -378,6 +378,7 @@ export class BattleplanStore {
     initial_prompt: string;
     output_type: OutputType;
     dependencies: string[];
+    sibling_dependencies: string[];
   }): Promise<void> {
     const task = this.selectedTask();
     if (!task) return;
@@ -415,6 +416,24 @@ export class BattleplanStore {
       this.applyTaskConversation(await this.api.listTaskMessages(task.task_id));
     });
     if (runId && !this.error()) await this.watchTask(task.task_id, runId);
+  }
+
+  async executeChildren(parentTaskId: string): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    await this.run(async () => {
+      const started = await this.api.executeChildren(projectId, parentTaskId);
+      await this.reloadTasks();
+      if (started.length === 0) {
+        this.notice.set('No child tasks are ready to execute.');
+      } else {
+        this.notice.set(`Started ${started.length} child task${started.length === 1 ? '' : 's'}.`);
+      }
+      const selection = this.selection();
+      if (selection.kind === 'task' || selection.kind === 'subproject') {
+        this.applyTaskConversation(await this.api.listTaskMessages(selection.taskId));
+      }
+    });
   }
 
   async executeSubprojectChat(): Promise<void> {

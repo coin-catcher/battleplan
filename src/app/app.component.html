@@ -52,7 +52,6 @@
                 [attr.x2]="edge.x2"
                 [attr.y2]="edge.y2"
                 [class.dashed]="edge.dashed"
-                [attr.marker-start]="edge.bidirectional ? 'url(#arrow-dashed)' : null"
                 [attr.marker-end]="edge.dashed ? 'url(#arrow-dashed)' : 'url(#arrow-solid)'"
               />
             }
@@ -77,6 +76,16 @@
                 [style.top.px]="convertHandlePoint(node.id).y"
                 aria-label="Convert research task"
                 (pointerdown)="onConvertPointerDown(node, $event)"
+              ></button>
+            }
+            @if (node.kind === 'task' && taskHasChildren(node.id)) {
+              <button
+                type="button"
+                class="map-play-children"
+                [style.left.px]="playChildrenPoint(node).x"
+                [style.top.px]="playChildrenPoint(node).y"
+                aria-label="Execute child tasks"
+                (pointerdown)="requestExecuteChildren(node.id, $event)"
               ></button>
             }
             <div
@@ -348,18 +357,21 @@
                 <textarea rows="4" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" placeholder="Instruction sent when you execute this task. Save and return anytime before starting the agent."></textarea>
               </label>
               <div class="composer-actions">
-                <button type="button" class="accent" [disabled]="store.busy() || !taskInitialPrompt.trim()" (click)="executeTask()">Execute</button>
+                <button type="button" class="accent" [disabled]="store.busy() || !taskInitialPrompt.trim() || task.status === 'ABANDONED'" (click)="executeTask()">Execute</button>
+                @if (taskHasChildren(task.task_id)) {
+                  <button type="button" class="ghost" [disabled]="store.busy()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
+                }
               </div>
             }
             <fieldset class="deps">
               <legend>Links and dependencies</legend>
-              <p class="hint">Check tasks this one links to. One-way links draw a solid arrow from this task to the other. Check both tasks to create a union (dashed, two-way) link.</p>
+              <p class="eyebrow">Solid child links come from the mindmap. Check a sibling to depend on it (dashed arrow).</p>
               @for (other of otherTasks(); track other.task_id) {
                 <label>
                   <input
                     type="checkbox"
-                    [checked]="dependencies.includes(other.task_id)"
-                    (change)="toggleDependency(other.task_id, $event)"
+                    [checked]="siblingDependencies.includes(other.task_id)"
+                    (change)="toggleSiblingDependency(other.task_id, $event)"
                   />
                   {{ other.title }}
                 </label>
@@ -446,6 +458,9 @@
               </label>
               <div class="composer-actions">
                 <button type="button" class="accent" [disabled]="store.busy() || !subprojectInitialPrompt.trim()" (click)="executeSubproject()">Execute</button>
+                @if (taskHasChildren(task.task_id)) {
+                  <button type="button" class="ghost" [disabled]="store.busy()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
+                }
               </div>
             }
             <div class="transcript" aria-live="polite">
@@ -560,6 +575,20 @@
       <div class="modal-actions">
         <button type="button" class="ghost" (click)="dismissUpdate()">Not now</button>
         <button type="button" class="primary" (click)="installUpdate()">Download and restart</button>
+      </div>
+    </section>
+  </div>
+}
+
+@if (executeChildrenPrompt()) {
+  <div class="modal-backdrop" role="presentation">
+    <section class="modal" role="dialog" aria-labelledby="execute-children-title">
+      <header class="panel-head">
+        <h2 id="execute-children-title">Execute Children?</h2>
+      </header>
+      <div class="modal-actions">
+        <button type="button" class="ghost" (click)="answerExecuteChildren(false)">No</button>
+        <button type="button" class="primary" (click)="answerExecuteChildren(true)">Yes</button>
       </div>
     </section>
   </div>

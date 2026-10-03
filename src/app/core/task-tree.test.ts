@@ -32,10 +32,10 @@ describe('task tree', () => {
     expect(review.children.map((node) => node.task.task_id)).toEqual(['d']);
   });
 
-  it('keeps a cyclic dependency from looping forever', () => {
+  it('keeps a sibling-only pair as separate roots', () => {
     const forest = buildTaskForest([
-      task({ task_id: 'a', title: 'A', order: 0, dependencies: ['b'] }),
-      task({ task_id: 'b', title: 'B', order: 1, dependencies: ['a'] }),
+      task({ task_id: 'a', title: 'A', order: 0, sibling_dependencies: ['b'] }),
+      task({ task_id: 'b', title: 'B', order: 1, sibling_dependencies: ['a'] }),
     ]);
     const count = (nodes: ReturnType<typeof buildTaskForest>): number =>
       nodes.reduce((sum, node) => sum + 1 + count(node.children), 0);

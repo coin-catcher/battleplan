@@ -35,6 +35,8 @@ export interface ProjectTask {
   /** Saved instruction used once when starting the Cursor agent. */
   initial_prompt?: string;
   dependencies: string[];
+  /** One-way sibling links: this task depends on the listed task ids (dashed mindmap arrows). */
+  sibling_dependencies?: string[];
   status: TaskStatus;
   output_type: OutputType;
   /** Nested project opened by a subproject task. */

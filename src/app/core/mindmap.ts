@@ -1,9 +1,9 @@
 import type { ProjectTask, TaskStatus } from './models';
 import {
   depthByNormalLinks,
-  isUnionPair,
   normalChildIds,
   rootTaskIds,
+  siblingDependencyIds,
 } from './dependencies';
 
 export type MindmapShape = 'project' | 'code' | 'research' | 'subproject';
@@ -24,7 +24,6 @@ export interface MindmapEdge {
   from: string;
   to: string;
   dashed: boolean;
-  bidirectional: boolean;
   x1: number;
   y1: number;
   x2: number;
@@ -219,11 +218,10 @@ export function layoutMindmap(
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const project = nodeById.get('project');
   const edges: MindmapEdge[] = [];
-  const unionDrawn = new Set<string>();
   if (project) {
     for (const task of direct) {
       const target = nodeById.get(task.task_id);
-      if (target) edges.push(drawEdge(project, target, false, false));
+      if (target) edges.push(drawEdge(project, target, false));
     }
   }
   for (const task of tasks) {
@@ -232,16 +230,12 @@ export function layoutMindmap(
     for (const childId of normalChildIds(task, byId)) {
       const child = nodeById.get(childId);
       if (!child || child.id === parent.id) continue;
-      edges.push(drawEdge(parent, child, false, false));
+      edges.push(drawEdge(parent, child, false));
     }
-    for (const partnerId of task.dependencies) {
-      if (!isUnionPair(byId, task.task_id, partnerId)) continue;
-      const key = [task.task_id, partnerId].sort().join('|');
-      if (unionDrawn.has(key)) continue;
-      unionDrawn.add(key);
-      const partner = nodeById.get(partnerId);
-      if (!partner) continue;
-      edges.push(drawEdge(parent, partner, true, true));
+    for (const siblingId of siblingDependencyIds(task)) {
+      const sibling = nodeById.get(siblingId);
+      if (!sibling || sibling.id === parent.id) continue;
+      edges.push(drawEdge(parent, sibling, true));
     }
   }
   return {
@@ -272,7 +266,7 @@ function separateUnpinned(nodes: MindmapNode[], tasks: ProjectTask[]): void {
   }
 }
 
-function drawEdge(from: MindmapNode, to: MindmapNode, dashed: boolean, bidirectional: boolean): MindmapEdge {
+function drawEdge(from: MindmapNode, to: MindmapNode, dashed: boolean): MindmapEdge {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const length = Math.hypot(dx, dy) || 1;
@@ -280,16 +274,14 @@ function drawEdge(from: MindmapNode, to: MindmapNode, dashed: boolean, bidirecti
   const uy = dy / length;
   const start = borderPoint(from, ux, uy);
   const end = borderPoint(to, -ux, -uy);
-  const inset = bidirectional ? 0 : 6;
   return {
     from: from.id,
     to: to.id,
     dashed,
-    bidirectional,
-    x1: start.x + ux * (bidirectional ? 6 : 0),
-    y1: start.y + uy * (bidirectional ? 6 : 0),
-    x2: end.x - ux * inset,
-    y2: end.y - uy * inset,
+    x1: start.x,
+    y1: start.y,
+    x2: end.x - ux * 6,
+    y2: end.y - uy * 6,
   };
 }
 

@@ -1,34 +1,24 @@
 import type { ProjectTask } from './models';
 
-/** True when both tasks list each other in `dependencies` (union / sibling link). */
-export function isUnionPair(byId: Map<string, ProjectTask>, leftId: string, rightId: string): boolean {
-  if (leftId === rightId) return false;
-  const left = byId.get(leftId);
-  const right = byId.get(rightId);
-  if (!left || !right) return false;
-  return left.dependencies.includes(rightId) && right.dependencies.includes(leftId);
-}
-
-/** Parent depends on child: `parent.dependencies` includes `childId` and the link is not a union pair. */
+/** Parent depends on child: `parent.dependencies` includes `childId`. */
 export function isNormalChildLink(
   byId: Map<string, ProjectTask>,
   parentId: string,
   childId: string,
 ): boolean {
   const parent = byId.get(parentId);
-  if (!parent?.dependencies.includes(childId)) return false;
-  return !isUnionPair(byId, parentId, childId);
+  return Boolean(parent?.dependencies.includes(childId));
 }
 
 export function normalChildIds(task: ProjectTask, byId: Map<string, ProjectTask>): string[] {
   return task.dependencies.filter((id) => isNormalChildLink(byId, task.task_id, id));
 }
 
-export function unionPartnerIds(task: ProjectTask, byId: Map<string, ProjectTask>): string[] {
-  return task.dependencies.filter((id) => isUnionPair(byId, task.task_id, id));
+export function siblingDependencyIds(task: ProjectTask): string[] {
+  return [...(task.sibling_dependencies ?? [])];
 }
 
-/** Tasks whose parent depends on them via a normal (non-union) link. */
+/** Tasks whose parent depends on them via a normal child link. */
 export function normalParentIds(taskId: string, tasks: ProjectTask[]): string[] {
   const byId = new Map(tasks.map((task) => [task.task_id, task]));
   return tasks
@@ -80,9 +70,16 @@ export function rootTaskIds(tasks: ProjectTask[]): string[] {
   return tasks.filter((task) => !childIds.has(task.task_id)).map((task) => task.task_id);
 }
 
+function hadMutualDependencyLink(byId: Map<string, ProjectTask>, leftId: string, rightId: string): boolean {
+  const left = byId.get(leftId);
+  const right = byId.get(rightId);
+  if (!left || !right) return false;
+  return left.dependencies.includes(rightId) && right.dependencies.includes(leftId);
+}
+
 /**
  * Convert legacy storage where a task listed its prerequisites in `dependencies`
- * into parent-depends-on-child links (and preserved mutual union pairs).
+ * into parent-depends-on-child links.
  */
 export function migrateLegacyDependencies(tasks: ProjectTask[]): boolean {
   const byId = new Map(tasks.map((task) => [task.task_id, task]));
@@ -92,9 +89,13 @@ export function migrateLegacyDependencies(tasks: ProjectTask[]): boolean {
   for (const task of tasks) {
     for (const prerequisite of task.dependencies) {
       if (prerequisite === task.task_id) continue;
-      if (!byId.has(prerequisite)) continue;
-      if (isUnionPair(byId, task.task_id, prerequisite)) continue;
-      if (byId.get(prerequisite)?.dependencies.includes(task.task_id)) continue;
+      const prereqTask = byId.get(prerequisite);
+      if (!prereqTask) continue;
+      if (hadMutualDependencyLink(byId, task.task_id, prerequisite)) continue;
+      if (prereqTask.dependencies.includes(task.task_id)) continue;
+      // New parent→child links list children created after the parent.
+      if (task.order < prereqTask.order) continue;
+      if (task.order === prereqTask.order && task.created_at <= prereqTask.created_at) continue;
       legacyEdges.push({ dependent: task.task_id, prerequisite });
     }
   }
@@ -118,6 +119,47 @@ export function migrateLegacyDependencies(tasks: ProjectTask[]): boolean {
   return changed;
 }
 
+/** Move deprecated mutual `dependencies` links to one-way `sibling_dependencies`. */
+export function migrateMutualLinksToSiblingDependencies(tasks: ProjectTask[]): boolean {
+  const byId = new Map(tasks.map((task) => [task.task_id, task]));
+  const pairs = new Set<string>();
+  for (const task of tasks) {
+    for (const otherId of task.dependencies) {
+      if (!hadMutualDependencyLink(byId, task.task_id, otherId)) continue;
+      pairs.add([task.task_id, otherId].sort().join('|'));
+    }
+  }
+  if (pairs.size === 0) return false;
+  let changed = false;
+  for (const key of pairs) {
+    const [leftId, rightId] = key.split('|');
+    const left = byId.get(leftId);
+    const right = byId.get(rightId);
+    if (!left || !right) continue;
+    if (left.dependencies.includes(rightId)) {
+      left.dependencies = left.dependencies.filter((id) => id !== rightId);
+      changed = true;
+    }
+    if (right.dependencies.includes(leftId)) {
+      right.dependencies = right.dependencies.filter((id) => id !== leftId);
+      changed = true;
+    }
+    const leftSiblings = new Set(left.sibling_dependencies ?? []);
+    if (!leftSiblings.has(rightId)) {
+      leftSiblings.add(rightId);
+      left.sibling_dependencies = [...leftSiblings];
+      changed = true;
+    }
+    const rightSiblings = new Set(right.sibling_dependencies ?? []);
+    if (!rightSiblings.has(leftId)) {
+      rightSiblings.add(leftId);
+      right.sibling_dependencies = [...rightSiblings];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 export function assertAcyclicNormalLinks(tasks: ProjectTask[]): void {
   const byId = new Map(tasks.map((task) => [task.task_id, task]));
   const ids = new Set(tasks.map((task) => task.task_id));
@@ -129,6 +171,7 @@ export function assertAcyclicNormalLinks(tasks: ProjectTask[]): void {
   }
   for (const task of tasks) {
     for (const childId of normalChildIds(task, byId)) {
+      if (childId === task.task_id) throw new Error('A task cannot depend on itself.');
       if (!ids.has(childId)) throw new Error(`Dependency ${childId} is not a task in this project.`);
       outgoing.get(task.task_id)?.push(childId);
       indegree.set(childId, (indegree.get(childId) ?? 0) + 1);

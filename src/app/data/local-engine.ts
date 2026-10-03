@@ -17,9 +17,11 @@ import { collectProjectDarSections, collectTaskDarSections, joinDarSections } fr
 import {
   assertAcyclicNormalLinks,
   migrateLegacyDependencies,
+  migrateMutualLinksToSiblingDependencies,
   normalChildIds,
-  unionPartnerIds,
+  siblingDependencyIds,
 } from '../core/dependencies';
+import { availableDescendants, independentBatch } from '../core/execute-children';
 import { defaultDarForOutputType, taskDar, taskInitialPrompt } from '../core/task-fields';
 
 const TERMINAL_RUN = new Set(['FINISHED', 'ERROR', 'CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED']);
@@ -219,7 +221,9 @@ export class LocalEngine {
   async listTasks(projectId: string): Promise<ProjectTask[]> {
     await this.requireProject(projectId);
     const tasks = await this.repo.listTasks(projectId);
-    if (migrateLegacyDependencies(tasks)) {
+    let migrated = migrateLegacyDependencies(tasks);
+    migrated = migrateMutualLinksToSiblingDependencies(tasks) || migrated;
+    if (migrated) {
       await this.repo.saveTasks(tasks);
     }
     return tasks;
@@ -331,6 +335,7 @@ export class LocalEngine {
     dar?: string;
     initial_prompt?: string;
     dependencies?: string[];
+    sibling_dependencies?: string[];
     output_type?: OutputType;
     status?: TaskStatus;
     manual?: boolean;
@@ -386,6 +391,12 @@ export class LocalEngine {
       task.dependencies = nextDependencies;
       const tasks = (await this.repo.listTasks(projectId)).map((item) => item.task_id === task.task_id ? task : item);
       assertAcyclicNormalLinks(tasks);
+    }
+    if (patch.sibling_dependencies !== undefined) {
+      const next = [...new Set(patch.sibling_dependencies.filter((id) => id !== task.task_id))];
+      const previous = task.sibling_dependencies ?? [];
+      if (next.join(',') !== previous.join(',')) changes.push('Sibling dependencies updated.');
+      task.sibling_dependencies = next;
     }
     if (patch.status !== undefined) {
       if (!isStatus(patch.status)) throw new Error('Unknown task status.');
@@ -550,6 +561,31 @@ export class LocalEngine {
       throw new Error('Only research tasks can be converted from the mindmap.');
     }
     return this.updateTask(projectId, taskId, { output_type: to });
+  }
+
+  async executeChildren(projectId: string, parentTaskId: string): Promise<ProjectTask[]> {
+    await this.requireTask(projectId, parentTaskId);
+    const started: ProjectTask[] = [];
+    for (let guard = 0; guard < 500; guard += 1) {
+      const tasks = await this.listTasks(projectId);
+      const available = availableDescendants(parentTaskId, tasks);
+      if (available.length === 0) break;
+      const batch = independentBatch(available, tasks);
+      if (batch.length === 0) break;
+      await Promise.all(batch.map(async (candidate) => {
+        if (candidate.output_type === 'subproject') return;
+        if (candidate.status === 'ABANDONED') return;
+        const fresh = await this.requireTask(projectId, candidate.task_id);
+        if (fresh.cursor_agent_id || fresh.status !== 'TODO') return;
+        if (!taskInitialPrompt(fresh)) {
+          throw new Error(`"${fresh.title}" needs an Initial Prompt before it can be executed.`);
+        }
+        await this.executeTask(candidate.task_id);
+        const updated = await this.requireTask(projectId, candidate.task_id);
+        started.push(updated);
+      }));
+    }
+    return started;
   }
 
   async executeTask(taskId: string): Promise<ChatMessage> {
@@ -828,10 +864,10 @@ export class LocalEngine {
   private async assertDependenciesDone(task: ProjectTask): Promise<void> {
     const tasks = await this.repo.listTasks(task.project_id);
     const byId = new Map(tasks.map((item) => [item.task_id, item]));
-    for (const partnerId of unionPartnerIds(task, byId)) {
-      const other = byId.get(partnerId);
+    for (const siblingId of siblingDependencyIds(task)) {
+      const other = byId.get(siblingId);
       if (!other || other.status !== 'DONE') {
-        throw new Error('Union dependencies must be DONE before this task can start.');
+        throw new Error('Sibling dependencies must be DONE before this task can start.');
       }
     }
   }
@@ -856,9 +892,9 @@ export class LocalEngine {
       lines.push('Implement the task in code and open a pull request.');
     }
     lines.push(`Task title: ${task.title}`);
-    const unionIds = unionPartnerIds(task, new Map((await this.repo.listTasks(task.project_id)).map((item) => [item.task_id, item])));
-    if (unionIds.length > 0) {
-      lines.push(`This task depends on these completed task ids: ${unionIds.join(', ')}.`);
+    const siblingIds = siblingDependencyIds(task);
+    if (siblingIds.length > 0) {
+      lines.push(`This task depends on these completed task ids: ${siblingIds.join(', ')}.`);
     }
     const dar = joinDarSections(await collectTaskDarSections(task, this.darLookup()));
     const firstChat = joinDarSections([dar, userMessage]);

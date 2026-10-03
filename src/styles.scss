@@ -379,6 +379,26 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   display: block;
 }
 
+.map-play-children {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  z-index: 2;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.18);
+  color: #f4efe6;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+.map-play-children::before {
+  content: '▶';
+  display: block;
+  margin-left: 2px;
+}
+
 .map-node.editing { cursor: text; }
 .map-label-input {
   width: 100%;
