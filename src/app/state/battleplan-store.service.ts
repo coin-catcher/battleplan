@@ -132,6 +132,7 @@ export class BattleplanStore {
       this.projectId.set(projectId);
       await this.preferences.setCurrentProjectId(projectId);
       this.restoreWorkspace(cached);
+      void this.refreshPendingChanges();
       this.resumeWatchForSelection();
       return cached.paneWidth;
     }
@@ -298,6 +299,7 @@ export class BattleplanStore {
       this.selection.set({ kind: 'project' });
       await this.run(async () => {
         this.applyConversation(await this.api.listProjectMessages(projectId));
+        await this.refreshPendingChanges();
       });
       this.continueProjectWatch(projectId);
     });
