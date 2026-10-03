@@ -18,6 +18,7 @@ import {
   type MindmapNode,
 } from './core/mindmap';
 import { MarkdownComponent } from 'ngx-markdown';
+import { editorPanelDirty } from './core/editor-dirty';
 import { taskDar, taskInitialPrompt } from './core/task-fields';
 import { BattleplanStore } from './state/battleplan-store.service';
 
@@ -79,6 +80,9 @@ export class AppComponent implements OnInit {
   readonly themeId = signal<ThemeId>('harbor');
   readonly paneWidth = signal(640);
   readonly updatePrompt = signal<{ version: string; notes: string } | null>(null);
+  readonly unsavedPromptOpen = signal(false);
+  readonly autoSaveEnabled = signal(false);
+  private pendingNavigation: (() => Promise<void>) | null = null;
 
   title = '';
   initialPrompt = '';
@@ -178,9 +182,10 @@ export class AppComponent implements OnInit {
       if (!this.desktop) return;
       const selection = this.store.selection();
       const exportEnabled = Boolean(this.store.project());
-      const saveEnabled = (selection.kind === 'project' && Boolean(this.title.trim()))
+      const saveEnabled = this.editorIsDirty()
+        || ((selection.kind === 'project' && Boolean(this.title.trim()))
         || (selection.kind === 'subproject' && Boolean(this.title.trim()))
-        || selection.kind === 'task';
+        || selection.kind === 'task');
       void electronBridge()?.invoke('menu:sync-state', { exportEnabled, saveEnabled });
     });
     effect((onCleanup) => {
@@ -219,6 +224,7 @@ export class AppComponent implements OnInit {
     await this.preferences.restore();
     this.themeId.set(this.preferences.theme());
     this.paneWidth.set(this.preferences.paneWidth());
+    this.autoSaveEnabled.set(this.preferences.autoSave());
     applyTheme(this.themeId(), !this.desktop);
     if (this.cursorKey.ready()) await this.store.loadProjects();
     electronBridge()?.on('update:available', (payload) => {
@@ -247,7 +253,9 @@ export class AppComponent implements OnInit {
   private handleMenuAction(action: string): void {
     switch (action) {
       case 'new-project':
-        this.store.showCreate();
+        void this.guardUnsavedChanges(async () => {
+          this.store.showCreate();
+        });
         break;
       case 'import-project':
         this.importProject();
@@ -270,10 +278,104 @@ export class AppComponent implements OnInit {
   }
 
   saveCurrent(): void {
+    void this.persistEditorChanges();
+  }
+
+  editorIsDirty(): boolean {
     const selection = this.store.selection();
-    if (selection.kind === 'project') this.saveProject();
-    else if (selection.kind === 'subproject') this.saveSubproject();
-    else if (selection.kind === 'task') void this.saveTask();
+    const project = selection.kind === 'subproject' ? this.store.editorProject() : this.store.project();
+    return editorPanelDirty(
+      selection.kind,
+      {
+        title: this.title,
+        repo_url: this.projectRepo,
+        starting_ref: this.projectBranch,
+        dar: this.projectDar,
+        initial_prompt: selection.kind === 'subproject' ? this.subprojectInitialPrompt : undefined,
+      },
+      {
+        title: this.taskTitle,
+        dar: this.taskDar,
+        initial_prompt: this.taskInitialPrompt,
+        output_type: this.outputType,
+        dependencies: this.dependencies,
+      },
+      project,
+      this.store.selectedTask(),
+    );
+  }
+
+  onEditorFieldBlur(): void {
+    if (!this.autoSaveEnabled() || !this.editorIsDirty()) return;
+    void this.persistEditorChanges();
+  }
+
+  onEditorFieldAutoSave(): void {
+    this.onEditorFieldBlur();
+  }
+
+  private async persistEditorChanges(): Promise<boolean> {
+    const selection = this.store.selection();
+    if (selection.kind === 'project') {
+      await this.store.saveProject({
+        title: this.title.trim(),
+        repo_url: this.projectRepo.trim(),
+        starting_ref: this.projectBranch.trim() || 'main',
+        dar: this.projectDar,
+      });
+    } else if (selection.kind === 'subproject') {
+      await this.store.saveEditorProject({
+        title: this.title.trim(),
+        repo_url: this.projectRepo.trim(),
+        starting_ref: this.projectBranch.trim() || 'main',
+        dar: this.projectDar,
+        initial_prompt: this.subprojectInitialPrompt,
+      });
+    } else if (selection.kind === 'task') {
+      await this.store.saveTask({
+        title: this.taskTitle,
+        dar: this.taskDar,
+        initial_prompt: this.taskInitialPrompt,
+        output_type: this.outputType,
+        dependencies: this.dependencies,
+      });
+    } else {
+      return true;
+    }
+    return !this.store.error();
+  }
+
+  private async guardUnsavedChanges(navigate: () => Promise<void>): Promise<void> {
+    if (!this.editorIsDirty()) {
+      await navigate();
+      return;
+    }
+    if (this.autoSaveEnabled()) {
+      if (await this.persistEditorChanges()) await navigate();
+      return;
+    }
+    this.pendingNavigation = navigate;
+    this.unsavedPromptOpen.set(true);
+  }
+
+  unsavedChoice(choice: 'no' | 'yes' | 'yes-always'): void {
+    void this.resolveUnsavedChoice(choice);
+  }
+
+  private async resolveUnsavedChoice(choice: 'no' | 'yes' | 'yes-always'): Promise<void> {
+    const navigate = this.pendingNavigation;
+    this.pendingNavigation = null;
+    this.unsavedPromptOpen.set(false);
+    if (!navigate) return;
+    if (choice === 'no') {
+      await navigate();
+      return;
+    }
+    if (choice === 'yes-always') {
+      this.autoSaveEnabled.set(true);
+      await this.preferences.saveAutoSave(true);
+    }
+    if (await this.persistEditorChanges()) await navigate();
   }
 
   checkForUpdates(): void {
@@ -584,8 +686,18 @@ export class AppComponent implements OnInit {
   }
 
   selectMapNode(node: MindmapNode): void {
-    if (node.kind === 'project') void this.store.openProjectChat();
-    else void this.store.openTask(node.id);
+    if (this.isSameMapSelection(node)) return;
+    void this.guardUnsavedChanges(async () => {
+      if (node.kind === 'project') await this.store.openProjectChat();
+      else await this.store.openTask(node.id);
+    });
+  }
+
+  private isSameMapSelection(node: MindmapNode): boolean {
+    const selection = this.store.selection();
+    if (node.kind === 'project') return selection.kind === 'project';
+    return (selection.kind === 'task' || selection.kind === 'subproject' || selection.kind === 'code' || selection.kind === 'research')
+      && selection.taskId === node.id;
   }
 
   connectArrowClass(direction: CardinalDirection): string {
@@ -705,17 +817,21 @@ export class AppComponent implements OnInit {
     const panel = this.convertPanel();
     if (!panel) return;
     this.convertPanel.set(null);
-    await this.store.convertTask(panel.taskId, to);
+    await this.guardUnsavedChanges(async () => {
+      await this.store.convertTask(panel.taskId, to);
+    });
   }
 
   private async quickAddResearchTask(node: MindmapNode, direction: CardinalDirection): Promise<void> {
-    const taskId = await this.store.addConnectedTask({
-      sourceId: node.id,
-      sourceKind: node.kind,
-      direction,
-      output_type: 'research',
+    await this.guardUnsavedChanges(async () => {
+      const taskId = await this.store.addConnectedTask({
+        sourceId: node.id,
+        sourceKind: node.kind,
+        direction,
+        output_type: 'research',
+      });
+      if (taskId) this.startInlineEdit(taskId, 'New research task');
     });
-    if (taskId) this.startInlineEdit(taskId, 'New research task');
   }
 
   onMapDismissPointerDown(event: PointerEvent): void {
@@ -740,13 +856,15 @@ export class AppComponent implements OnInit {
       research: 'New research task',
       subproject: 'New subproject',
     };
-    const taskId = await this.store.addConnectedTask({
-      sourceId: panel.sourceId,
-      sourceKind: panel.sourceKind,
-      direction: panel.direction,
-      output_type: outputType,
+    await this.guardUnsavedChanges(async () => {
+      const taskId = await this.store.addConnectedTask({
+        sourceId: panel.sourceId,
+        sourceKind: panel.sourceKind,
+        direction: panel.direction,
+        output_type: outputType,
+      });
+      if (taskId) this.startInlineEdit(taskId, labels[outputType]);
     });
-    if (taskId) this.startInlineEdit(taskId, labels[outputType]);
   }
 
   onNodeDblClick(node: MindmapNode, event: MouseEvent): void {
@@ -816,11 +934,18 @@ export class AppComponent implements OnInit {
     this.dependencies = checked
       ? [...this.dependencies, taskId]
       : this.dependencies.filter((id) => id !== taskId);
+    this.onEditorFieldAutoSave();
   }
 
   async onProjectChange(event: Event): Promise<void> {
-    const projectId = (event.target as HTMLSelectElement).value;
-    if (projectId) await this.store.selectProject(projectId);
+    const select = event.target as HTMLSelectElement;
+    const projectId = select.value;
+    const current = this.store.projectId() ?? '';
+    if (!projectId || projectId === current) return;
+    select.value = current;
+    await this.guardUnsavedChanges(async () => {
+      await this.store.selectProject(projectId);
+    });
   }
 
   async onStatusChange(taskId: string, event: Event): Promise<void> {
