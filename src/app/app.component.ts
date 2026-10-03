@@ -85,6 +85,7 @@ export class AppComponent implements OnInit {
   startingRef = 'main';
   projectRepo = '';
   projectBranch = 'main';
+  projectDar = '';
   chatDraft = '';
   taskTitle = '';
   taskPrompt = '';
@@ -125,12 +126,15 @@ export class AppComponent implements OnInit {
     effect(() => {
       const selection = this.store.selection();
       const project = selection.kind === 'subproject' ? this.store.editorProject() : this.store.project();
-      const signature = project ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}:${selection.kind}` : '';
+      const signature = project
+        ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}:${project.dar ?? ''}:${selection.kind}`
+        : '';
       if (signature === this.titleSignature) return;
       this.titleSignature = signature;
       this.title = project?.title ?? '';
       this.projectRepo = project?.repo_url ?? '';
       this.projectBranch = project?.starting_ref || 'main';
+      this.projectDar = project?.dar ?? '';
     });
     effect(() => {
       const projectId = this.store.project()?.project_id;
@@ -408,6 +412,7 @@ export class AppComponent implements OnInit {
       title: this.title.trim(),
       repo_url: this.projectRepo.trim(),
       starting_ref: this.projectBranch.trim() || 'main',
+      dar: this.projectDar,
     });
   }
 
@@ -416,6 +421,7 @@ export class AppComponent implements OnInit {
       title: this.title.trim(),
       repo_url: this.projectRepo.trim(),
       starting_ref: this.projectBranch.trim() || 'main',
+      dar: this.projectDar,
     });
   }
 
@@ -771,10 +777,6 @@ export class AppComponent implements OnInit {
 
   openResearch(taskId: string): void {
     void this.store.openOutput(taskId, 'research');
-  }
-
-  start(taskId: string): void {
-    void this.store.transition(taskId, 'DOING', false);
   }
 
   toggleDependency(taskId: string, event: Event): void {

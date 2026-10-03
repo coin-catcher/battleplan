@@ -153,6 +153,30 @@ describe('LocalEngine', () => {
     expect(notes.some((note) => note.content.includes('BLOCKED'))).toBe(true);
   });
 
+  it('prepends task DAR to the first Cursor message while keeping chat separate', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    let tick = 0;
+    const engine = new LocalEngine(repo, client, () => `2026-10-02T00:00:0${tick++}.000Z`, () => `id-${tick}`);
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      dar: 'Project rules',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      starting_ref: 'main',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const task = await engine.createTask('p1', { title: 'Implement', prompt: 'Task rules' });
+    const sent = await engine.sendTaskMessage(task.task_id, 'Please implement the feature.');
+    expect(client.prompts[0]).toContain('Project rules');
+    expect(client.prompts[0]).toContain('Task rules');
+    expect(client.prompts[0]).toContain('Please implement the feature.');
+    expect(sent.content).toBe('Please implement the feature.');
+  });
+
   it('splits a both-output draft into research then code', async () => {
     const repo = new MemoryRepository();
     let tick = 0;

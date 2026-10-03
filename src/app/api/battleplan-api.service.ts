@@ -36,6 +36,7 @@ export class BattleplanApi {
     title?: string;
     repo_url?: string;
     starting_ref?: string;
+    dar?: string;
     map_x?: number;
     map_y?: number;
   }): Promise<Project> {

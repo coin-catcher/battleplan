@@ -247,6 +247,10 @@
               </label>
             </div>
             <p class="pending">New task branches are created from this branch, and approved pull requests merge back into it.</p>
+            <label class="field">
+              <span>Data and Rules</span>
+              <textarea rows="4" [(ngModel)]="projectDar" name="projectDar" placeholder="Persistent context for this project. Not part of chat history."></textarea>
+            </label>
             <div class="transcript" aria-live="polite">
               @for (item of timeline(); track item.id) {
                 @if (item.kind === 'message') {
@@ -289,9 +293,6 @@
             <div class="toolbar">
               <button type="button" class="danger" [disabled]="store.busy()" (click)="deleteTask(task)">Delete</button>
               <button type="button" class="accent" [disabled]="store.busy()" (click)="store.generateTasks()">Generate Tasks</button>
-              @if (task.status === 'TODO') {
-                <button type="button" class="accent" [disabled]="store.busy()" (click)="start(task.task_id)">Start</button>
-              }
               @if (task.status === 'REVIEW') {
                 <button type="button" class="accent" [disabled]="store.busy()" (click)="store.approve()">Approve and merge</button>
               }
@@ -337,8 +338,8 @@
               </label>
             </div>
             <label class="field">
-              <span>Prompt</span>
-              <textarea rows="3" [(ngModel)]="taskPrompt" [name]="'taskPrompt-' + task.task_id" (focus)="onTaskFieldFocus()"></textarea>
+              <span>Data and Rules</span>
+              <textarea rows="4" [(ngModel)]="taskPrompt" [name]="'taskPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" placeholder="Persistent context for this task. Prepended to the first agent message."></textarea>
             </label>
             <fieldset class="deps">
               <legend>Dependencies</legend>
@@ -383,7 +384,7 @@
             </div>
             <div class="composer">
               <label class="sr-only" for="task-chat">Message</label>
-              <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat."></textarea>
+              <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Start or continue this task chat."></textarea>
               <div class="composer-actions">
                 <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
               </div>
@@ -421,6 +422,10 @@
                 <input [(ngModel)]="projectBranch" name="subprojectBranch" placeholder="main" />
               </label>
             </div>
+            <label class="field">
+              <span>Data and Rules</span>
+              <textarea rows="4" [(ngModel)]="projectDar" name="subprojectDar" placeholder="Persistent context for this subproject. Not part of chat history."></textarea>
+            </label>
             <div class="transcript" aria-live="polite">
               @for (item of timeline(); track item.id) {
                 @if (item.kind === 'message') {
@@ -449,7 +454,7 @@
             </div>
             <div class="composer">
               <label class="sr-only" for="subproject-chat">Message</label>
-              <textarea id="subproject-chat" rows="3" [(ngModel)]="chatDraft" name="subprojectChat" placeholder="Continue this subproject chat."></textarea>
+              <textarea id="subproject-chat" rows="3" [(ngModel)]="chatDraft" name="subprojectChat" placeholder="Start or continue this subproject chat."></textarea>
               <div class="composer-actions">
                 <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
               </div>

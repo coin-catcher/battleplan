@@ -6,6 +6,8 @@ export interface Project {
   project_id: string;
   title: string;
   initial_prompt: string;
+  /** Persistent Data and Rules for this project, separate from chat history. */
+  dar?: string;
   cursor_chat_link: string;
   cursor_agent_id?: string;
   latest_run_id?: string;

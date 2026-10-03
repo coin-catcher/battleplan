@@ -13,6 +13,7 @@ import { TASK_STATUSES } from '../core/models';
 import type { CursorClient, CursorRun } from './cursor-browser';
 import { normalizeRepoUrl } from './cursor-browser';
 import type { BattleplanRepository } from './repository';
+import { collectProjectDarSections, collectTaskDarSections, joinDarSections } from '../core/dar';
 
 const TERMINAL_RUN = new Set(['FINISHED', 'ERROR', 'CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED']);
 const ASSISTANT_PLACEHOLDER = 'The agent finished. Attached files are shown with this conversation.';
@@ -107,6 +108,7 @@ export class LocalEngine {
     title?: string;
     repo_url?: string;
     starting_ref?: string;
+    dar?: string;
     map_x?: number;
     map_y?: number;
   }): Promise<Project> {
@@ -128,6 +130,11 @@ export class LocalEngine {
       const next = patch.starting_ref.trim();
       if (next !== (project.starting_ref ?? '')) changes.push(`Base branch: ${next || 'main'}`);
       project.starting_ref = next || undefined;
+    }
+    if (patch.dar !== undefined) {
+      const next = patch.dar.trim();
+      if (next !== (project.dar ?? '')) changes.push('Data and Rules updated.');
+      project.dar = next || undefined;
     }
     if (patch.map_x !== undefined) project.map_x = patch.map_x;
     if (patch.map_y !== undefined) project.map_y = patch.map_y;
@@ -263,7 +270,7 @@ export class LocalEngine {
     if (patch.prompt !== undefined) {
       const prompt = patch.prompt.trim();
       if (!prompt) throw new Error('prompt is required.');
-      if (prompt !== task.prompt) changes.push('Prompt updated.');
+      if (prompt !== task.prompt) changes.push('Data and Rules updated.');
       task.prompt = prompt;
     }
     if (patch.output_type !== undefined) {
@@ -369,7 +376,15 @@ export class LocalEngine {
   }
 
   async sendProjectMessage(projectId: string, message: string): Promise<ChatMessage> {
-    return this.dispatchProject(projectId, message, 'chat');
+    const project = await this.requireProject(projectId);
+    const content = message.trim();
+    if (!content) throw new Error('message is required.');
+    const existing = await this.repo.listProjectMessages(projectId);
+    const isFirstChat = !existing.some((item) => item.role === 'user' && item.run_id);
+    const text = isFirstChat
+      ? joinDarSections([joinDarSections(await collectProjectDarSections(project, this.darLookup())), content])
+      : content;
+    return this.dispatchProject(projectId, text, 'chat', content);
   }
 
   generateTasks(projectId: string): Promise<ChatMessage> {
@@ -383,7 +398,7 @@ export class LocalEngine {
     if (!agentId) throw new Error('This project is not linked to a Cursor agent.');
     const text = [
       `Generate tasks from the conversation for "${task.title}".`,
-      task.prompt ? `Task prompt:\n${task.prompt}` : '',
+      task.prompt ? `Task data and rules:\n${task.prompt}` : '',
       GENERATE_TASKS_INSTRUCTION,
     ].filter(Boolean).join('\n\n');
     const run = await this.cursor.createRun(agentId, {
@@ -460,15 +475,8 @@ export class LocalEngine {
       return this.sendProjectMessage(task.subproject_id, feedback);
     }
     if (!task.cursor_agent_id) {
-      task.prompt = feedback;
-      task.updated_at = this.now();
-      await this.repo.saveTask(task);
-      await this.transition(task.project_id, taskId, 'DOING', true);
-      const started = await this.requireTaskById(taskId);
-      if (!started.cursor_agent_id) throw new Error('Could not start this task.');
-      const messages = await this.repo.listTaskMessages(taskId);
-      const initial = [...messages].reverse().find((message) => message.role === 'user' && message.run_id);
-      if (initial) return initial;
+      await this.assertDependenciesDone(task);
+      return this.launchWithFirstMessage(task, feedback);
     }
     const active = await this.requireTaskById(taskId);
     if (!active.cursor_agent_id) throw new Error('Start the task before sending feedback.');
@@ -526,7 +534,12 @@ export class LocalEngine {
     return task;
   }
 
-  private async dispatchProject(projectId: string, text: string, intent: ChatMessage['intent']): Promise<ChatMessage> {
+  private async dispatchProject(
+    projectId: string,
+    text: string,
+    intent: ChatMessage['intent'],
+    transcriptContent = text.trim(),
+  ): Promise<ChatMessage> {
     const project = await this.requireProject(projectId);
     const content = text.trim();
     if (!content) throw new Error('message is required.');
@@ -539,7 +552,7 @@ export class LocalEngine {
       scope: 'project',
       project_id: projectId,
       role: 'user',
-      content,
+      content: transcriptContent,
       run_id: run.id,
       intent,
     });
@@ -706,9 +719,8 @@ export class LocalEngine {
 
   private async applyStatus(task: ProjectTask, status: TaskStatus, manual: boolean): Promise<void> {
     assertCanTransition(task.status, status, manual);
-    if (status === 'DOING' && !task.cursor_agent_id && task.output_type !== 'subproject') {
-      if (!manual) await this.assertDependenciesDone(task);
-      await this.launch(task);
+    if (status === 'DOING' && !task.cursor_agent_id && task.output_type !== 'subproject' && !manual) {
+      await this.assertDependenciesDone(task);
     }
     task.status = status;
     if (status !== 'DOING') task.pending_action = undefined;
@@ -725,7 +737,7 @@ export class LocalEngine {
     }
   }
 
-  private async launch(task: ProjectTask): Promise<void> {
+  private async launchWithFirstMessage(task: ProjectTask, userMessage: string): Promise<ChatMessage> {
     const project = await this.requireProject(task.project_id);
     if (!project.repo_url) throw new Error('Add a repository to the project before starting a task.');
     const base = project.starting_ref?.trim() || 'main';
@@ -744,12 +756,14 @@ export class LocalEngine {
     } else {
       lines.push('Implement the task in code and open a pull request.');
     }
-    lines.push(`Task title: ${task.title}`, `Task prompt:\n${task.prompt}`);
+    lines.push(`Task title: ${task.title}`);
     if (task.dependencies.length > 0) {
       lines.push(`This task depends on these completed task ids: ${task.dependencies.join(', ')}.`);
     }
+    const dar = joinDarSections(await collectTaskDarSections(task, this.darLookup()));
+    const firstChat = joinDarSections([dar, userMessage]);
     const created = await this.cursor.createAgent({
-      prompt: lines.join('\n\n'),
+      prompt: joinDarSections([lines.join('\n\n'), firstChat]),
       name: task.title,
       mode: 'agent',
       repoUrl: project.repo_url,
@@ -759,17 +773,26 @@ export class LocalEngine {
     task.cursor_agent_id = created.agent.id;
     task.cursor_chat_link = created.agent.url;
     task.latest_run_id = created.run.id;
-    await this.repo.saveMessage({
-      message_id: this.newId(),
+    task.status = 'DOING';
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+    return this.record({
       scope: 'task',
       project_id: task.project_id,
       task_id: task.task_id,
       role: 'user',
-      content: task.prompt,
-      created_at: this.now(),
+      content: userMessage,
       run_id: created.run.id,
       intent: 'chat',
     });
+  }
+
+  private darLookup() {
+    return {
+      getProject: (projectId: string) => this.repo.getProject(projectId),
+      getTask: (taskId: string) => this.repo.getTask(taskId),
+      listTasks: (projectId: string) => this.repo.listTasks(projectId),
+    };
   }
 
   private async createNestedProject(

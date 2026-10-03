@@ -111,7 +111,7 @@ export class BattleplanStore {
     if (projectId && !this.error()) this.continueProjectWatch(projectId);
   }
 
-  async saveProject(patch: { title: string; repo_url: string; starting_ref: string }): Promise<void> {
+  async saveProject(patch: { title: string; repo_url: string; starting_ref: string; dar: string }): Promise<void> {
     const project = this.project();
     if (!project) return;
     await this.run(async () => {
@@ -122,7 +122,7 @@ export class BattleplanStore {
     });
   }
 
-  async saveEditorProject(patch: { title: string; repo_url: string; starting_ref: string }): Promise<void> {
+  async saveEditorProject(patch: { title: string; repo_url: string; starting_ref: string; dar: string }): Promise<void> {
     const editor = this.editorProject();
     if (!editor) return;
     await this.run(async () => {
