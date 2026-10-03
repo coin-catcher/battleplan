@@ -14,6 +14,7 @@ import type { CursorClient, CursorRun } from './cursor-browser';
 import { normalizeRepoUrl } from './cursor-browser';
 import type { BattleplanRepository } from './repository';
 import { collectProjectDarSections, collectTaskDarSections, joinDarSections } from '../core/dar';
+import { defaultDarForOutputType, taskDar, taskInitialPrompt } from '../core/task-fields';
 
 const TERMINAL_RUN = new Set(['FINISHED', 'ERROR', 'CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED']);
 const ASSISTANT_PLACEHOLDER = 'The agent finished. Attached files are shown with this conversation.';
@@ -104,11 +105,44 @@ export class LocalEngine {
     return project;
   }
 
+  async executeProjectChat(projectId: string): Promise<{ message: ChatMessage; project: Project }> {
+    const project = await this.requireProject(projectId);
+    if (project.cursor_agent_id) throw new Error('This project already has a Cursor agent.');
+    const initial = project.initial_prompt?.trim();
+    if (!initial) throw new Error('Initial prompt is required.');
+    const dar = joinDarSections(await collectProjectDarSections(project, this.darLookup()));
+    const payload = joinDarSections([dar, initial]);
+    const created = await this.cursor.createAgent({
+      prompt: payload,
+      name: project.title,
+      mode: 'plan',
+      repoUrl: project.repo_url?.trim() || undefined,
+      startingRef: project.starting_ref?.trim() || undefined,
+      autoCreatePr: false,
+    });
+    const timestamp = this.now();
+    project.cursor_agent_id = created.agent.id;
+    project.cursor_chat_link = created.agent.url;
+    project.latest_run_id = created.run.id;
+    project.updated_at = timestamp;
+    await this.repo.saveProject(project);
+    const message = await this.record({
+      scope: 'project',
+      project_id: projectId,
+      role: 'user',
+      content: initial,
+      run_id: created.run.id,
+      intent: 'chat',
+    });
+    return { message, project };
+  }
+
   async updateProject(projectId: string, patch: {
     title?: string;
     repo_url?: string;
     starting_ref?: string;
     dar?: string;
+    initial_prompt?: string;
     map_x?: number;
     map_y?: number;
   }): Promise<Project> {
@@ -135,6 +169,12 @@ export class LocalEngine {
       const next = patch.dar.trim();
       if (next !== (project.dar ?? '')) changes.push('Data and Rules updated.');
       project.dar = next || undefined;
+    }
+    if (patch.initial_prompt !== undefined) {
+      if (project.cursor_agent_id) throw new Error('Initial prompt cannot be changed after the Cursor agent has started.');
+      const next = patch.initial_prompt.trim();
+      if (next !== (project.initial_prompt ?? '')) changes.push('Initial prompt updated.');
+      project.initial_prompt = next;
     }
     if (patch.map_x !== undefined) project.map_x = patch.map_x;
     if (patch.map_y !== undefined) project.map_y = patch.map_y;
@@ -171,7 +211,8 @@ export class LocalEngine {
 
   async createTask(projectId: string, input: {
     title?: string;
-    prompt?: string;
+    dar?: string;
+    initial_prompt?: string;
     output_type?: OutputType;
     depends_on?: string;
     map_x?: number;
@@ -180,8 +221,9 @@ export class LocalEngine {
     await this.requireProject(projectId);
     const existing = await this.repo.listTasks(projectId);
     const title = input.title?.trim() || 'New task';
-    const prompt = input.prompt?.trim() || 'Describe what this task should do.';
     const outputType = input.output_type ?? 'research';
+    const dar = input.dar !== undefined ? input.dar.trim() : defaultDarForOutputType(outputType);
+    const initialPrompt = input.initial_prompt?.trim() ?? '';
     if (outputType !== 'code' && outputType !== 'research' && outputType !== 'subproject') {
       throw new Error('output_type must be code, research, or subproject.');
     }
@@ -194,7 +236,9 @@ export class LocalEngine {
       task_id: this.newId(),
       project_id: projectId,
       title,
-      prompt,
+      prompt: dar,
+      dar: dar || undefined,
+      initial_prompt: initialPrompt || undefined,
       dependencies,
       status: 'TODO',
       output_type: outputType,
@@ -231,18 +275,24 @@ export class LocalEngine {
     const normalized = normalizeDrafts(drafts);
     const existing = await this.repo.listTasks(projectId);
     const timestamp = this.now();
-    const created: ProjectTask[] = normalized.map((draft, index) => ({
+    const created: ProjectTask[] = normalized.map((draft, index) => {
+      const dar = defaultDarForOutputType(draft.output_type);
+      const initialPrompt = draft.prompt.trim();
+      return {
       task_id: this.newId(),
       project_id: projectId,
       title: draft.title,
-      prompt: draft.prompt,
+      prompt: dar,
+      dar: dar || undefined,
+      initial_prompt: initialPrompt || undefined,
       dependencies: [],
       status: 'TODO',
       output_type: draft.output_type,
       order: existing.length + index,
       created_at: timestamp,
       updated_at: timestamp,
-    }));
+    };
+    });
     bindDependencies(existing, created, normalized);
     assertAcyclic([...existing, ...created]);
     await this.repo.saveTasks(created);
@@ -251,7 +301,8 @@ export class LocalEngine {
 
   async updateTask(projectId: string, taskId: string, patch: {
     title?: string;
-    prompt?: string;
+    dar?: string;
+    initial_prompt?: string;
     dependencies?: string[];
     output_type?: OutputType;
     status?: TaskStatus;
@@ -267,11 +318,17 @@ export class LocalEngine {
       if (title !== task.title) changes.push(`Title: ${title}`);
       task.title = title;
     }
-    if (patch.prompt !== undefined) {
-      const prompt = patch.prompt.trim();
-      if (!prompt) throw new Error('prompt is required.');
-      if (prompt !== task.prompt) changes.push('Data and Rules updated.');
-      task.prompt = prompt;
+    if (patch.dar !== undefined) {
+      const dar = patch.dar.trim();
+      if (dar !== taskDar(task)) changes.push('Data and Rules updated.');
+      task.dar = dar || undefined;
+      task.prompt = dar;
+    }
+    if (patch.initial_prompt !== undefined) {
+      if (task.cursor_agent_id) throw new Error('Initial prompt cannot be changed after the Cursor agent has started.');
+      const initial = patch.initial_prompt.trim();
+      if (initial !== taskInitialPrompt(task)) changes.push('Initial prompt updated.');
+      task.initial_prompt = initial || undefined;
     }
     if (patch.output_type !== undefined) {
       if (patch.output_type !== 'code' && patch.output_type !== 'research' && patch.output_type !== 'subproject') {
@@ -379,12 +436,10 @@ export class LocalEngine {
     const project = await this.requireProject(projectId);
     const content = message.trim();
     if (!content) throw new Error('message is required.');
-    const existing = await this.repo.listProjectMessages(projectId);
-    const isFirstChat = !existing.some((item) => item.role === 'user' && item.run_id);
-    const text = isFirstChat
-      ? joinDarSections([joinDarSections(await collectProjectDarSections(project, this.darLookup())), content])
-      : content;
-    return this.dispatchProject(projectId, text, 'chat', content);
+    if (!project.cursor_agent_id) {
+      throw new Error('Execute the subproject with its Initial Prompt before sending chat messages.');
+    }
+    return this.dispatchProject(projectId, content, 'chat');
   }
 
   generateTasks(projectId: string): Promise<ChatMessage> {
@@ -398,7 +453,7 @@ export class LocalEngine {
     if (!agentId) throw new Error('This project is not linked to a Cursor agent.');
     const text = [
       `Generate tasks from the conversation for "${task.title}".`,
-      task.prompt ? `Task data and rules:\n${task.prompt}` : '',
+      taskDar(task) ? `Task data and rules:\n${taskDar(task)}` : '',
       GENERATE_TASKS_INSTRUCTION,
     ].filter(Boolean).join('\n\n');
     const run = await this.cursor.createRun(agentId, {
@@ -467,6 +522,18 @@ export class LocalEngine {
     return this.updateTask(projectId, taskId, { output_type: to });
   }
 
+  async executeTask(taskId: string): Promise<ChatMessage> {
+    const task = await this.requireTaskById(taskId);
+    if (task.output_type === 'subproject') {
+      throw new Error('Open the subproject and use Execute there.');
+    }
+    if (task.cursor_agent_id) throw new Error('This task already has a Cursor agent.');
+    const initial = taskInitialPrompt(task);
+    if (!initial) throw new Error('Initial prompt is required.');
+    await this.assertDependenciesDone(task);
+    return this.launchWithFirstMessage(task, initial);
+  }
+
   async sendTaskMessage(taskId: string, text: string): Promise<ChatMessage> {
     const task = await this.requireTaskById(taskId);
     const feedback = text.trim();
@@ -475,8 +542,7 @@ export class LocalEngine {
       return this.sendProjectMessage(task.subproject_id, feedback);
     }
     if (!task.cursor_agent_id) {
-      await this.assertDependenciesDone(task);
-      return this.launchWithFirstMessage(task, feedback);
+      throw new Error('Execute the task with its Initial Prompt before sending chat messages.');
     }
     const active = await this.requireTaskById(taskId);
     if (!active.cursor_agent_id) throw new Error('Start the task before sending feedback.');
@@ -804,7 +870,7 @@ export class LocalEngine {
     const nested: Project = {
       project_id: this.newId(),
       title: input.title,
-      initial_prompt: `Subproject of ${root.title}.`,
+      initial_prompt: '',
       cursor_chat_link: '',
       parent_project_id: rootProjectId,
       parent_task_id: input.parentTaskId,

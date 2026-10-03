@@ -1,4 +1,5 @@
 import type { Project, ProjectTask } from './models';
+import { taskDar } from './task-fields';
 import { buildTaskParentMap } from './task-tree';
 
 export function formatDarSection(title: string, body: string): string | null {
@@ -52,10 +53,10 @@ export async function collectTaskDarSections(task: ProjectTask, lookup: DarLooku
 
   for (const ancestor of [...ancestorTasks].reverse()) {
     if (subprojectBoundary && ancestor.task_id === subprojectBoundary.task_id) continue;
-    pushSection(blocks, ancestor.title, ancestor.prompt);
+    pushSection(blocks, ancestor.title, taskDar(ancestor));
   }
 
-  pushSection(blocks, task.title, task.prompt);
+  pushSection(blocks, task.title, taskDar(task));
   return blocks;
 }
 
@@ -71,7 +72,7 @@ async function nestedProjectBoundarySections(project: Project, lookup: DarLookup
   const blocks: string[] = [];
   const parentTask = project.parent_task_id ? await lookup.getTask(project.parent_task_id) : null;
   if (parentTask) {
-    pushSection(blocks, parentTask.title, parentTask.prompt);
+    pushSection(blocks, parentTask.title, taskDar(parentTask));
   }
   pushSection(blocks, project.title, project.dar ?? '');
   return blocks;
@@ -79,7 +80,7 @@ async function nestedProjectBoundarySections(project: Project, lookup: DarLookup
 
 async function subprojectBoundarySections(task: ProjectTask, lookup: DarLookup): Promise<string[]> {
   const blocks: string[] = [];
-  pushSection(blocks, task.title, task.prompt);
+  pushSection(blocks, task.title, taskDar(task));
   if (task.subproject_id) {
     const nested = await lookup.getProject(task.subproject_id);
     if (nested) pushSection(blocks, nested.title, nested.dar ?? '');
@@ -88,7 +89,7 @@ async function subprojectBoundarySections(task: ProjectTask, lookup: DarLookup):
 }
 
 function sectionForTask(task: ProjectTask): string[] {
-  const section = formatDarSection(task.title, task.prompt);
+  const section = formatDarSection(task.title, taskDar(task));
   return section ? [section] : [];
 }
 

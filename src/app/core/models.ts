@@ -28,7 +28,12 @@ export interface ProjectTask {
   task_id: string;
   project_id: string;
   title: string;
+  /** Legacy mirror of `dar`; kept for older saved projects. */
   prompt: string;
+  /** Persistent Data and Rules for this task, separate from chat. */
+  dar?: string;
+  /** Saved instruction used once when starting the Cursor agent. */
+  initial_prompt?: string;
   dependencies: string[];
   status: TaskStatus;
   output_type: OutputType;

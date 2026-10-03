@@ -18,6 +18,7 @@ import {
   type MindmapNode,
 } from './core/mindmap';
 import { MarkdownComponent } from 'ngx-markdown';
+import { taskDar, taskInitialPrompt } from './core/task-fields';
 import { BattleplanStore } from './state/battleplan-store.service';
 
 @Component({
@@ -88,7 +89,9 @@ export class AppComponent implements OnInit {
   projectDar = '';
   chatDraft = '';
   taskTitle = '';
-  taskPrompt = '';
+  taskDar = '';
+  taskInitialPrompt = '';
+  subprojectInitialPrompt = '';
   outputType: OutputType = 'code';
   dependencies: string[] = [];
   codeRepo = '';
@@ -127,7 +130,7 @@ export class AppComponent implements OnInit {
       const selection = this.store.selection();
       const project = selection.kind === 'subproject' ? this.store.editorProject() : this.store.project();
       const signature = project
-        ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}:${project.dar ?? ''}:${selection.kind}`
+        ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}:${project.dar ?? ''}:${project.initial_prompt}:${project.cursor_agent_id ?? ''}:${selection.kind}`
         : '';
       if (signature === this.titleSignature) return;
       this.titleSignature = signature;
@@ -135,6 +138,9 @@ export class AppComponent implements OnInit {
       this.projectRepo = project?.repo_url ?? '';
       this.projectBranch = project?.starting_ref || 'main';
       this.projectDar = project?.dar ?? '';
+      if (selection.kind === 'subproject') {
+        this.subprojectInitialPrompt = project?.initial_prompt ?? '';
+      }
     });
     effect(() => {
       const projectId = this.store.project()?.project_id;
@@ -162,7 +168,8 @@ export class AppComponent implements OnInit {
       if (this.boundTaskFormId === task.task_id) return;
       this.boundTaskFormId = task.task_id;
       this.taskTitle = task.title;
-      this.taskPrompt = task.prompt;
+      this.taskDar = taskDar(task);
+      this.taskInitialPrompt = taskInitialPrompt(task);
       this.outputType = task.output_type;
       this.dependencies = [...task.dependencies];
     });
@@ -422,7 +429,32 @@ export class AppComponent implements OnInit {
       repo_url: this.projectRepo.trim(),
       starting_ref: this.projectBranch.trim() || 'main',
       dar: this.projectDar,
+      initial_prompt: this.subprojectInitialPrompt,
     });
+  }
+
+  taskAgentStarted(task: ProjectTask): boolean {
+    return Boolean(task.cursor_agent_id);
+  }
+
+  subprojectAgentStarted(): boolean {
+    return Boolean(this.store.editorProject()?.cursor_agent_id);
+  }
+
+  async executeTask(): Promise<void> {
+    await this.saveTask();
+    await this.store.executeTask();
+  }
+
+  async executeSubproject(): Promise<void> {
+    await this.store.saveEditorProject({
+      title: this.title.trim(),
+      repo_url: this.projectRepo.trim(),
+      starting_ref: this.projectBranch.trim() || 'main',
+      dar: this.projectDar,
+      initial_prompt: this.subprojectInitialPrompt,
+    });
+    await this.store.executeSubprojectChat();
   }
 
   deleteProject(): void {
@@ -819,7 +851,8 @@ export class AppComponent implements OnInit {
   async saveTask(): Promise<void> {
     await this.store.saveTask({
       title: this.taskTitle,
-      prompt: this.taskPrompt,
+      dar: this.taskDar,
+      initial_prompt: this.taskInitialPrompt,
       output_type: this.outputType,
       dependencies: this.dependencies,
     });

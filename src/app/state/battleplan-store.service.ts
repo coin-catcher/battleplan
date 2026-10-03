@@ -111,7 +111,7 @@ export class BattleplanStore {
     if (projectId && !this.error()) this.continueProjectWatch(projectId);
   }
 
-  async saveProject(patch: { title: string; repo_url: string; starting_ref: string; dar: string }): Promise<void> {
+  async saveProject(patch: { title: string; repo_url: string; starting_ref: string; dar: string; initial_prompt?: string }): Promise<void> {
     const project = this.project();
     if (!project) return;
     await this.run(async () => {
@@ -122,7 +122,13 @@ export class BattleplanStore {
     });
   }
 
-  async saveEditorProject(patch: { title: string; repo_url: string; starting_ref: string; dar: string }): Promise<void> {
+  async saveEditorProject(patch: {
+    title: string;
+    repo_url: string;
+    starting_ref: string;
+    dar: string;
+    initial_prompt?: string;
+  }): Promise<void> {
     const editor = this.editorProject();
     if (!editor) return;
     await this.run(async () => {
@@ -368,7 +374,8 @@ export class BattleplanStore {
 
   async saveTask(patch: {
     title: string;
-    prompt: string;
+    dar: string;
+    initial_prompt: string;
     output_type: OutputType;
     dependencies: string[];
   }): Promise<void> {
@@ -395,6 +402,37 @@ export class BattleplanStore {
       }
     });
     if (this.selection().kind === 'task') this.continueTaskWatch(taskId);
+  }
+
+  async executeTask(): Promise<void> {
+    const task = this.selectedTask();
+    if (!task) return;
+    let runId: string | undefined;
+    await this.run(async () => {
+      const sent = await this.api.executeTask(task.task_id);
+      runId = sent.run_id;
+      this.rememberMessage(sent);
+      this.applyTaskConversation(await this.api.listTaskMessages(task.task_id));
+    });
+    if (runId && !this.error()) await this.watchTask(task.task_id, runId);
+  }
+
+  async executeSubprojectChat(): Promise<void> {
+    const editor = this.editorProject();
+    if (!editor) return;
+    let runId: string | undefined;
+    let projectId = editor.project_id;
+    await this.run(async () => {
+      const result = await this.api.executeProjectChat(editor.project_id);
+      runId = result.message.run_id;
+      projectId = result.project.project_id;
+      this.rememberMessage(result.message);
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === result.project.project_id ? result.project : item
+      )));
+      this.applyConversation(await this.api.listProjectMessages(editor.project_id));
+    });
+    if (runId && !this.error()) await this.watchProject(projectId, runId);
   }
 
   async sendTaskMessage(message: string): Promise<void> {

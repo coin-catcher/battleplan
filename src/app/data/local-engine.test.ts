@@ -169,12 +169,35 @@ describe('LocalEngine', () => {
       created_at: '2026-10-02T00:00:00.000Z',
       updated_at: '2026-10-02T00:00:00.000Z',
     });
-    const task = await engine.createTask('p1', { title: 'Implement', prompt: 'Task rules' });
-    const sent = await engine.sendTaskMessage(task.task_id, 'Please implement the feature.');
+    const task = await engine.createTask('p1', {
+      title: 'Implement',
+      output_type: 'code',
+      dar: 'Task rules',
+      initial_prompt: 'Please implement the feature.',
+    });
+    const sent = await engine.executeTask(task.task_id);
     expect(client.prompts[0]).toContain('Project rules');
     expect(client.prompts[0]).toContain('Task rules');
     expect(client.prompts[0]).toContain('Please implement the feature.');
     expect(sent.content).toBe('Please implement the feature.');
+  });
+
+  it('defaults research task DAR and no default for code tasks', async () => {
+    const repo = new MemoryRepository();
+    let tick = 0;
+    const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => `id-${tick++}`);
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const research = await engine.createTask('p1', { output_type: 'research', title: 'Research' });
+    const code = await engine.createTask('p1', { output_type: 'code', title: 'Code' });
+    expect(research.dar).toContain('list of tasks');
+    expect(code.dar ?? '').toBe('');
   });
 
   it('splits a both-output draft into research then code', async () => {

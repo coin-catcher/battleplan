@@ -339,8 +339,17 @@
             </div>
             <label class="field">
               <span>Data and Rules</span>
-              <textarea rows="4" [(ngModel)]="taskPrompt" [name]="'taskPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" placeholder="Persistent context for this task. Prepended to the first agent message."></textarea>
+              <textarea rows="4" [(ngModel)]="taskDar" [name]="'taskDar-' + task.task_id" (focus)="onTaskFieldFocus()" placeholder="Persistent context for this task. Prepended when the agent chat starts."></textarea>
             </label>
+            @if (!taskAgentStarted(task)) {
+              <label class="field">
+                <span>Initial Prompt</span>
+                <textarea rows="4" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" placeholder="Instruction sent when you execute this task. Save and return anytime before starting the agent."></textarea>
+              </label>
+              <div class="composer-actions">
+                <button type="button" class="accent" [disabled]="store.busy() || !taskInitialPrompt.trim()" (click)="executeTask()">Execute</button>
+              </div>
+            }
             <fieldset class="deps">
               <legend>Dependencies</legend>
               @for (other of otherTasks(); track other.task_id) {
@@ -382,13 +391,15 @@
                 <p class="pending">Waiting for Cursor…</p>
               }
             </div>
-            <div class="composer">
-              <label class="sr-only" for="task-chat">Message</label>
-              <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Start or continue this task chat."></textarea>
-              <div class="composer-actions">
-                <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+            @if (taskAgentStarted(task)) {
+              <div class="composer">
+                <label class="sr-only" for="task-chat">Message</label>
+                <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat."></textarea>
+                <div class="composer-actions">
+                  <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+                </div>
               </div>
-            </div>
+            }
           </section>
         }
       }
@@ -426,6 +437,15 @@
               <span>Data and Rules</span>
               <textarea rows="4" [(ngModel)]="projectDar" name="subprojectDar" placeholder="Persistent context for this subproject. Not part of chat history."></textarea>
             </label>
+            @if (!subprojectAgentStarted()) {
+              <label class="field">
+                <span>Initial Prompt</span>
+                <textarea rows="4" [(ngModel)]="subprojectInitialPrompt" name="subprojectInitialPrompt" placeholder="Instruction sent when you execute this subproject chat."></textarea>
+              </label>
+              <div class="composer-actions">
+                <button type="button" class="accent" [disabled]="store.busy() || !subprojectInitialPrompt.trim()" (click)="executeSubproject()">Execute</button>
+              </div>
+            }
             <div class="transcript" aria-live="polite">
               @for (item of timeline(); track item.id) {
                 @if (item.kind === 'message') {
@@ -452,13 +472,15 @@
                 <p class="pending">Waiting for Cursor…</p>
               }
             </div>
-            <div class="composer">
-              <label class="sr-only" for="subproject-chat">Message</label>
-              <textarea id="subproject-chat" rows="3" [(ngModel)]="chatDraft" name="subprojectChat" placeholder="Start or continue this subproject chat."></textarea>
-              <div class="composer-actions">
-                <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+            @if (subprojectAgentStarted()) {
+              <div class="composer">
+                <label class="sr-only" for="subproject-chat">Message</label>
+                <textarea id="subproject-chat" rows="3" [(ngModel)]="chatDraft" name="subprojectChat" placeholder="Continue this subproject chat."></textarea>
+                <div class="composer-actions">
+                  <button type="button" class="primary" [disabled]="store.busy() || !chatDraft.trim()" (click)="sendChat()">Send</button>
+                </div>
               </div>
-            </div>
+            }
           </section>
           }
         }
