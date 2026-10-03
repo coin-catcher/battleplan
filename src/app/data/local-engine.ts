@@ -357,9 +357,12 @@ export class LocalEngine {
       task.prompt = dar;
     }
     if (patch.initial_prompt !== undefined) {
-      if (task.cursor_agent_id) throw new Error('Initial prompt cannot be changed after the Cursor agent has started.');
       const initial = patch.initial_prompt.trim();
-      if (initial !== taskInitialPrompt(task)) changes.push('Initial prompt updated.');
+      const saved = taskInitialPrompt(task);
+      if (task.cursor_agent_id && initial !== saved) {
+        throw new Error('Initial prompt cannot be changed after the Cursor agent has started.');
+      }
+      if (initial !== saved) changes.push('Initial prompt updated.');
       task.initial_prompt = initial || undefined;
     }
     if (patch.output_type !== undefined) {
