@@ -60,6 +60,16 @@ export async function collectTaskDarSections(task: ProjectTask, lookup: DarLooku
   return blocks;
 }
 
+/** Text sent to Cursor for the first user turn: ancestor + task DAR, then the user message. */
+export async function prependTaskDarToUserMessage(
+  task: ProjectTask,
+  lookup: DarLookup,
+  userMessage: string,
+): Promise<string> {
+  const dar = joinDarSections(await collectTaskDarSections(task, lookup));
+  return joinDarSections([dar, userMessage.trim()]);
+}
+
 export async function collectProjectDarSections(project: Project, lookup: DarLookup): Promise<string[]> {
   if (project.parent_task_id) {
     return nestedProjectBoundarySections(project, lookup);

@@ -190,6 +190,43 @@ describe('LocalEngine', () => {
     expect(sent.content).toBe('Please implement the feature.');
   });
 
+  it('prepends ancestor DAR when the first chat message starts the agent', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    let tick = 0;
+    const engine = new LocalEngine(repo, client, () => `2026-10-02T00:00:0${tick++}.000Z`, () => `id-${tick}`);
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      dar: 'Project rules',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      starting_ref: 'main',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const parent = await engine.createTask('p1', {
+      title: 'Parent research',
+      output_type: 'research',
+      dar: 'Parent rules',
+      initial_prompt: 'Parent work',
+    });
+    const child = await engine.createTask('p1', {
+      title: 'Child research',
+      output_type: 'research',
+      dar: 'Child rules',
+      initial_prompt: 'Child work',
+    });
+    await engine.updateTask('p1', parent.task_id, { dependencies: [child.task_id] });
+    const sent = await engine.sendTaskMessage(child.task_id, 'Begin the research task.');
+    expect(client.prompts[0]).toContain('Project rules');
+    expect(client.prompts[0]).toContain('Parent rules');
+    expect(client.prompts[0]).toContain('Child rules');
+    expect(client.prompts[0]).toContain('Begin the research task.');
+    expect(sent.content).toBe('Begin the research task.');
+  });
+
   it('allows DAR updates after the agent starts without resubmitting initial prompt', async () => {
     const repo = new MemoryRepository();
     const client = cursor();

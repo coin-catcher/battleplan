@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Project, ProjectTask } from './models';
-import { collectTaskDarSections } from './dar';
+import { collectTaskDarSections, prependTaskDarToUserMessage } from './dar';
 
 function task(partial: Partial<ProjectTask> & Pick<ProjectTask, 'task_id' | 'title'>): ProjectTask {
   return {
@@ -111,5 +111,31 @@ describe('collectTaskDarSections', () => {
     expect(combined).toContain('Nested rules');
     expect(combined).toContain('Work rules');
     expect(combined).not.toContain('Outer rules');
+  });
+
+  it('prepends collected DAR before the user message', async () => {
+    const project: Project = {
+      project_id: 'p-root',
+      title: 'Root',
+      initial_prompt: 'Plan',
+      dar: 'Root rules',
+      cursor_chat_link: 'https://cursor.com/agents/a',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    };
+    const current = task({
+      task_id: 't-child',
+      title: 'Research step',
+      dar: 'Research rules',
+      prompt: 'Research rules',
+      output_type: 'research',
+    });
+    const lookup = {
+      async getProject() { return project; },
+      async getTask() { return current; },
+      async listTasks() { return [current]; },
+    };
+    const payload = await prependTaskDarToUserMessage(current, lookup, 'Start researching vendors.');
+    expect(payload).toMatch(/Root rules[\s\S]*Research rules[\s\S]*Start researching vendors\./);
   });
 });

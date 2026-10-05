@@ -1055,8 +1055,15 @@ export class AppComponent implements OnInit {
     this.store.chatActionPending.set('send');
     try {
       const selection = this.store.selection();
-      if (selection.kind === 'task' || selection.kind === 'subproject') await this.store.sendTaskMessage(message);
-      else await this.store.sendProjectMessage(message);
+      if (selection.kind === 'task') {
+        await this.saveTask();
+        if (this.store.error()) return;
+        await this.store.sendTaskMessage(message);
+      } else if (selection.kind === 'subproject') {
+        await this.store.sendTaskMessage(message);
+      } else {
+        await this.store.sendProjectMessage(message);
+      }
       if (!this.store.error()) this.chatDraft = '';
     } finally {
       this.store.chatActionPending.set(null);

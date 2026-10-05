@@ -15,7 +15,7 @@ import { TASK_STATUSES } from '../core/models';
 import type { CursorClient, CursorRun } from './cursor-browser';
 import { normalizeRepoUrl } from './cursor-browser';
 import type { BattleplanRepository } from './repository';
-import { collectProjectDarSections, collectTaskDarSections, joinDarSections } from '../core/dar';
+import { collectProjectDarSections, joinDarSections, prependTaskDarToUserMessage } from '../core/dar';
 import {
   assertAcyclicNormalLinks,
   migrateLegacyDependencies,
@@ -629,7 +629,7 @@ export class LocalEngine {
     const initial = taskInitialPrompt(task);
     if (!initial) throw new Error('Initial prompt is required.');
     await this.assertDependenciesDone(task);
-    return this.launchWithFirstMessage(task, initial);
+    return this.launchWithFirstMessage(taskId, initial);
   }
 
   async sendTaskMessage(taskId: string, text: string): Promise<ChatMessage> {
@@ -640,7 +640,11 @@ export class LocalEngine {
       return this.sendProjectMessage(task.subproject_id, feedback);
     }
     if (!task.cursor_agent_id) {
-      throw new Error('Execute the task with its Initial Prompt before sending chat messages.');
+      if (task.status === 'ABANDONED') {
+        throw new Error('An abandoned task cannot be executed.');
+      }
+      await this.assertDependenciesDone(task);
+      return this.launchWithFirstMessage(taskId, feedback);
     }
     const active = await this.requireTaskById(taskId);
     if (!active.cursor_agent_id) throw new Error('Start the task before sending feedback.');
@@ -901,7 +905,8 @@ export class LocalEngine {
     }
   }
 
-  private async launchWithFirstMessage(task: ProjectTask, userMessage: string): Promise<ChatMessage> {
+  private async launchWithFirstMessage(taskId: string, userMessage: string): Promise<ChatMessage> {
+    const task = await this.requireTaskById(taskId);
     const project = await this.requireProject(task.project_id);
     if (!project.repo_url) throw new Error('Add a repository to the project before starting a task.');
     const base = project.starting_ref?.trim() || 'main';
@@ -925,8 +930,7 @@ export class LocalEngine {
     if (siblingIds.length > 0) {
       lines.push(`This task depends on these completed task ids: ${siblingIds.join(', ')}.`);
     }
-    const dar = joinDarSections(await collectTaskDarSections(task, this.darLookup()));
-    const firstChat = joinDarSections([dar, userMessage]);
+    const firstChat = await prependTaskDarToUserMessage(task, this.darLookup(), userMessage);
     const created = await this.cursor.createAgent({
       prompt: joinDarSections([lines.join('\n\n'), firstChat]),
       name: task.title,
@@ -956,7 +960,7 @@ export class LocalEngine {
     return {
       getProject: (projectId: string) => this.repo.getProject(projectId),
       getTask: (taskId: string) => this.repo.getTask(taskId),
-      listTasks: (projectId: string) => this.repo.listTasks(projectId),
+      listTasks: (projectId: string) => this.listTasks(projectId),
     };
   }
 

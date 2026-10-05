@@ -448,19 +448,23 @@
                 <p class="pending">Waiting for Cursor…</p>
               }
             </div>
-            @if (taskAgentStarted(task)) {
-              <div class="composer">
-                <label class="sr-only" for="task-chat">Message</label>
-                <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat."></textarea>
-                <div class="composer-actions">
-                  @if (store.chatActionPending() === 'send') {
-                    <span class="inline-spinner" aria-label="Sending message"></span>
-                  } @else {
-                    <button type="button" class="primary" [disabled]="chatActionsLocked() || !chatDraft.trim()" (click)="sendChat()">Send</button>
-                  }
-                </div>
+            <div class="composer">
+              <label class="sr-only" for="task-chat">Message</label>
+              <textarea
+                id="task-chat"
+                rows="3"
+                [(ngModel)]="chatDraft"
+                name="taskChat"
+                [placeholder]="taskAgentStarted(task) ? 'Continue this task chat.' : 'Send your first message to start this task. Data and Rules from this task and its ancestors are prepended automatically.'"
+              ></textarea>
+              <div class="composer-actions">
+                @if (store.chatActionPending() === 'send') {
+                  <span class="inline-spinner" aria-label="Sending message"></span>
+                } @else {
+                  <button type="button" class="primary" [disabled]="chatActionsLocked() || !chatDraft.trim() || task.status === 'ABANDONED'" (click)="sendChat()">Send</button>
+                }
               </div>
-            }
+            </div>
           </section>
         }
       }
