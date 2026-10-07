@@ -636,6 +636,7 @@ export class AppComponent implements OnInit {
         title: this.title.trim(),
         repo_url: this.projectRepo.trim(),
         starting_ref: this.projectBranch.trim() || 'main',
+        github_pat: this.projectGithubPat.trim(),
         dar: this.projectDar,
         initial_prompt: this.subprojectInitialPrompt,
       });
