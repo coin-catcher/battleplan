@@ -1,0 +1,7 @@
+timestamp_utc,agent_bc_id,check,result,detail
+2026-10-07T02:47Z,bc-3062b33e-223b-48b3-93c6-d8fb10405dc9,git_remote_push,success,Pushed cursor/fix-pr-create-e51e to origin after empty branch
+2026-10-07T02:47Z,bc-3062b33e-223b-48b3-93c6-d8fb10405dc9,gh_auth_account,cursor,Active gh account is cursor with ghs_ installation-style token
+2026-10-07T02:47Z,bc-3062b33e-223b-48b3-93c6-d8fb10405dc9,repo_permissions_via_gh_token,all_false,"API permissions admin/maintain/push/pull/triage all false for coin-catcher/battleplan"
+2026-10-07T02:47Z,bc-3062b33e-223b-48b3-93c6-d8fb10405dc9,gh_pr_create,fail,GraphQL Resource not accessible by integration (createPullRequest)
+2026-10-07T02:47Z,bc-3062b33e-223b-48b3-93c6-d8fb10405dc9,manage_pull_request_create_pre_commit,fail_no_diff,No differences between cursor/fix-pr-create-e51e and develop before research commit
+2026-10-07T02:47Z,bc-3062b33e-223b-48b3-93c6-d8fb10405dc9,manage_pull_request_pre_push,fail,Head branch had no commits on remote until git push completed

@@ -1,0 +1,47 @@
+{
+  "cursor_forum_threads": [
+    {
+      "title": "Pull request create failed: Resource not accessible by integration (createPullRequest)",
+      "url": "https://forum.cursor.com/t/pull-request-create-failed-graphql-resource-not-accessible-by-integration-createpullrequest/153425",
+      "relevance": "Staff confirms installation token lacks PR write; PAT GH_TOKEN workaround; no ETA"
+    },
+    {
+      "title": "Cursor Automation can't create PR",
+      "url": "https://forum.cursor.com/t/cursor-automation-cant-create-pr/154133",
+      "relevance": "Same token scope issue; gh read-only for PR create"
+    },
+    {
+      "title": "Cloud agent having issue with Github Permissions",
+      "url": "https://forum.cursor.com/t/cloud-agent-having-issue-with-github-permissions/149049",
+      "relevance": "issues/PR GraphQL failures; permissions API returns false"
+    },
+    {
+      "title": "Cursor GH app doesn't seem to have the correct permissions",
+      "url": "https://forum.cursor.com/t/cursor-gh-app-doesnt-seem-to-have-the-correct-permissions/159885",
+      "relevance": "PAT workaround; agents may still refuse gh despite GH_TOKEN"
+    },
+    {
+      "title": "Failed to Create a GitHub Pull Request from Cursor Web",
+      "url": "https://forum.cursor.com/t/failed-to-create-a-github-pull-request-from-cursor-web/147959",
+      "relevance": "Push succeeds PR create fails; CI check 403 related scopes"
+    }
+  ],
+  "battleplan_repo_touchpoints": [
+    {
+      "path": "src/app/data/local-engine.ts",
+      "symbols": ["launchWithFirstMessage", "applyTaskRun", "approve", "mergePrompt"],
+      "notes": "autoCreatePr true; prUrl from run.git.branches; merge via follow-up run"
+    },
+    {
+      "path": "src/app/data/cursor-browser.ts",
+      "symbols": ["createAgent", "autoCreatePR"],
+      "notes": "Maps autoCreatePr to Cursor API"
+    }
+  ],
+  "research_run": {
+    "bcId": "bc-3062b33e-223b-48b3-93c6-d8fb10405dc9",
+    "repo": "github.com/coin-catcher/battleplan",
+    "branch": "cursor/fix-pr-create-e51e",
+    "base": "develop"
+  }
+}

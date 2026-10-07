@@ -1,0 +1,52 @@
+# Action items for coin-catcher / Battleplan operators (research task only)
+
+platform_cursor:
+  - id: track-github-app-token-regression
+    priority: high
+    action: Monitor Cursor forum/issues for fix to installation token missing pull_requests/issues scopes
+    note: Staff acknowledged issue; no ETA as of Apr 2026 threads in references.json
+
+  - id: pat-workaround
+    priority: high
+    action: Add org or bot PAT to Cloud Agent environment secrets as GH_TOKEN
+    scopes: repo or minimum pull_requests + contents write for coin-catcher/battleplan
+    note: Makes gh pr create/merge work inside sandbox; does not fix ManagePullRequest if backend remains limited
+
+  - id: verify-github-app-install
+    priority: medium
+    action: Reconfirm Cursor GitHub App installed on coin-catcher org with read/write PRs and contents
+    note: UI can show write while token effective permissions are false (known mismatch)
+
+battleplan_product:
+  - id: single-source-pr-creation
+    priority: high
+    action: When autoCreatePr is true, rely on run.git.branches prUrl and avoid duplicating open PR in agent prompt
+    file_hint: src/app/data/local-engine.ts launchWithFirstMessage
+    note: Reduces agent confusion and spurious gh pr create attempts
+
+  - id: pr-link-fallback-ui
+    priority: medium
+    action: Allow manual paste of PR URL into task output when auto-create and agent both fail
+    note: Unblocks REVIEW/approve without re-running agent
+
+  - id: merge-via-github-actions
+    priority: low
+    action: Optional workflow_dispatch merge using GITHUB_TOKEN with explicit permissions
+    note: Only if PAT on agent is unacceptable; shifts merge off agent
+
+agent_operations:
+  - id: branch-hygiene
+    priority: medium
+    action: Ensure task agents commit on the run branchName and push before ManagePullRequest
+    note: Prevents false cannot create PR when head equals base or branch not on remote
+
+  - id: rulesets
+    priority: medium
+    action: Audit GitHub rulesets for cursor/* branch patterns on battleplan repo
+    note: Forum reports rulesets blocking PRs from cursor/ branches
+
+verification:
+  - id: smoke-test
+    priority: high
+    action: Start minimal research task on develop; confirm run finishes with prUrl in Cursor API
+    success_criteria: Task reaches REVIEW with pr_link without manual compare link
