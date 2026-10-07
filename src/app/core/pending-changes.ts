@@ -93,6 +93,14 @@ export function pendingSummary(output: TaskCodeOutput | TaskResearchOutput, pull
   return pull?.title?.trim() || 'Merged change';
 }
 
+export function appendPendingChangeRows(current: PendingChange[], rows: PendingChange[]): PendingChange[] {
+  const byId = new Map(current.map((item) => [item.change_id, item]));
+  for (const row of rows) byId.set(row.change_id, row);
+  return [...byId.values()].sort(
+    (left, right) => right.merged_to_develop_at?.localeCompare(left.merged_to_develop_at ?? '') ?? 0,
+  );
+}
+
 export function upsertPendingChange(
   current: PendingChange[],
   entry: PendingChange,
@@ -196,12 +204,5 @@ export function projectRepoSlug(project: Project): { owner: string; repo: string
   return { owner: match[1], repo: match[2].replace(/\.git$/, '') };
 }
 
-export const RELEASE_CHANGES_MESSAGE = [
-  'release the changes in development:',
-  '- create a new branch off the develop branch',
-  '- bump the version in package.json',
-  '- create a PR that will merge the new branch into develop',
-  '- approve the PR and merge this new branch into develop',
-  '- create a PR that will merge the develop branch into the main branch',
-  '- approve the PR and merge the develop branch into the main branch',
-].join('\n');
+export const POST_MAIN_MERGE_PROJECT_MESSAGE =
+  'a PR was merged to main branch. create a list of recent changes merged to main';

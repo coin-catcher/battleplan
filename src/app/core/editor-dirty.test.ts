@@ -36,6 +36,7 @@ describe('projectEditorDirty', () => {
       title: 'Alpha',
       repo_url: 'https://github.com/org/repo',
       starting_ref: 'main',
+      github_pat: '',
       dar: 'Rules',
     }, project)).toBe(false);
   });
@@ -46,24 +47,28 @@ describe('projectEditorDirty', () => {
       title: 'Beta',
       repo_url: 'https://github.com/org/repo',
       starting_ref: 'main',
+      github_pat: '',
       dar: 'Rules',
     }, project)).toBe(true);
     expect(projectEditorDirty({
       title: 'Alpha',
       repo_url: 'https://github.com/org/repo',
       starting_ref: 'develop',
+      github_pat: '',
       dar: 'Rules',
     }, project)).toBe(true);
     expect(projectEditorDirty({
       title: 'Alpha',
       repo_url: 'https://github.com/org/repo',
       starting_ref: 'main',
+      github_pat: '',
       dar: 'New rules',
     }, project)).toBe(true);
     expect(projectEditorDirty({
       title: 'Alpha',
       repo_url: 'https://github.com/org/repo',
       starting_ref: 'main',
+      github_pat: '',
       dar: 'Rules',
       initial_prompt: 'Updated',
     }, project)).toBe(true);
