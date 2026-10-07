@@ -39,10 +39,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            artifact: desktop-linux
-          - os: macos-latest
-            artifact: desktop-mac
           - os: windows-latest
             artifact: desktop-win
     runs-on: ${{ matrix.os }}
@@ -110,10 +106,6 @@ jobs:
           set -euo pipefail
           echo "Bundled files:"
           find release-assets -type f | sort
-          find release-assets -name 'battleplan-*-linux.AppImage' | grep -q .
-          find release-assets -name 'battleplan-*-linux.deb' | grep -q .
-          find release-assets -name 'battleplan-*-mac.zip' | grep -q .
-          find release-assets -name 'battleplan-*-mac.dmg' | grep -q .
           find release-assets -name 'battleplan-*-win.exe' | grep -q .
 
       - name: Flatten release bundle

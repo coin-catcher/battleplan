@@ -3,7 +3,6 @@ name: Tag desktop release
 on:
   push:
     branches:
-      - develop
       - main
 
 permissions:
