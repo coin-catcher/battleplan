@@ -18,21 +18,40 @@ platform_cursor:
     note: UI can show write while token effective permissions are false (known mismatch)
 
 battleplan_product:
+  - id: guaranteed-workflow-spec
+    priority: high
+    action: Implement Phase A–C in guaranteed-code-task-workflow.md
+    note: Prompts cannot guarantee PR/merge; mechanical ensurePullRequest + optional API merge on approve
+
+  - id: phase-a-apply-task-run
+    priority: high
+    action: On FINISHED run, persist branch; if no prUrl call ensurePullRequest; trim PR instructions from agent prompt
+    file_hint: src/app/data/local-engine.ts applyTaskRun, launchWithFirstMessage
+
+  - id: phase-b-github-pat
+    priority: high
+    action: Add GitHub PAT to app settings; POST /pulls in ensurePullRequest using project.starting_ref as base
+    file_hint: new module e.g. src/app/core/github-client.ts; wire from local-engine
+
+  - id: phase-c-merge-on-approve
+    priority: high
+    action: On Approve and merge, PUT /pulls/{n}/merge via PAT; agent mergePrompt as fallback only
+    file_hint: src/app/data/local-engine.ts approve
+
   - id: single-source-pr-creation
     priority: high
-    action: When autoCreatePr is true, rely on run.git.branches prUrl and avoid duplicating open PR in agent prompt
-    file_hint: src/app/data/local-engine.ts launchWithFirstMessage
-    note: Reduces agent confusion and spurious gh pr create attempts
+    action: Keep autoCreatePr true; treat Cursor prUrl as fast path, Battleplan ensure as backstop
+    file_hint: src/app/data/cursor-browser.ts createAgent
 
   - id: pr-link-fallback-ui
     priority: medium
-    action: Allow manual paste of PR URL into task output when auto-create and agent both fail
-    note: Unblocks REVIEW/approve without re-running agent
+    action: Keep manual PR fields in UI as emergency override
+    note: Should rarely be needed after Phase B
 
   - id: merge-via-github-actions
     priority: low
-    action: Optional workflow_dispatch merge using GITHUB_TOKEN with explicit permissions
-    note: Only if PAT on agent is unacceptable; shifts merge off agent
+    action: Optional workflow_dispatch merge if org forbids storing PAT in desktop app
+    note: Alternative to Phase C in locked-down orgs
 
 agent_operations:
   - id: branch-hygiene

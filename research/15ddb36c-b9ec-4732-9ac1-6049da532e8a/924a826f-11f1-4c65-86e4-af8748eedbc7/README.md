@@ -9,15 +9,18 @@ PR creation and merge involve **three different mechanisms** that do not share t
 
 Battleplan adds a fourth layer: it sets **`autoCreatePr: true`** on task launch *and* tells the agent to open a PR manually. When auto-create and agent tools both fail, the UI never receives `run.git.branches[].prUrl` and merge-on-approve cannot run.
 
-## Recommended direction for Battleplan (no app code changed in this task)
+## Guaranteed code-task workflow (PR review feedback)
 
-See `recommendations.yaml`. Highest impact: treat **platform `autoCreatePR` + run git metadata** as the source of truth for `pr_link`, add **GH_TOKEN** (or org PAT) to the Cloud Agent environment for repos that need reliable `gh`/merge, and soften duplicate “open a PR” instructions when auto-create is enabled.
+Prompts **cannot** reliably enforce one branch off `develop`, PR into `develop`, and merge on approve. Use **Battleplan code** plus Cursor API flags. Full design: **`guaranteed-code-task-workflow.md`**.
+
+**Recommended:** Keep `autoCreatePr: true` and `startingRef: develop` as the fast path; add **`ensurePullRequest`** (GitHub API + PAT in app settings) when `run.git.branches` has a branch but no `prUrl`; on **Approve and merge**, call **GitHub merge API** instead of relying on an agent merge run (agent merge as fallback only).
 
 ## Artifacts in this folder
 
 | File | Purpose |
 |------|---------|
+| `guaranteed-code-task-workflow.md` | Reliable branch → PR → merge design (Phases A–C) |
 | `findings.md` | Detailed analysis |
-| `recommendations.yaml` | Action items |
+| `recommendations.yaml` | Phased action items |
 | `evidence.csv` | Checks run in agent bc-3062b33e on 2026-10-07 |
 | `references.json` | External threads and in-repo touchpoints |
