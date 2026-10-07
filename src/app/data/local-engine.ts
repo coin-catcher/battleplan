@@ -1253,14 +1253,6 @@ function feedbackPrompt(task: ProjectTask, feedback: string): string {
   ].join('\n');
 }
 
-function mergePrompt(task: ProjectTask, prLink: string, baseBranch: string): string {
-  return [
-    `The user approved the battleplan task "${task.title}".`,
-    `Merge the pull request ${prLink} into \`${baseBranch}\` and confirm when the merge is complete.`,
-    'Do not open a new pull request.',
-  ].join('\n');
-}
-
 function shouldReplaceAssistantText(previous: string, next: string): boolean {
   if (previous === next) return false;
   if (previous === ASSISTANT_PLACEHOLDER) return true;
