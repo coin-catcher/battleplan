@@ -5,3 +5,5 @@ timestamp_utc,agent_bc_id,check,result,detail
 2026-10-07T02:47Z,bc-3062b33e-223b-48b3-93c6-d8fb10405dc9,gh_pr_create,fail,GraphQL Resource not accessible by integration (createPullRequest)
 2026-10-07T02:47Z,bc-3062b33e-223b-48b3-93c6-d8fb10405dc9,manage_pull_request_create_pre_commit,fail_no_diff,No differences between cursor/fix-pr-create-e51e and develop before research commit
 2026-10-07T02:47Z,bc-3062b33e-223b-48b3-93c6-d8fb10405dc9,manage_pull_request_pre_push,fail,Head branch had no commits on remote until git push completed
+2026-10-07T02:50Z,bc-3062b33e-223b-48b3-93c6-d8fb10405dc9,gh_pr_create_after_commit,fail,Same GraphQL Resource not accessible by integration after research commit pushed
+2026-10-07T02:50Z,bc-3062b33e-223b-48b3-93c6-d8fb10405dc9,manage_pull_request_create_post_commit,success,Created PR #38 base develop via ManagePullRequest (gh pr create still failed)

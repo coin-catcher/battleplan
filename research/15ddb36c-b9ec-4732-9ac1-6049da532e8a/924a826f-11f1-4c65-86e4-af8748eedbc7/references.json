@@ -42,6 +42,7 @@
     "bcId": "bc-3062b33e-223b-48b3-93c6-d8fb10405dc9",
     "repo": "github.com/coin-catcher/battleplan",
     "branch": "cursor/fix-pr-create-e51e",
-    "base": "develop"
+    "base": "develop",
+    "pr_url": "https://github.com/coin-catcher/battleplan/pull/38"
   }
 }

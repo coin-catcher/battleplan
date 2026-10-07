@@ -18,7 +18,7 @@ If no `prUrl` appears, the user sees an agent message about compare links or “
 | Mechanism | Who invokes it | Typical credential | Observed in this research run |
 |-----------|----------------|-------------------|--------------------------------|
 | **Platform `autoCreatePR`** | Cursor when the agent is created | Cursor backend / GitHub App (not the sandbox `gh` session) | Not directly observable from the sandbox; success would show as `prUrl` on the run |
-| **`ManagePullRequest` tool** | Agent via Cursor-managed API | Cursor integration (separate from `gh auth`) | **Allowed to attempt**; failed pre-commit with “no differences”; post-commit behavior documented in `evidence.csv` |
+| **`ManagePullRequest` tool** | Agent via Cursor-managed API | Cursor integration (separate from `gh auth`) | **Succeeded** for PR #38 after commit+push; earlier attempts failed with “no differences” or “no commits on remote” |
 | **`gh pr create` / GraphQL** | Agent shell | **`ghs_` installation token** in `~/.config/gh/hosts.yml` | **Failed:** `Resource not accessible by integration (createPullRequest)` |
 
 **Git push succeeded** using the **`x-access-token`** embedded in the git remote URL. That is **not** the same token `gh` uses. This split explains a common user report: “The agent pushed the branch but cannot open the PR.”
