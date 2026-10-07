@@ -5,6 +5,7 @@ export interface ProjectEditorForm {
   title: string;
   repo_url: string;
   starting_ref: string;
+  github_pat: string;
   dar: string;
   initial_prompt?: string;
 }
@@ -28,6 +29,7 @@ export function projectEditorDirty(form: ProjectEditorForm, project: Project | n
   return form.title.trim() !== project.title
     || form.repo_url.trim() !== (project.repo_url ?? '').trim()
     || branch !== savedBranch
+    || form.github_pat.trim() !== (project.github_pat ?? '').trim()
     || form.dar.trim() !== savedDar
     || initialDirty;
 }

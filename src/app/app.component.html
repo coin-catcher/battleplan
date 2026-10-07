@@ -27,7 +27,7 @@
       <section class="pending-changes">
         <header class="pending-changes-head">
           <h2>Pending Changes</h2>
-          <button type="button" class="accent" [disabled]="store.busy()" (click)="releasePendingChanges()">Release Changes</button>
+          <button type="button" class="accent" [disabled]="store.busy() || store.pendingChanges().length === 0" (click)="releasePendingChanges()">Release Changes</button>
         </header>
         <div class="pending-changes-table-wrap">
           <table class="pending-changes-table">
@@ -284,10 +284,14 @@
               </label>
               <label class="field">
                 <span>Base branch</span>
-                <input [(ngModel)]="projectBranch" name="projectBranch" placeholder="main" (blur)="onEditorFieldBlur()" />
+                <input [(ngModel)]="projectBranch" name="projectBranch" placeholder="develop" (blur)="onEditorFieldBlur()" />
+              </label>
+              <label class="field">
+                <span>GitHub personal access token</span>
+                <input type="password" autocomplete="off" [(ngModel)]="projectGithubPat" name="projectGithubPat" placeholder="ghp_…" (blur)="onEditorFieldBlur()" />
               </label>
             </div>
-            <p class="pending">New task branches are created from this branch, and approved pull requests merge back into it.</p>
+            <p class="pending">Task agents branch from this base. Approve and merge creates and merges PRs into it using the token above.</p>
             <label class="field">
               <span>Data and Rules</span>
               <textarea rows="4" [(ngModel)]="projectDar" name="projectDar" placeholder="Persistent context for this project. Not part of chat history." (blur)="onEditorFieldBlur()"></textarea>
@@ -361,9 +365,6 @@
                 <h2>{{ task.title }}</h2>
               </div>
             </header>
-            @if (task.pending_action === 'merge') {
-              <p class="banner notice">Cursor is merging the pull request.</p>
-            }
             <div class="config">
               <label class="field">
                 <span>Title</span>
@@ -491,7 +492,11 @@
               </label>
               <label class="field">
                 <span>Base branch</span>
-                <input [(ngModel)]="projectBranch" name="subprojectBranch" placeholder="main" (blur)="onEditorFieldBlur()" />
+                <input [(ngModel)]="projectBranch" name="subprojectBranch" placeholder="develop" (blur)="onEditorFieldBlur()" />
+              </label>
+              <label class="field">
+                <span>GitHub personal access token</span>
+                <input type="password" autocomplete="off" [(ngModel)]="projectGithubPat" name="subprojectGithubPat" placeholder="ghp_…" (blur)="onEditorFieldBlur()" />
               </label>
             </div>
             <label class="field">

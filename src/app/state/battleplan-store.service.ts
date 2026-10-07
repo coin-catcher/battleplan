@@ -14,7 +14,6 @@ import type {
   TaskResearchOutput,
   TaskStatus,
 } from '../core/models';
-import { RELEASE_CHANGES_MESSAGE } from '../core/pending-changes';
 import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
 import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
@@ -163,28 +162,28 @@ export class BattleplanStore {
 
   async refreshPendingChanges(): Promise<void> {
     const projectId = this.projectId();
-    const project = this.project();
-    if (!projectId || !project) {
+    if (!projectId) {
       this.pendingChanges.set([]);
       return;
     }
-    try {
-      const current = await this.api.listPendingChanges(projectId);
-      const synced = await this.api.syncPendingChanges(projectId, {
-        tasks: this.tasks(),
-        codeOutputs: this.codeOutputs(),
-        researchOutputs: this.researchOutputs(),
-        current,
-      });
-      await this.api.savePendingChanges(projectId, synced);
-      this.pendingChanges.set(synced);
-    } catch {
-      this.pendingChanges.set(await this.api.listPendingChanges(projectId));
-    }
+    this.pendingChanges.set(await this.api.listPendingChanges(projectId));
   }
 
   async releasePendingChanges(): Promise<void> {
-    await this.sendProjectMessage(RELEASE_CHANGES_MESSAGE);
+    const projectId = this.projectId();
+    if (!projectId) return;
+    let runId: string | undefined;
+    await this.run(async () => {
+      const message = await this.api.releaseProjectChanges(projectId);
+      runId = message.run_id ?? undefined;
+      this.pendingChanges.set([]);
+      this.applyConversation(await this.api.listProjectMessages(projectId));
+      this.notice.set('Released pending changes to main.');
+    });
+    if (runId && !this.error()) {
+      await this.syncProjectUserRun(projectId, runId);
+      void this.watchProject(projectId, runId);
+    }
   }
 
   showCreate(): void {
@@ -216,7 +215,7 @@ export class BattleplanStore {
     }
   }
 
-  async saveProject(patch: { title: string; repo_url: string; starting_ref: string; dar: string; initial_prompt?: string }): Promise<void> {
+  async saveProject(patch: { title: string; repo_url: string; starting_ref: string; github_pat: string; dar: string; initial_prompt?: string }): Promise<void> {
     const project = this.project();
     if (!project) return;
     await this.run(async () => {
@@ -231,6 +230,7 @@ export class BattleplanStore {
     title: string;
     repo_url: string;
     starting_ref: string;
+    github_pat: string;
     dar: string;
     initial_prompt?: string;
   }): Promise<void> {
@@ -610,21 +610,14 @@ export class BattleplanStore {
   async approve(): Promise<void> {
     const task = this.selectedTask();
     if (!task) return;
-    let runId: string | undefined;
     await this.run(async () => {
-      const merging = await this.api.approve(task.task_id);
-      runId = merging.latest_run_id ?? undefined;
-      this.replaceTask(merging);
+      const merged = await this.api.approve(task.task_id);
+      this.replaceTask(merged);
       const refreshed = await this.api.listTaskMessages(task.task_id);
       this.applyTaskConversation(refreshed);
-      this.notice.set(refreshed.task.status === 'DONE' ? 'Pull request merged. Task is DONE.' : 'Merge requested.');
+      await this.refreshPendingChanges();
+      this.notice.set('Pull request merged. Task is DONE.');
     });
-    if (runId && !this.error()) {
-      await this.syncTaskUserRun(task.task_id, runId);
-      void this.watchTask(task.task_id, runId);
-    } else {
-      this.continueTaskWatch(task.task_id);
-    }
   }
 
   async move(taskId: string, direction: -1 | 1): Promise<void> {

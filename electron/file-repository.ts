@@ -42,6 +42,7 @@ export class FileRepository implements BattleplanRepository {
       project,
       messages: doc?.messages ?? [],
       artifacts: doc?.artifacts ?? [],
+      pending_changes: doc?.pending_changes,
     };
     await this.writeProjectDocument(project.project_id, next);
   }
