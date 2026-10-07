@@ -8,7 +8,7 @@ Battleplan is the planning surface for a project, as a mindmap "skin" over Curso
 
 - Move the pointer near the north, south, east, or west edge of a project or task to reveal a semi-transparent arrow.
 - Press and hold the arrow to open a panel; choose **Add connected task** to create a linked task with a directed edge, or click away to dismiss without creating.
-- Double-click a project or task shape to edit its title in place; the title saves when you click away or press Enter. A project starts as a prompt to a Cursor CloudAgents. The conversation stays in the battleplan UI. When the plan is settled, Generate Tasks asks the agent for an ordered task list. Each task is either a code change or a research write-up, can depend on other tasks, and is executed by its own cloud agent. Finished work comes back as a pull request for review. Approval tells the agent to merge the pull request.
+- Double-click a project or task shape to edit its title in place; the title saves when you click away or press Enter. A project starts as a prompt to a Cursor CloudAgents. The conversation stays in the battleplan UI. When the plan is settled, **Generate Tasks** asks the agent for a JSON task list, parses it, and creates mindmap nodes (see [docs/GENERATE_TASKS.md](docs/GENERATE_TASKS.md)). From a **research** task, the default is a flat list of sibling **code** tasks under that research node; the agent may add prerequisite research or foundation code tasks only when needed. Each task is executed by its own cloud agent. Finished work comes back as a pull request for review. Approval tells the agent to merge the pull request.
 
 
 # Battleplan frontend

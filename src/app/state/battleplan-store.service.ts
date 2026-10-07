@@ -15,6 +15,7 @@ import type {
   TaskStatus,
 } from '../core/models';
 import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
+import { anchorDraftsUnderParentTask } from '../core/generate-tasks';
 import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
 
@@ -350,7 +351,11 @@ export class BattleplanStore {
       return;
     }
     await this.run(async () => {
-      const drafts = parseGeneratedTaskListFromSources(reply.content, this.artifacts());
+      let drafts = parseGeneratedTaskListFromSources(reply.content, this.artifacts());
+      const sourceTask = taskId ? this.tasks().find((item) => item.task_id === taskId) : undefined;
+      if (sourceTask) {
+        drafts = anchorDraftsUnderParentTask(drafts, sourceTask.title);
+      }
       await this.api.createTasks(projectId, drafts);
       await this.reloadTasks();
       const note = `Created ${drafts.length} task${drafts.length === 1 ? '' : 's'} from this conversation.`;
