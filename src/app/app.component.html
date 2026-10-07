@@ -301,7 +301,7 @@
                 @if (item.kind === 'message') {
                   <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
                     <p class="who">{{ speaker(item.message) }}</p>
-                    <pre>{{ item.message.content }}</pre>
+                    <markdown class="md chat-md" mermaid [data]="planMarkdown(item.message.content)"></markdown>
                   </article>
                 } @else {
                   <article class="artifact">
@@ -428,7 +428,7 @@
                 @if (item.kind === 'message') {
                   <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
                     <p class="who">{{ speaker(item.message) }}</p>
-                    <pre>{{ item.message.content }}</pre>
+                    <markdown class="md chat-md" mermaid [data]="planMarkdown(item.message.content)"></markdown>
                   </article>
                 } @else {
                   <article class="artifact">
@@ -524,7 +524,7 @@
                 @if (item.kind === 'message') {
                   <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
                     <p class="who">{{ speaker(item.message) }}</p>
-                    <pre>{{ item.message.content }}</pre>
+                    <markdown class="md chat-md" mermaid [data]="planMarkdown(item.message.content)"></markdown>
                   </article>
                 } @else {
                   <article class="artifact">
