@@ -38,6 +38,10 @@ import {
   siblingDependencyIds,
 } from '../core/dependencies';
 import { availableDescendants, independentBatch } from '../core/execute-children';
+import {
+  buildGenerateTaskTasksUserMessage,
+  generateTasksInstructionForProject,
+} from '../core/generate-tasks';
 import { defaultDarForOutputType, taskDar, taskInitialPrompt } from '../core/task-fields';
 
 const TERMINAL_RUN = new Set(['FINISHED', 'ERROR', 'CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED']);
@@ -55,18 +59,6 @@ const GUIDED: Record<TaskStatus, TaskStatus[]> = {
   DONE: [],
   ABANDONED: [],
 };
-
-const GENERATE_TASKS_INSTRUCTION = [
-  'Generate an ordered list of project tasks based on the agreed decisions in this battleplan.',
-  'Return only a JSON array, with no markdown and no commentary.',
-  'Each item must be an object with:',
-  '- "title": string, a short task name',
-  '- "prompt": string, the instruction the executing agent should follow',
-  '- "output_type": "code" or "research"',
-  '- "depends_on": array of task titles this task depends on',
-  'A task must declare exactly one output type. If work needs both research and code, emit two tasks.',
-  'Order the array so each task appears after the tasks it depends on.',
-].join('\n');
 
 export interface ConversationPage {
   messages: ChatMessage[];
@@ -533,7 +525,7 @@ export class LocalEngine {
   }
 
   generateTasks(projectId: string): Promise<ChatMessage> {
-    return this.dispatchProject(projectId, GENERATE_TASKS_INSTRUCTION, 'generate_tasks');
+    return this.dispatchProject(projectId, generateTasksInstructionForProject(), 'generate_tasks');
   }
 
   async generateTaskTasks(taskId: string): Promise<ChatMessage> {
@@ -541,11 +533,7 @@ export class LocalEngine {
     const project = await this.requireProject(task.project_id);
     const agentId = task.cursor_agent_id || project.cursor_agent_id;
     if (!agentId) throw new Error('This project is not linked to a Cursor agent.');
-    const text = [
-      `Generate tasks from the conversation for "${task.title}".`,
-      taskDar(task) ? `Task data and rules:\n${taskDar(task)}` : '',
-      GENERATE_TASKS_INSTRUCTION,
-    ].filter(Boolean).join('\n\n');
+    const text = buildGenerateTaskTasksUserMessage(task);
     const run = await this.cursor.createRun(agentId, {
       text,
       mode: task.cursor_agent_id ? 'agent' : 'plan',
