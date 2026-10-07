@@ -1,0 +1,71 @@
+# Action items for coin-catcher / Battleplan operators (research task only)
+
+platform_cursor:
+  - id: track-github-app-token-regression
+    priority: high
+    action: Monitor Cursor forum/issues for fix to installation token missing pull_requests/issues scopes
+    note: Staff acknowledged issue; no ETA as of Apr 2026 threads in references.json
+
+  - id: pat-workaround
+    priority: high
+    action: Add org or bot PAT to Cloud Agent environment secrets as GH_TOKEN
+    scopes: repo or minimum pull_requests + contents write for coin-catcher/battleplan
+    note: Makes gh pr create/merge work inside sandbox; does not fix ManagePullRequest if backend remains limited
+
+  - id: verify-github-app-install
+    priority: medium
+    action: Reconfirm Cursor GitHub App installed on coin-catcher org with read/write PRs and contents
+    note: UI can show write while token effective permissions are false (known mismatch)
+
+battleplan_product:
+  - id: guaranteed-workflow-spec
+    priority: high
+    action: Implement Phase A–C in guaranteed-code-task-workflow.md
+    note: Prompts cannot guarantee PR/merge; mechanical ensurePullRequest + optional API merge on approve
+
+  - id: phase-a-apply-task-run
+    priority: high
+    action: On FINISHED run, persist branch; if no prUrl call ensurePullRequest; trim PR instructions from agent prompt
+    file_hint: src/app/data/local-engine.ts applyTaskRun, launchWithFirstMessage
+
+  - id: phase-b-github-pat
+    priority: high
+    action: Add GitHub PAT to app settings; POST /pulls in ensurePullRequest using project.starting_ref as base
+    file_hint: new module e.g. src/app/core/github-client.ts; wire from local-engine
+
+  - id: phase-c-merge-on-approve
+    priority: high
+    action: On Approve and merge, PUT /pulls/{n}/merge via PAT; agent mergePrompt as fallback only
+    file_hint: src/app/data/local-engine.ts approve
+
+  - id: single-source-pr-creation
+    priority: high
+    action: Keep autoCreatePr true; treat Cursor prUrl as fast path, Battleplan ensure as backstop
+    file_hint: src/app/data/cursor-browser.ts createAgent
+
+  - id: pr-link-fallback-ui
+    priority: medium
+    action: Keep manual PR fields in UI as emergency override
+    note: Should rarely be needed after Phase B
+
+  - id: merge-via-github-actions
+    priority: low
+    action: Optional workflow_dispatch merge if org forbids storing PAT in desktop app
+    note: Alternative to Phase C in locked-down orgs
+
+agent_operations:
+  - id: branch-hygiene
+    priority: medium
+    action: Ensure task agents commit on the run branchName and push before ManagePullRequest
+    note: Prevents false cannot create PR when head equals base or branch not on remote
+
+  - id: rulesets
+    priority: medium
+    action: Audit GitHub rulesets for cursor/* branch patterns on battleplan repo
+    note: Forum reports rulesets blocking PRs from cursor/ branches
+
+verification:
+  - id: smoke-test
+    priority: high
+    action: Start minimal research task on develop; confirm run finishes with prUrl in Cursor API
+    success_criteria: Task reaches REVIEW with pr_link without manual compare link

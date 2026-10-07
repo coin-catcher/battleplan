@@ -91,6 +91,7 @@ export class AppComponent implements OnInit {
   startingRef = 'main';
   projectRepo = '';
   projectBranch = 'main';
+  projectGithubPat = '';
   projectDar = '';
   chatDraft = '';
   taskTitle = '';
@@ -137,13 +138,14 @@ export class AppComponent implements OnInit {
       const selection = this.store.selection();
       const project = selection.kind === 'subproject' ? this.store.editorProject() : this.store.project();
       const signature = project
-        ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}:${project.dar ?? ''}:${project.initial_prompt}:${project.cursor_agent_id ?? ''}:${selection.kind}`
+        ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}:${project.github_pat ?? ''}:${project.dar ?? ''}:${project.initial_prompt}:${project.cursor_agent_id ?? ''}:${selection.kind}`
         : '';
       if (signature === this.titleSignature) return;
       this.titleSignature = signature;
       this.title = project?.title ?? '';
       this.projectRepo = project?.repo_url ?? '';
       this.projectBranch = project?.starting_ref || 'main';
+      this.projectGithubPat = project?.github_pat ?? '';
       this.projectDar = project?.dar ?? '';
       if (selection.kind === 'subproject') {
         this.subprojectInitialPrompt = project?.initial_prompt ?? '';
@@ -315,6 +317,7 @@ export class AppComponent implements OnInit {
         title: this.title,
         repo_url: this.projectRepo,
         starting_ref: this.projectBranch,
+        github_pat: this.projectGithubPat,
         dar: this.projectDar,
         initial_prompt: selection.kind === 'subproject' ? this.subprojectInitialPrompt : undefined,
       },
@@ -347,6 +350,7 @@ export class AppComponent implements OnInit {
         title: this.title.trim(),
         repo_url: this.projectRepo.trim(),
         starting_ref: this.projectBranch.trim() || 'main',
+        github_pat: this.projectGithubPat.trim(),
         dar: this.projectDar,
       });
     } else if (selection.kind === 'subproject') {
@@ -354,6 +358,7 @@ export class AppComponent implements OnInit {
         title: this.title.trim(),
         repo_url: this.projectRepo.trim(),
         starting_ref: this.projectBranch.trim() || 'main',
+        github_pat: this.projectGithubPat.trim(),
         dar: this.projectDar,
         initial_prompt: this.subprojectInitialPrompt,
       });
@@ -590,6 +595,7 @@ export class AppComponent implements OnInit {
       title: this.title.trim(),
       repo_url: this.projectRepo.trim(),
       starting_ref: this.projectBranch.trim() || 'main',
+      github_pat: this.projectGithubPat.trim(),
       dar: this.projectDar,
     });
   }
@@ -599,6 +605,7 @@ export class AppComponent implements OnInit {
       title: this.title.trim(),
       repo_url: this.projectRepo.trim(),
       starting_ref: this.projectBranch.trim() || 'main',
+      github_pat: this.projectGithubPat.trim(),
       dar: this.projectDar,
       initial_prompt: this.subprojectInitialPrompt,
     });

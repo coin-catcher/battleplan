@@ -10,7 +10,21 @@ import type {
   TaskResearchOutput,
   TaskStatus,
 } from '../core/models';
-import { syncPendingChangesForProject } from '../core/pending-changes';
+import {
+  appendPendingChangeRows,
+  DEFAULT_DEVELOP_BRANCH,
+  DEFAULT_MAIN_BRANCH,
+  POST_MAIN_MERGE_PROJECT_MESSAGE,
+  projectRepoSlug,
+  syncPendingChangesForProject,
+} from '../core/pending-changes';
+import type { GithubCompareCommit } from '../core/github-client';
+import {
+  compareBranches,
+  createAndMergePullRequest,
+  requireProjectGithubPat,
+  repoSlugFromProject,
+} from '../core/github-client';
 import { TASK_STATUSES } from '../core/models';
 import type { CursorClient, CursorRun } from './cursor-browser';
 import { normalizeRepoUrl } from './cursor-browser';
@@ -35,7 +49,7 @@ const MAX_TEXT_CHARS = 100_000;
 
 const GUIDED: Record<TaskStatus, TaskStatus[]> = {
   TODO: ['DOING', 'BLOCKED', 'ABANDONED'],
-  DOING: ['REVIEW', 'DONE', 'BLOCKED', 'ABANDONED'],
+  DOING: ['REVIEW', 'TODO', 'DONE', 'BLOCKED', 'ABANDONED'],
   REVIEW: ['DOING', 'DONE', 'BLOCKED', 'ABANDONED'],
   BLOCKED: ['TODO', 'DOING', 'ABANDONED'],
   DONE: [],
@@ -159,6 +173,7 @@ export class LocalEngine {
     starting_ref?: string;
     dar?: string;
     initial_prompt?: string;
+    github_pat?: string;
     map_x?: number;
     map_y?: number;
   }): Promise<Project> {
@@ -191,6 +206,11 @@ export class LocalEngine {
       const next = patch.initial_prompt.trim();
       if (next !== (project.initial_prompt ?? '')) changes.push('Initial prompt updated.');
       project.initial_prompt = next;
+    }
+    if (patch.github_pat !== undefined) {
+      const next = patch.github_pat.trim();
+      if (next !== (project.github_pat ?? '')) changes.push('GitHub token updated.');
+      project.github_pat = next || undefined;
     }
     if (patch.map_x !== undefined) project.map_x = patch.map_x;
     if (patch.map_y !== undefined) project.map_y = patch.map_y;
@@ -670,20 +690,34 @@ export class LocalEngine {
   async approve(taskId: string): Promise<ProjectTask> {
     const task = await this.requireTaskById(taskId);
     if (task.status !== 'REVIEW') throw new Error('Only a task in REVIEW can be approved.');
-    if (!task.cursor_agent_id) throw new Error('This task has no Cursor agent.');
     const output = task.output_type === 'code'
       ? await this.repo.getCodeOutput(taskId)
       : await this.repo.getResearchOutput(taskId);
-    if (!output?.pr_link) throw new Error('Record a pull request before approving the task.');
-    assertCanTransition('REVIEW', 'DOING', false);
+    if (!output?.branch) throw new Error('This task has no agent branch to merge.');
     const project = await this.requireProject(task.project_id);
-    const run = await this.cursor.createRun(task.cursor_agent_id, {
-      text: mergePrompt(task, output.pr_link, project.starting_ref?.trim() || 'main'),
-      mode: 'agent',
+    const token = requireProjectGithubPat(project);
+    const { owner, repo } = repoSlugFromProject(project);
+    const base = project.starting_ref?.trim() || DEFAULT_MAIN_BRANCH;
+    const { pull, commits } = await createAndMergePullRequest({
+      owner,
+      repo,
+      head: output.branch,
+      base,
+      title: task.title,
+      body: output.pr_message || task.title,
+      token,
     });
-    task.status = 'DOING';
-    task.pending_action = 'merge';
-    task.latest_run_id = run.id;
+    const mergedOutput = {
+      ...output,
+      pr_link: pull.html_url,
+      pr_message: output.pr_message || task.title,
+    };
+    if (task.output_type === 'code') await this.repo.saveCodeOutput(mergedOutput);
+    else await this.repo.saveResearchOutput(mergedOutput as import('../core/models').TaskResearchOutput);
+    await this.appendPendingChangesFromCommits(task.project_id, task, commits, pull.html_url);
+    assertCanTransition('REVIEW', 'DONE', false);
+    task.status = 'DONE';
+    task.pending_action = undefined;
     task.updated_at = this.now();
     await this.repo.saveTask(task);
     await this.record({
@@ -691,11 +725,31 @@ export class LocalEngine {
       project_id: task.project_id,
       task_id: taskId,
       role: 'user',
-      content: 'Approved. Merge the pull request.',
-      run_id: run.id,
+      content: 'Approved. Merged pull request into the base branch.',
       intent: 'approve',
     });
     return task;
+  }
+
+  async releaseProjectChanges(projectId: string): Promise<ChatMessage> {
+    const project = await this.requireProject(projectId);
+    const pending = await this.repo.listPendingChanges(projectId);
+    if (pending.length === 0) throw new Error('No pending changes to release.');
+    const token = requireProjectGithubPat(project);
+    const { owner, repo } = repoSlugFromProject(project);
+    const develop = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
+    const main = DEFAULT_MAIN_BRANCH;
+    await createAndMergePullRequest({
+      owner,
+      repo,
+      head: develop,
+      base: main,
+      title: `Release: ${project.title}`,
+      body: 'Merge accumulated develop changes into main.',
+      token,
+    });
+    await this.repo.savePendingChanges(projectId, []);
+    return this.dispatchProject(projectId, POST_MAIN_MERGE_PROJECT_MESSAGE, 'chat');
   }
 
   private async dispatchProject(
@@ -850,35 +904,69 @@ export class LocalEngine {
   private async applyTaskRun(taskId: string, run: CursorRun): Promise<void> {
     const task = await this.repo.getTask(taskId);
     if (!task || task.latest_run_id !== run.id || run.status !== 'FINISHED') return;
-    if (task.pending_action === 'merge') {
-      task.status = 'DONE';
-      task.pending_action = undefined;
-      task.updated_at = this.now();
-      await this.repo.saveTask(task);
-      return;
-    }
-    const branch = run.git?.branches.find((item) => item.prUrl && item.branch);
-    if (!branch?.prUrl || !branch.branch) return;
+    if (task.output_type === 'subproject') return;
+    const branchInfo = run.git?.branches.find((item) => item.branch);
+    if (!branchInfo?.branch) return;
+    const project = await this.requireProject(task.project_id);
+    const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
     const shared = {
       task_id: task.task_id,
-      repo: normalizeRepoUrl(branch.repoUrl),
-      branch: branch.branch,
+      repo: normalizeRepoUrl(branchInfo.repoUrl || project.repo_url || ''),
+      branch: branchInfo.branch,
       pr_message: (run.result ?? task.title).slice(0, 500),
-      pr_link: branch.prUrl,
+      pr_link: branchInfo.prUrl ?? '',
     };
-    if (task.output_type === 'code') await this.repo.saveCodeOutput(shared);
-    else {
-      await this.repo.saveResearchOutput({
-        ...shared,
-        path: `research/${task.project_id}/${task.task_id}/`,
-      });
+    let hasChanges = false;
+    const token = project.github_pat?.trim();
+    const slug = projectRepoSlug(project);
+    if (token && slug) {
+      try {
+        const compare = await compareBranches(slug.owner, slug.repo, base, branchInfo.branch, token);
+        hasChanges = compare.ahead_by > 0;
+      } catch {
+        hasChanges = true;
+      }
+    } else {
+      hasChanges = true;
     }
-    if (task.status === 'DOING') {
-      assertCanTransition('DOING', 'REVIEW', false);
-      task.status = 'REVIEW';
-      task.updated_at = this.now();
-      await this.repo.saveTask(task);
+    if (hasChanges) {
+      if (task.output_type === 'code') await this.repo.saveCodeOutput(shared);
+      else {
+        await this.repo.saveResearchOutput({
+          ...shared,
+          path: `research/${task.project_id}/${task.task_id}/`,
+        });
+      }
+      if (task.status === 'DOING') {
+        assertCanTransition('DOING', 'REVIEW', false);
+        task.status = 'REVIEW';
+      }
+    } else if (task.status === 'DOING') {
+      assertCanTransition('DOING', 'TODO', false);
+      task.status = 'TODO';
     }
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+  }
+
+  private async appendPendingChangesFromCommits(
+    projectId: string,
+    task: ProjectTask,
+    commits: GithubCompareCommit[],
+    prLink: string,
+  ): Promise<void> {
+    if (commits.length === 0) return;
+    const current = await this.repo.listPendingChanges(projectId);
+    const timestamp = this.now();
+    const rows: PendingChange[] = commits.map((commit) => ({
+      change_id: commit.sha,
+      task_id: task.task_id,
+      task_title: task.title,
+      summary: commit.message.split('\n')[0]?.trim() || task.title,
+      pr_link: prLink,
+      merged_to_develop_at: timestamp,
+    }));
+    await this.repo.savePendingChanges(projectId, appendPendingChangeRows(current, rows));
   }
 
   private async applyStatus(task: ProjectTask, status: TaskStatus, manual: boolean): Promise<void> {
@@ -907,18 +995,19 @@ export class LocalEngine {
     const base = project.starting_ref?.trim() || 'main';
     const lines = [
       `You are executing a battleplan ${task.output_type} task.`,
-      `Create the working branch from \`${base}\` in ${project.repo_url}.`,
-      `Open the pull request against \`${base}\`, which is the branch this project merges into.`,
+      `Work on a dedicated branch created from \`${base}\` in ${project.repo_url}.`,
+      'Commit and push all work to that branch only.',
+      'Do not create or merge pull requests; Battleplan handles PRs after review.',
+      'When finished, summarize the code changes you committed in your reply.',
     ];
     if (task.output_type === 'research') {
       lines.push(
         `Write the research into the git repository under \`research/${project.project_id}/${task.task_id}/\`.`,
         'Use markdown, JSON, CSV, or YAML, whichever fits the findings.',
         'Do not change application source code.',
-        'Open a pull request that contains those research files.',
       );
     } else {
-      lines.push('Implement the task in code and open a pull request.');
+      lines.push('Implement the task in code on the agent branch.');
     }
     lines.push(`Task title: ${task.title}`);
     const siblingIds = siblingDependencyIds(task);
@@ -933,7 +1022,7 @@ export class LocalEngine {
       mode: 'agent',
       repoUrl: project.repo_url,
       startingRef: base,
-      autoCreatePr: true,
+      autoCreatePr: false,
     });
     task.cursor_agent_id = created.agent.id;
     task.cursor_chat_link = created.agent.url;
@@ -1161,14 +1250,6 @@ function feedbackPrompt(task: ProjectTask, feedback: string): string {
     'Incorporate the feedback into the existing branch and update the pull request.',
     '',
     feedback,
-  ].join('\n');
-}
-
-function mergePrompt(task: ProjectTask, prLink: string, baseBranch: string): string {
-  return [
-    `The user approved the battleplan task "${task.title}".`,
-    `Merge the pull request ${prLink} into \`${baseBranch}\` and confirm when the merge is complete.`,
-    'Do not open a new pull request.',
   ].join('\n');
 }
 

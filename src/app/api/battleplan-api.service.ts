@@ -39,6 +39,7 @@ export class BattleplanApi {
     starting_ref?: string;
     dar?: string;
     initial_prompt?: string;
+    github_pat?: string;
     map_x?: number;
     map_y?: number;
   }): Promise<Project> {
@@ -181,5 +182,9 @@ export class BattleplanApi {
 
   approve(taskId: string): Promise<ProjectTask> {
     return this.engine.approve(taskId);
+  }
+
+  releaseProjectChanges(projectId: string): Promise<ChatMessage> {
+    return this.engine.releaseProjectChanges(projectId);
   }
 }
