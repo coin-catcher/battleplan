@@ -20,6 +20,13 @@ import {
 } from '../core/pending-changes';
 import type { GithubCompareCommit } from '../core/github-client';
 import {
+  agentBranchPolicyLines,
+  branchNamesFromRun,
+  pickBranchInfoFromRun,
+  pickTaskAgentBranch,
+  wrapAgentRunPrompt,
+} from '../core/agent-branch';
+import {
   compareBranches,
   createAndMergePullRequest,
   requireProjectGithubPat,
@@ -534,8 +541,12 @@ export class LocalEngine {
     const agentId = task.cursor_agent_id || project.cursor_agent_id;
     if (!agentId) throw new Error('This project is not linked to a Cursor agent.');
     const text = buildGenerateTaskTasksUserMessage(task);
+    const output = task.output_type === 'code'
+      ? await this.repo.getCodeOutput(taskId)
+      : await this.repo.getResearchOutput(taskId);
+    const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
     const run = await this.cursor.createRun(agentId, {
-      text,
+      text: wrapAgentRunPrompt(text, { baseBranch: base, agentBranch: output?.branch }),
       mode: task.cursor_agent_id ? 'agent' : 'plan',
     });
     return this.record({
@@ -657,8 +668,16 @@ export class LocalEngine {
       active.status = 'DOING';
       active.pending_action = undefined;
     }
+    const output = active.output_type === 'code'
+      ? await this.repo.getCodeOutput(taskId)
+      : await this.repo.getResearchOutput(taskId);
+    const project = await this.requireProject(active.project_id);
+    const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
     const run = await this.cursor.createRun(active.cursor_agent_id!, {
-      text: feedbackPrompt(active, feedback),
+      text: wrapAgentRunPrompt(feedbackPrompt(active, feedback), {
+        baseBranch: base,
+        agentBranch: output?.branch,
+      }),
       mode: 'agent',
     });
     active.latest_run_id = run.id;
@@ -681,15 +700,16 @@ export class LocalEngine {
     const output = task.output_type === 'code'
       ? await this.repo.getCodeOutput(taskId)
       : await this.repo.getResearchOutput(taskId);
-    if (!output?.branch) throw new Error('This task has no agent branch to merge.');
+    if (!output) throw new Error('This task has no saved output to merge.');
     const project = await this.requireProject(task.project_id);
     const token = requireProjectGithubPat(project);
     const { owner, repo } = repoSlugFromProject(project);
     const base = project.starting_ref?.trim() || DEFAULT_MAIN_BRANCH;
+    const head = await this.resolveTaskMergeBranch(task, output?.branch, base, token, owner, repo);
     const { pull, commits } = await createAndMergePullRequest({
       owner,
       repo,
-      head: output.branch,
+      head,
       base,
       title: task.title,
       body: output.pr_message || task.title,
@@ -893,23 +913,42 @@ export class LocalEngine {
     const task = await this.repo.getTask(taskId);
     if (!task || task.latest_run_id !== run.id || run.status !== 'FINISHED') return;
     if (task.output_type === 'subproject') return;
-    const branchInfo = run.git?.branches.find((item) => item.branch);
-    if (!branchInfo?.branch) return;
     const project = await this.requireProject(task.project_id);
     const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
-    const shared = {
-      task_id: task.task_id,
-      repo: normalizeRepoUrl(branchInfo.repoUrl || project.repo_url || ''),
-      branch: branchInfo.branch,
-      pr_message: (run.result ?? task.title).slice(0, 500),
-      pr_link: branchInfo.prUrl ?? '',
-    };
-    let hasChanges = false;
+    const existingOutput = task.output_type === 'code'
+      ? await this.repo.getCodeOutput(taskId)
+      : await this.repo.getResearchOutput(taskId);
     const token = project.github_pat?.trim();
     const slug = projectRepoSlug(project);
+    const branchNames = branchNamesFromRun(run);
+    let branch = existingOutput?.branch;
+    if (token && slug && branchNames.length > 0) {
+      const picked = await pickTaskAgentBranch({
+        branchNames,
+        preferred: existingOutput?.branch,
+        owner: slug.owner,
+        repo: slug.repo,
+        base,
+        token,
+      });
+      if (picked?.branch) branch = picked.branch;
+    } else if (branchNames.length > 0) {
+      branch = branchNames[branchNames.length - 1];
+    }
+    const branchInfo = pickBranchInfoFromRun(run.git?.branches, branch);
+    if (!branchInfo?.branch && !branch) return;
+    const resolvedBranch = branch ?? branchInfo!.branch!;
+    const shared = {
+      task_id: task.task_id,
+      repo: normalizeRepoUrl(branchInfo?.repoUrl || project.repo_url || ''),
+      branch: resolvedBranch,
+      pr_message: (run.result ?? task.title).slice(0, 500),
+      pr_link: '',
+    };
+    let hasChanges = false;
     if (token && slug) {
       try {
-        const compare = await compareBranches(slug.owner, slug.repo, base, branchInfo.branch, token);
+        const compare = await compareBranches(slug.owner, slug.repo, base, resolvedBranch, token);
         hasChanges = compare.ahead_by > 0;
       } catch {
         hasChanges = true;
@@ -935,6 +974,50 @@ export class LocalEngine {
     }
     task.updated_at = this.now();
     await this.repo.saveTask(task);
+  }
+
+  private async resolveTaskMergeBranch(
+    task: ProjectTask,
+    storedBranch: string | undefined,
+    base: string,
+    token: string,
+    owner: string,
+    repo: string,
+  ): Promise<string> {
+    const names = new Set<string>();
+    if (storedBranch?.trim()) names.add(storedBranch.trim());
+    if (task.cursor_agent_id) {
+      try {
+        const runs = await this.cursor.listRuns(task.cursor_agent_id);
+        for (const summary of runs) {
+          if (!TERMINAL_RUN.has(summary.status)) continue;
+          try {
+            const run = await this.cursor.getRun(task.cursor_agent_id, summary.id);
+            for (const name of branchNamesFromRun(run)) names.add(name);
+          } catch {
+            continue;
+          }
+        }
+      } catch {
+        // listRuns unavailable; fall back to stored branch only
+      }
+    }
+    const picked = await pickTaskAgentBranch({
+      branchNames: [...names],
+      preferred: storedBranch,
+      owner,
+      repo,
+      base,
+      token,
+    });
+    if (!picked?.branch) throw new Error('This task has no agent branch to merge.');
+    if (picked.aheadBy <= 0) {
+      throw new Error(
+        `Branch "${picked.branch}" has no commits ahead of "${base}". `
+        + 'The agent may have pushed to a different branch; check the latest Cursor run or send a follow-up using the single-branch instructions.',
+      );
+    }
+    return picked.branch;
   }
 
   private async appendPendingChangesFromCommits(
@@ -983,10 +1066,9 @@ export class LocalEngine {
     const base = project.starting_ref?.trim() || 'main';
     const lines = [
       `You are executing a battleplan ${task.output_type} task.`,
-      `Work on a dedicated branch created from \`${base}\` in ${project.repo_url}.`,
-      'Commit and push all work to that branch only.',
-      'Do not create or merge pull requests; Battleplan handles PRs after review.',
-      'When finished, summarize the code changes you committed in your reply.',
+      ...agentBranchPolicyLines({ baseBranch: base }),
+      `Repository: ${project.repo_url}.`,
+      'When finished, summarize the code changes you committed and name the branch you pushed.',
     ];
     if (task.output_type === 'research') {
       lines.push(
@@ -1234,8 +1316,8 @@ function bindDependencies(existing: ProjectTask[], created: ProjectTask[], draft
 
 function feedbackPrompt(task: ProjectTask, feedback: string): string {
   return [
-    `The user reviewed the pull request for "${task.title}" and sent feedback.`,
-    'Incorporate the feedback into the existing branch and update the pull request.',
+    `The user reviewed the work for "${task.title}" and sent feedback.`,
+    'Incorporate the feedback on the existing agent branch, commit, and push. Do not create or update pull requests.',
     '',
     feedback,
   ].join('\n');

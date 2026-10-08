@@ -118,6 +118,13 @@ export async function createPullRequest(input: {
   body?: string;
   token: string;
 }): Promise<GithubPullRequestRef> {
+  const compare = await compareBranches(input.owner, input.repo, input.base, input.head, input.token);
+  if (compare.ahead_by <= 0) {
+    throw new Error(
+      `Branch "${input.head}" has no commits ahead of "${input.base}". `
+      + 'The agent may have pushed to a different branch; open the task output and confirm the branch name, or re-run the agent with the single-branch policy.',
+    );
+  }
   const existing = await findOpenPullRequest(input.owner, input.repo, input.head, input.base, input.token);
   if (existing) return existing;
   const data = await githubJson<{ number: number; html_url: string }>(
