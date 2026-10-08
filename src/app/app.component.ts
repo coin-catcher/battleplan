@@ -72,7 +72,7 @@ export class AppComponent implements OnInit {
       ?? (project && Number.isFinite(project.map_x) && Number.isFinite(project.map_y)
         ? { x: project.map_x as number, y: project.map_y as number }
         : undefined);
-    return layoutMindmap(project?.title ?? 'Project', tasks, projectPin);
+    return layoutMindmap(project?.title ?? 'Project', tasks, projectPin, project?.status);
   });
 
   apiKey = '';

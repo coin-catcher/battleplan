@@ -124,6 +124,7 @@ export function layoutMindmap(
   title: string,
   tasks: ProjectTask[],
   projectPin?: { x: number; y: number },
+  projectStatus?: TaskStatus,
 ): MindmapLayout {
   const byId = new Map(tasks.map((task) => [task.task_id, task]));
   const depth = depthByNormalLinks(tasks);
@@ -179,6 +180,7 @@ export function layoutMindmap(
     kind: 'project',
     shape: 'project',
     label: title || 'Project',
+    status: projectStatus,
     x: projectX,
     y: projectY,
     width: PROJECT_RADIUS * 2,
