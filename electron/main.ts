@@ -16,7 +16,7 @@ import {
   selectInstallerAsset,
   type GithubRelease,
   type GithubReleaseAsset,
-} from '../src/app/core/desktop-release-update';
+} from './desktop-release-update';
 import type {
   ChatArtifact,
   ChatMessage,
@@ -185,12 +185,17 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[^\w.\- ]+/g, '_').trim() || 'battleplan-project';
 }
 
-async function readGithubPat(): Promise<string> {
+const MISSING_GITHUB_PAT_MESSAGE = 'Add a GitHub personal access token under File → GitHub Token (Updates).';
+
+async function readGithubPatFromConfig(): Promise<string | null> {
   const config = await repo().readAppConfig();
   const token = config.github_pat?.trim();
-  if (!token) {
-    throw new Error('Add a GitHub personal access token under File → GitHub Token (Updates).');
-  }
+  return token || null;
+}
+
+async function requireGithubPat(): Promise<string> {
+  const token = await readGithubPatFromConfig();
+  if (!token) throw new Error(MISSING_GITHUB_PAT_MESSAGE);
   return token;
 }
 
@@ -223,7 +228,13 @@ async function checkForUpdatesFromGitHub(notifyWhenCurrent: boolean): Promise<{
     return { ok: false, message: 'Updates are only available in the packaged desktop app.' };
   }
   try {
-    const token = await readGithubPat();
+    const token = await readGithubPatFromConfig();
+    if (!token) {
+      if (notifyWhenCurrent) {
+        return { ok: false, message: MISSING_GITHUB_PAT_MESSAGE };
+      }
+      return { ok: true, upToDate: true };
+    }
     const current = normalizeVersion(app.getVersion());
     const latestRelease = latestProductionRelease(await fetchGithubReleases(token));
     if (!latestRelease) return { ok: false, message: 'Could not read the latest GitHub release.' };
@@ -254,7 +265,7 @@ async function checkForUpdatesFromGitHub(notifyWhenCurrent: boolean): Promise<{
 async function installPendingRelease(): Promise<{ ok: boolean; message?: string }> {
   if (!pendingRelease) return { ok: false, message: 'No update is ready to install.' };
   try {
-    const token = await readGithubPat();
+    const token = await requireGithubPat();
     const destination = path.join(app.getPath('temp'), pendingRelease.asset.name);
     await downloadReleaseAsset({
       assetApiUrl: pendingRelease.asset.url,
@@ -276,14 +287,18 @@ async function installPendingRelease(): Promise<{ ok: boolean; message?: string 
 }
 
 async function checkForUpdatesOnStartup(): Promise<void> {
-  await checkForUpdatesFromGitHub(false);
+  try {
+    await checkForUpdatesFromGitHub(false);
+  } catch (error) {
+    console.warn('Startup update check skipped', error);
+  }
 }
 
 app.whenReady().then(async () => {
   registerRepositoryHandlers();
   buildApplicationMenu(() => mainWindow);
   createWindow();
-  await checkForUpdatesOnStartup();
+  void checkForUpdatesOnStartup();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
