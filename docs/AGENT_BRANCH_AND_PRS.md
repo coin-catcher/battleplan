@@ -2,9 +2,24 @@
 
 Battleplan owns **GitHub pull requests**. Cursor agents must **not** create or merge PRs.
 
+## Cursor API / environment config
+
+Every `POST /v1/agents` from Battleplan (`BrowserCursor.createAgent`) sets:
+
+| Field | Value | Purpose |
+|--------|--------|---------|
+| `autoCreatePR` | `false` | Cursor must not open a PR when a run finishes |
+| `workOnCurrentBranch` | `false` | First push goes to one auto `cursor/…` branch from `startingRef` (not the base branch directly) |
+| `repos[].prUrl` | *(omitted)* | Agents are never scoped to an existing PR |
+| `envVars.BATTLEPLAN_PR_POLICY` | `cursor_agents_must_not_create_or_merge_pull_requests` | Session env marker aligned with prompt rules |
+
+Caller-supplied `autoCreatePr` / `prUrl` on `CreateAgentInput` are **ignored** so no code path can re-enable platform PRs.
+
+Follow-up runs (`POST …/runs`) reuse the agent record; they do not pass `autoCreatePR`. Prompt text on every run repeats the no-PR policy.
+
 ## One branch per task agent
 
-1. **Execute** creates one Cursor agent (`createAgent`, `autoCreatePr: false`).
+1. **Execute** creates one Cursor agent with the settings above.
 2. Cursor opens a single `cursor/…` branch from the project **base branch** (`starting_ref`, usually `develop`).
 3. Every follow-up run on that agent (`createRun` for chat, feedback, generate tasks) receives **agent branch policy** text:
    - Stay on the same branch (named when known).

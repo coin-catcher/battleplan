@@ -68,7 +68,7 @@ export function agentBranchPolicyLines(input: {
     '- Do not create additional branches or fork new agent branches.',
     `- Before writing or committing code, merge the latest \`${base}\` branch into your working branch if your branch is behind.`,
     '- Commit and push all changes to that single branch only.',
-    '- Do not create, update, or merge pull requests. Battleplan opens and merges PRs after human review.',
+    '- Do not create, update, or merge pull requests (no `gh pr`, no ManagePullRequest, no GitHub PR tools). Battleplan opens and merges PRs after human review.',
     '- In your final reply, state which branch contains your commits.',
   ];
   return lines;
