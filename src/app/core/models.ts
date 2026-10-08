@@ -27,6 +27,8 @@ export interface Project {
   github_pat?: string;
   map_x?: number;
   map_y?: number;
+  /** Mindmap status for the root project node (nested subprojects use their task node). */
+  status?: TaskStatus;
   /** When set, this project is nested under another project or task. */
   parent_project_id?: string;
   parent_task_id?: string;

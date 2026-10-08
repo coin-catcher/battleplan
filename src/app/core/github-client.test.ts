@@ -31,6 +31,9 @@ describe('github-client', () => {
   it('creates a pull request when none is open', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo) => {
       const url = String(input);
+      if (url.includes('/compare/')) {
+        return new Response(JSON.stringify({ ahead_by: 2, commits: [] }), { status: 200 });
+      }
       if (url.includes('/pulls?state=open')) {
         return new Response(JSON.stringify([]), { status: 200 });
       }

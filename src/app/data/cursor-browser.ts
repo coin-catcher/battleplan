@@ -31,14 +31,27 @@ export interface ArtifactDownload {
   expiresAt: string;
 }
 
+/** Cursor Cloud Agent repo policy: Battleplan owns PRs; agents use one auto branch per agent. */
+export const CURSOR_AGENT_DISABLE_PLATFORM_PRS = {
+  autoCreatePR: false,
+  workOnCurrentBranch: false,
+} as const;
+
+export const BATTLEPLAN_AGENT_ENV_VARS: Record<string, string> = {
+  BATTLEPLAN_PR_POLICY: 'cursor_agents_must_not_create_or_merge_pull_requests',
+};
+
 export interface CreateAgentInput {
   prompt: string;
   name?: string;
   mode?: 'agent' | 'plan';
   repoUrl?: string;
   startingRef?: string;
+  /** Ignored — platform PR creation is always disabled. */
   autoCreatePr?: boolean;
+  /** Ignored — PR-scoped agent creates are not allowed. */
   prUrl?: string;
+  envVars?: Record<string, string>;
 }
 
 export interface CursorClient {
@@ -99,13 +112,13 @@ export class BrowserCursor implements CursorClient {
     const body: Record<string, unknown> = {
       prompt: { text: input.prompt },
       mode: input.mode ?? 'agent',
-      autoCreatePR: input.autoCreatePr ?? false,
+      ...CURSOR_AGENT_DISABLE_PLATFORM_PRS,
+      envVars: { ...BATTLEPLAN_AGENT_ENV_VARS, ...(input.envVars ?? {}) },
     };
     if (input.name) body['name'] = input.name.slice(0, 100);
     if (input.repoUrl) {
       const repo: Record<string, string> = { url: input.repoUrl };
       if (input.startingRef) repo['startingRef'] = input.startingRef;
-      if (input.prUrl) repo['prUrl'] = input.prUrl;
       body['repos'] = [repo];
     }
     const payload = await this.request<Record<string, unknown>>('POST', '/v1/agents', body);

@@ -11,6 +11,8 @@ import type {
 export interface AppConfigDocument {
   current_project_id: string | null;
   cursor_api_key: string;
+  /** GitHub PAT for checking and downloading Battleplan desktop releases. */
+  github_pat?: string;
   theme: string;
   pane_width: number;
   auto_save?: boolean;

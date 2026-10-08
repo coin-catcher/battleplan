@@ -20,6 +20,13 @@ import {
 } from '../core/pending-changes';
 import type { GithubCompareCommit } from '../core/github-client';
 import {
+  agentBranchPolicyLines,
+  branchNamesFromRun,
+  pickBranchInfoFromRun,
+  pickTaskAgentBranch,
+  wrapAgentRunPrompt,
+} from '../core/agent-branch';
+import {
   compareBranches,
   createAndMergePullRequest,
   requireProjectGithubPat,
@@ -43,6 +50,7 @@ import {
   generateTasksInstructionForProject,
 } from '../core/generate-tasks';
 import { defaultDarForOutputType, taskDar, taskInitialPrompt } from '../core/task-fields';
+import { applyTaskStatusTransition, assertTaskTransition } from '../core/task-state-machine';
 
 const TERMINAL_RUN = new Set(['FINISHED', 'ERROR', 'CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED']);
 const ASSISTANT_PLACEHOLDER = 'The agent finished. Attached files are shown with this conversation.';
@@ -50,15 +58,6 @@ const TEXT_ARTIFACT = /\.(md|markdown|txt|json|csv|ya?ml|html|log|xml|tsv|rst)$/
 const IMAGE_ARTIFACT = /\.(png|jpe?g|gif|webp|svg)$/i;
 const MAX_TEXT_BYTES = 200_000;
 const MAX_TEXT_CHARS = 100_000;
-
-const GUIDED: Record<TaskStatus, TaskStatus[]> = {
-  TODO: ['DOING', 'BLOCKED', 'ABANDONED'],
-  DOING: ['REVIEW', 'TODO', 'DONE', 'BLOCKED', 'ABANDONED'],
-  REVIEW: ['DOING', 'DONE', 'BLOCKED', 'ABANDONED'],
-  BLOCKED: ['TODO', 'DOING', 'ABANDONED'],
-  DONE: [],
-  ABANDONED: [],
-};
 
 export interface ConversationPage {
   messages: ChatMessage[];
@@ -148,6 +147,7 @@ export class LocalEngine {
     project.latest_run_id = created.run.id;
     project.updated_at = timestamp;
     await this.repo.saveProject(project);
+    await this.markSubprojectTaskDoing(project, created.run.id);
     const message = await this.record({
       scope: 'project',
       project_id: projectId,
@@ -521,6 +521,7 @@ export class LocalEngine {
     if (!project.cursor_agent_id) {
       throw new Error('Execute the subproject with its Initial Prompt before sending chat messages.');
     }
+    await this.markProjectDoingOnAgentChat(project);
     return this.dispatchProject(projectId, content, 'chat');
   }
 
@@ -534,8 +535,12 @@ export class LocalEngine {
     const agentId = task.cursor_agent_id || project.cursor_agent_id;
     if (!agentId) throw new Error('This project is not linked to a Cursor agent.');
     const text = buildGenerateTaskTasksUserMessage(task);
+    const output = task.output_type === 'code'
+      ? await this.repo.getCodeOutput(taskId)
+      : await this.repo.getResearchOutput(taskId);
+    const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
     const run = await this.cursor.createRun(agentId, {
-      text,
+      text: wrapAgentRunPrompt(text, { baseBranch: base, agentBranch: output?.branch }),
       mode: task.cursor_agent_id ? 'agent' : 'plan',
     });
     return this.record({
@@ -652,13 +657,17 @@ export class LocalEngine {
     }
     const active = await this.requireTaskById(taskId);
     if (!active.cursor_agent_id) throw new Error('Start the task before sending feedback.');
-    if (active.status === 'REVIEW') {
-      assertCanTransition('REVIEW', 'DOING', false);
-      active.status = 'DOING';
-      active.pending_action = undefined;
-    }
+    this.markTaskDoingOnAgentChat(active);
+    const output = active.output_type === 'code'
+      ? await this.repo.getCodeOutput(taskId)
+      : await this.repo.getResearchOutput(taskId);
+    const project = await this.requireProject(active.project_id);
+    const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
     const run = await this.cursor.createRun(active.cursor_agent_id!, {
-      text: feedbackPrompt(active, feedback),
+      text: wrapAgentRunPrompt(feedbackPrompt(active, feedback), {
+        baseBranch: base,
+        agentBranch: output?.branch,
+      }),
       mode: 'agent',
     });
     active.latest_run_id = run.id;
@@ -681,15 +690,16 @@ export class LocalEngine {
     const output = task.output_type === 'code'
       ? await this.repo.getCodeOutput(taskId)
       : await this.repo.getResearchOutput(taskId);
-    if (!output?.branch) throw new Error('This task has no agent branch to merge.');
+    if (!output) throw new Error('This task has no saved output to merge.');
     const project = await this.requireProject(task.project_id);
     const token = requireProjectGithubPat(project);
     const { owner, repo } = repoSlugFromProject(project);
     const base = project.starting_ref?.trim() || DEFAULT_MAIN_BRANCH;
+    const head = await this.resolveTaskMergeBranch(task, output?.branch, base, token, owner, repo);
     const { pull, commits } = await createAndMergePullRequest({
       owner,
       repo,
-      head: output.branch,
+      head,
       base,
       title: task.title,
       body: output.pr_message || task.title,
@@ -703,9 +713,7 @@ export class LocalEngine {
     if (task.output_type === 'code') await this.repo.saveCodeOutput(mergedOutput);
     else await this.repo.saveResearchOutput(mergedOutput as import('../core/models').TaskResearchOutput);
     await this.appendPendingChangesFromCommits(task.project_id, task, commits, pull.html_url);
-    assertCanTransition('REVIEW', 'DONE', false);
-    task.status = 'DONE';
-    task.pending_action = undefined;
+    applyTaskStatusTransition(task, 'DONE', 'approve_merge');
     task.updated_at = this.now();
     await this.repo.saveTask(task);
     await this.record({
@@ -754,7 +762,7 @@ export class LocalEngine {
     project.latest_run_id = run.id;
     project.updated_at = this.now();
     await this.repo.saveProject(project);
-    return this.record({
+    const message = await this.record({
       scope: 'project',
       project_id: projectId,
       role: 'user',
@@ -762,6 +770,8 @@ export class LocalEngine {
       run_id: run.id,
       intent,
     });
+    await this.markSubprojectTaskDoing(project, run.id);
+    return message;
   }
 
   private async importFinishedRuns(
@@ -796,6 +806,7 @@ export class LocalEngine {
         if (index >= 0) existing[index] = saved;
       }
       if (target.scope === 'task') await this.applyTaskRun(target.taskId, run);
+      else await this.applySubprojectParentRun(target.projectId, run);
     }
   }
 
@@ -893,48 +904,131 @@ export class LocalEngine {
     const task = await this.repo.getTask(taskId);
     if (!task || task.latest_run_id !== run.id || run.status !== 'FINISHED') return;
     if (task.output_type === 'subproject') return;
-    const branchInfo = run.git?.branches.find((item) => item.branch);
-    if (!branchInfo?.branch) return;
     const project = await this.requireProject(task.project_id);
     const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
-    const shared = {
-      task_id: task.task_id,
-      repo: normalizeRepoUrl(branchInfo.repoUrl || project.repo_url || ''),
-      branch: branchInfo.branch,
-      pr_message: (run.result ?? task.title).slice(0, 500),
-      pr_link: branchInfo.prUrl ?? '',
-    };
-    let hasChanges = false;
+    const existingOutput = task.output_type === 'code'
+      ? await this.repo.getCodeOutput(taskId)
+      : await this.repo.getResearchOutput(taskId);
     const token = project.github_pat?.trim();
     const slug = projectRepoSlug(project);
-    if (token && slug) {
-      try {
-        const compare = await compareBranches(slug.owner, slug.repo, base, branchInfo.branch, token);
-        hasChanges = compare.ahead_by > 0;
-      } catch {
+    const branchNames = branchNamesFromRun(run);
+    let branch = existingOutput?.branch;
+    if (token && slug && branchNames.length > 0) {
+      const picked = await pickTaskAgentBranch({
+        branchNames,
+        preferred: existingOutput?.branch,
+        owner: slug.owner,
+        repo: slug.repo,
+        base,
+        token,
+      });
+      if (picked?.branch) branch = picked.branch;
+    } else if (branchNames.length > 0) {
+      branch = branchNames[branchNames.length - 1];
+    }
+    const branchInfo = pickBranchInfoFromRun(run.git?.branches, branch);
+    const resolvedBranch = branch ?? branchInfo?.branch;
+    if (resolvedBranch) {
+      const shared = {
+        task_id: task.task_id,
+        repo: normalizeRepoUrl(branchInfo?.repoUrl || project.repo_url || ''),
+        branch: resolvedBranch,
+        pr_message: (run.result ?? task.title).slice(0, 500),
+        pr_link: '',
+      };
+      let hasChanges = false;
+      if (token && slug) {
+        try {
+          const compare = await compareBranches(slug.owner, slug.repo, base, resolvedBranch, token);
+          hasChanges = compare.ahead_by > 0;
+        } catch {
+          hasChanges = true;
+        }
+      } else {
         hasChanges = true;
       }
-    } else {
-      hasChanges = true;
+      if (hasChanges) {
+        if (task.output_type === 'code') await this.repo.saveCodeOutput(shared);
+        else {
+          await this.repo.saveResearchOutput({
+            ...shared,
+            path: `research/${task.project_id}/${task.task_id}/`,
+          });
+        }
+      }
     }
-    if (hasChanges) {
-      if (task.output_type === 'code') await this.repo.saveCodeOutput(shared);
-      else {
-        await this.repo.saveResearchOutput({
-          ...shared,
-          path: `research/${task.project_id}/${task.task_id}/`,
-        });
-      }
-      if (task.status === 'DOING') {
-        assertCanTransition('DOING', 'REVIEW', false);
-        task.status = 'REVIEW';
-      }
-    } else if (task.status === 'DOING') {
-      assertCanTransition('DOING', 'TODO', false);
-      task.status = 'TODO';
+    if (task.status === 'DOING') {
+      applyTaskStatusTransition(task, 'REVIEW', 'agent_finished');
     }
     task.updated_at = this.now();
     await this.repo.saveTask(task);
+  }
+
+  private async applySubprojectParentRun(projectId: string, run: CursorRun): Promise<void> {
+    const project = await this.repo.getProject(projectId);
+    if (!project?.parent_task_id || project.latest_run_id !== run.id || run.status !== 'FINISHED') return;
+    const task = await this.repo.getTask(project.parent_task_id);
+    if (!task || task.subproject_id !== projectId || task.output_type !== 'subproject') return;
+    if (task.status !== 'DOING') return;
+    applyTaskStatusTransition(task, 'REVIEW', 'agent_finished');
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+  }
+
+  private async markSubprojectTaskDoing(project: Project, latestRunId?: string): Promise<void> {
+    if (!project.parent_task_id) return;
+    const task = await this.repo.getTask(project.parent_task_id);
+    if (!task || task.subproject_id !== project.project_id) return;
+    if (task.status === 'TODO' || task.status === 'REVIEW') {
+      applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
+    }
+    if (latestRunId) task.latest_run_id = latestRunId;
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+  }
+
+  private async resolveTaskMergeBranch(
+    task: ProjectTask,
+    storedBranch: string | undefined,
+    base: string,
+    token: string,
+    owner: string,
+    repo: string,
+  ): Promise<string> {
+    const names = new Set<string>();
+    if (storedBranch?.trim()) names.add(storedBranch.trim());
+    if (task.cursor_agent_id) {
+      try {
+        const runs = await this.cursor.listRuns(task.cursor_agent_id);
+        for (const summary of runs) {
+          if (!TERMINAL_RUN.has(summary.status)) continue;
+          try {
+            const run = await this.cursor.getRun(task.cursor_agent_id, summary.id);
+            for (const name of branchNamesFromRun(run)) names.add(name);
+          } catch {
+            continue;
+          }
+        }
+      } catch {
+        // listRuns unavailable; fall back to stored branch only
+      }
+    }
+    const picked = await pickTaskAgentBranch({
+      branchNames: [...names],
+      preferred: storedBranch,
+      owner,
+      repo,
+      base,
+      token,
+    });
+    if (!picked?.branch) throw new Error('This task has no agent branch to merge.');
+    if (picked.aheadBy <= 0) {
+      throw new Error(
+        `Branch "${picked.branch}" has no commits ahead of "${base}". `
+        + 'The agent may have pushed to a different branch; check the latest Cursor run or send a follow-up using the single-branch instructions.',
+      );
+    }
+    return picked.branch;
   }
 
   private async appendPendingChangesFromCommits(
@@ -957,13 +1051,42 @@ export class LocalEngine {
     await this.repo.savePendingChanges(projectId, appendPendingChangeRows(current, rows));
   }
 
+  private markTaskDoingOnAgentChat(task: ProjectTask): void {
+    if (task.status === 'DONE' || task.status === 'ABANDONED' || task.status === 'DOING') return;
+    try {
+      applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
+    } catch {
+      applyTaskStatusTransition(task, 'DOING', 'manual');
+    }
+    task.updated_at = this.now();
+  }
+
+  private async markProjectDoingOnAgentChat(project: Project): Promise<void> {
+    if (project.parent_task_id) {
+      const parentTask = await this.repo.getTask(project.parent_task_id);
+      if (parentTask && parentTask.subproject_id === project.project_id) {
+        this.markTaskDoingOnAgentChat(parentTask);
+        await this.repo.saveTask(parentTask);
+      }
+      return;
+    }
+    if (project.parent_project_id) return;
+    if (project.status === 'DONE' || project.status === 'ABANDONED' || project.status === 'DOING') return;
+    project.status = 'DOING';
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+  }
+
   private async applyStatus(task: ProjectTask, status: TaskStatus, manual: boolean): Promise<void> {
-    assertCanTransition(task.status, status, manual);
+    assertTaskTransition(task.status, status, manual ? 'manual' : 'execute_or_send');
     if (status === 'DOING' && !task.cursor_agent_id && task.output_type !== 'subproject' && !manual) {
       await this.assertDependenciesDone(task);
     }
-    task.status = status;
-    if (status !== 'DOING') task.pending_action = undefined;
+    if (manual) {
+      applyTaskStatusTransition(task, status, 'manual');
+    } else {
+      applyTaskStatusTransition(task, status, 'execute_or_send');
+    }
   }
 
   private async assertDependenciesDone(task: ProjectTask): Promise<void> {
@@ -983,10 +1106,9 @@ export class LocalEngine {
     const base = project.starting_ref?.trim() || 'main';
     const lines = [
       `You are executing a battleplan ${task.output_type} task.`,
-      `Work on a dedicated branch created from \`${base}\` in ${project.repo_url}.`,
-      'Commit and push all work to that branch only.',
-      'Do not create or merge pull requests; Battleplan handles PRs after review.',
-      'When finished, summarize the code changes you committed in your reply.',
+      ...agentBranchPolicyLines({ baseBranch: base }),
+      `Repository: ${project.repo_url}.`,
+      'When finished, summarize the code changes you committed and name the branch you pushed.',
     ];
     if (task.output_type === 'research') {
       lines.push(
@@ -1015,7 +1137,7 @@ export class LocalEngine {
     task.cursor_agent_id = created.agent.id;
     task.cursor_chat_link = created.agent.url;
     task.latest_run_id = created.run.id;
-    task.status = 'DOING';
+    applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
     task.updated_at = this.now();
     await this.repo.saveTask(task);
     return this.record({
@@ -1153,14 +1275,6 @@ function isStatus(value: string): value is TaskStatus {
   return (TASK_STATUSES as readonly string[]).includes(value);
 }
 
-function assertCanTransition(from: TaskStatus, to: TaskStatus, manual: boolean): void {
-  if (from === to) return;
-  if (manual) return;
-  if (!GUIDED[from].includes(to)) {
-    throw new Error(`Cannot move a task from ${from} to ${to}. Expected one of: ${GUIDED[from].join(', ') || 'a manual change'}.`);
-  }
-}
-
 function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
   if (raw.length === 0) throw new Error('The task list is empty.');
   const normalized: NormalizedDraft[] = [];
@@ -1234,8 +1348,8 @@ function bindDependencies(existing: ProjectTask[], created: ProjectTask[], draft
 
 function feedbackPrompt(task: ProjectTask, feedback: string): string {
   return [
-    `The user reviewed the pull request for "${task.title}" and sent feedback.`,
-    'Incorporate the feedback into the existing branch and update the pull request.',
+    `The user reviewed the work for "${task.title}" and sent feedback.`,
+    'Incorporate the feedback on the existing agent branch, commit, and push. Do not create or update pull requests.',
     '',
     feedback,
   ].join('\n');

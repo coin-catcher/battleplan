@@ -16,7 +16,8 @@ export type MenuAction =
   | 'export-project'
   | 'save'
   | 'check-for-updates'
-  | 'cursor-api-key';
+  | 'cursor-api-key'
+  | 'github-pat';
 
 export interface MenuProject {
   id: string;
@@ -93,6 +94,11 @@ export function rebuildApplicationMenu(
       id: 'cursor-api-key',
       label: 'Cursor API Key',
       click: () => sendMenuAction(getWindow(), 'cursor-api-key'),
+    },
+    {
+      id: 'github-pat',
+      label: 'GitHub Token (Updates)',
+      click: () => sendMenuAction(getWindow(), 'github-pat'),
     },
   ];
 
