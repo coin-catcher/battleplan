@@ -333,7 +333,7 @@
                 </label>
               </details>
             </div>
-            <div class="chat-transcript-scroll transcript" aria-live="polite">
+            <div #chatTranscript class="chat-transcript-scroll transcript" aria-live="polite">
               @for (item of timeline(); track item.id) {
                 @if (item.kind === 'message') {
                   <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
@@ -465,7 +465,7 @@
                 }
               </details>
             </div>
-            <div class="chat-transcript-scroll transcript" aria-live="polite">
+            <div #chatTranscript class="chat-transcript-scroll transcript" aria-live="polite">
               @for (item of timeline(); track item.id) {
                 @if (item.kind === 'message') {
                   <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
@@ -564,7 +564,7 @@
                 </div>
               }
             </div>
-            <div class="chat-transcript-scroll transcript" aria-live="polite">
+            <div #chatTranscript class="chat-transcript-scroll transcript" aria-live="polite">
               @for (item of timeline(); track item.id) {
                 @if (item.kind === 'message') {
                   <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
