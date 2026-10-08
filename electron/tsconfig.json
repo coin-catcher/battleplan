@@ -14,7 +14,6 @@
   "include": [
     "./**/*.ts",
     "../src/app/core/models.ts",
-    "../src/app/core/desktop-release-update.ts",
     "../src/app/data/repository.ts"
   ],
   "exclude": [
