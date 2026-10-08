@@ -233,6 +233,38 @@
           </div>
         }
       </section>
+    } @else if (showGithubPat()) {
+      <section class="panel">
+        <header class="panel-head">
+          <div>
+            <p class="eyebrow">GitHub</p>
+            <h2>Personal access token</h2>
+          </div>
+        </header>
+        <p>Battleplan uses this token to compare your installed version with tagged releases on GitHub and to download the installer when you approve an update. The token is stored locally in <code>app_config.json</code>.</p>
+        @if (preferences.githubPat() && !replacingGithubPat) {
+          <p class="banner notice">A GitHub token is saved for desktop updates.</p>
+          <div class="composer-actions">
+            <button type="button" class="primary" (click)="closeGithubPat()">Continue</button>
+            <button type="button" class="ghost" (click)="replacingGithubPat = true">Replace token</button>
+            <button type="button" class="danger" (click)="clearGithubPat()">Remove token</button>
+          </div>
+        } @else {
+          <label class="field">
+            <span>GitHub PAT</span>
+            <input type="password" [(ngModel)]="githubPatDraft" name="githubPatDraft" autocomplete="off" placeholder="github_pat_…" />
+          </label>
+          @if (githubPatError) {
+            <p class="banner error" role="alert">{{ githubPatError }}</p>
+          }
+          <div class="composer-actions">
+            <button type="button" class="primary" [disabled]="!githubPatDraft.trim()" (click)="saveGithubPat()">Save token</button>
+            @if (preferences.githubPat()) {
+              <button type="button" class="ghost" (click)="replacingGithubPat = false">Cancel</button>
+            }
+          </div>
+        }
+      </section>
     } @else { @switch (store.selection().kind) {
       @case ('create') {
         <section class="panel">
