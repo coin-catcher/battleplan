@@ -353,11 +353,13 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
+  color: var(--ink);
 }
 .pending-changes-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.78rem;
+  color: var(--ink);
 }
 .pending-changes-table th,
 .pending-changes-table td {
@@ -365,11 +367,13 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
+  color: var(--ink);
 }
 .pending-changes-table th {
   position: sticky;
   top: 0;
-  background: var(--panel);
+  background: var(--th-bg);
+  color: var(--ink);
 }
 .pending-changes-table td.empty {
   color: var(--muted);

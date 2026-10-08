@@ -18,6 +18,7 @@ import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '..
 import { anchorDraftsUnderParentTask } from '../core/generate-tasks';
 import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
+import { doingBackgroundWatchTaskIds, taskNeedsDoingBackgroundPoll } from './doing-background-watch';
 
 const POLL_INTERVAL_MS = 3000;
 const POLL_ATTEMPTS = 300;
@@ -76,10 +77,14 @@ export class BattleplanStore {
     return this.tasks().find((task) => task.task_id === selection.taskId) ?? null;
   });
 
-  private watchGeneration = 0;
+  private foregroundWatchGeneration = 0;
   private editorLoadGeneration = 0;
-  private watchTimer: ReturnType<typeof setTimeout> | undefined;
+  private foregroundWatchTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly tabSnapshots = new Map<string, ProjectTabSnapshot>();
+  private readonly taskChatCache = new Map<string, { messages: ChatMessage[]; artifacts: ChatArtifact[]; task: ProjectTask }>();
+  private readonly doingBackgroundGeneration = new Map<string, number>();
+  private readonly doingBackgroundTimer = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly doingBackgroundInflight = new Set<string>();
 
   async loadProjects(): Promise<void> {
     await this.run(async () => {
@@ -372,9 +377,17 @@ export class BattleplanStore {
       const existing = this.tasks().find((item) => item.task_id === taskId);
       const kind = existing?.output_type === 'subproject' ? 'subproject' : 'task';
       this.selection.set({ kind, taskId });
+      const cached = this.taskChatCache.get(taskId);
+      if (cached) {
+        this.messages.set(cached.messages);
+        this.artifacts.set(cached.artifacts);
+        this.replaceTask(cached.task);
+      }
       await this.run(async () => {
         if (kind === 'subproject' && existing?.subproject_id) {
-          this.applyConversation(await this.api.listProjectMessages(existing.subproject_id));
+          const page = await this.api.listProjectMessages(existing.subproject_id);
+          this.cacheSubprojectTaskChat(taskId, page, existing);
+          this.applyConversation(page);
           return;
         }
         const result = await this.api.listTaskMessages(taskId);
@@ -530,6 +543,7 @@ export class BattleplanStore {
       }
     });
     if (this.selection().kind === 'task') this.continueTaskWatch(taskId);
+    this.syncDoingBackgroundWatches();
   }
 
   async executeTask(): Promise<void> {
@@ -545,6 +559,7 @@ export class BattleplanStore {
     if (runId && !this.error()) {
       await this.syncTaskUserRun(task.task_id, runId);
       void this.watchTask(task.task_id, runId);
+      this.ensureDoingBackgroundWatch(task.task_id);
     }
   }
 
@@ -563,6 +578,7 @@ export class BattleplanStore {
       if (selection.kind === 'task' || selection.kind === 'subproject') {
         this.applyTaskConversation(await this.api.listTaskMessages(selection.taskId));
       }
+      this.syncDoingBackgroundWatches();
     });
   }
 
@@ -584,6 +600,8 @@ export class BattleplanStore {
     if (runId && !this.error()) {
       await this.syncProjectUserRun(projectId, runId);
       void this.watchProject(projectId, runId);
+      const task = this.selectedTask();
+      if (task?.output_type === 'subproject') this.ensureDoingBackgroundWatch(task.task_id);
     }
   }
 
@@ -608,9 +626,11 @@ export class BattleplanStore {
       if (watchProjectId) {
         await this.syncProjectUserRun(watchProjectId, runId);
         void this.watchProject(watchProjectId, runId);
+        this.ensureDoingBackgroundWatch(task.task_id);
       } else {
         await this.syncTaskUserRun(task.task_id, runId);
         void this.watchTask(task.task_id, runId);
+        this.ensureDoingBackgroundWatch(task.task_id);
       }
     }
   }
@@ -646,6 +666,8 @@ export class BattleplanStore {
   async deleteTask(taskId: string): Promise<void> {
     const task = this.tasks().find((item) => item.task_id === taskId);
     if (!task) return;
+    this.stopDoingBackgroundWatch(taskId);
+    this.taskChatCache.delete(taskId);
     this.stopWatch();
     await this.run(async () => {
       await this.api.deleteTask(task.project_id, taskId);
@@ -748,6 +770,112 @@ export class BattleplanStore {
     });
   }
 
+  private subprojectCursorAgentId(subprojectId: string): string | undefined {
+    return this.projects().find((item) => item.project_id === subprojectId)?.cursor_agent_id;
+  }
+
+  private syncDoingBackgroundWatches(): void {
+    const wanted = new Set(doingBackgroundWatchTaskIds(this.tasks(), (id) => this.subprojectCursorAgentId(id)));
+    for (const taskId of wanted) this.ensureDoingBackgroundWatch(taskId);
+    for (const taskId of [...this.doingBackgroundGeneration.keys()]) {
+      if (!wanted.has(taskId)) this.stopDoingBackgroundWatch(taskId);
+    }
+  }
+
+  private ensureDoingBackgroundWatch(taskId: string): void {
+    const task = this.tasks().find((item) => item.task_id === taskId);
+    if (!task || !taskNeedsDoingBackgroundPoll(task, task.subproject_id ? this.subprojectCursorAgentId(task.subproject_id) : undefined)) {
+      this.stopDoingBackgroundWatch(taskId);
+      return;
+    }
+    if (this.doingBackgroundGeneration.has(taskId)) return;
+    const generation = (this.doingBackgroundGeneration.get(taskId) ?? 0) + 1;
+    this.doingBackgroundGeneration.set(taskId, generation);
+    this.scheduleDoingBackgroundTick(taskId, generation, 0);
+  }
+
+  private stopDoingBackgroundWatch(taskId: string): void {
+    this.doingBackgroundGeneration.set(taskId, (this.doingBackgroundGeneration.get(taskId) ?? 0) + 1);
+    this.doingBackgroundGeneration.delete(taskId);
+    const timer = this.doingBackgroundTimer.get(taskId);
+    if (timer) clearTimeout(timer);
+    this.doingBackgroundTimer.delete(taskId);
+    this.doingBackgroundInflight.delete(taskId);
+  }
+
+  private scheduleDoingBackgroundTick(taskId: string, generation: number, attempt: number): void {
+    if (this.doingBackgroundGeneration.get(taskId) !== generation) return;
+    if (attempt >= POLL_ATTEMPTS) return;
+    const timer = setTimeout(() => {
+      void this.runDoingBackgroundTick(taskId, generation, attempt);
+    }, attempt === 0 ? 0 : POLL_INTERVAL_MS);
+    this.doingBackgroundTimer.set(taskId, timer);
+  }
+
+  private async runDoingBackgroundTick(taskId: string, generation: number, attempt: number): Promise<void> {
+    if (this.doingBackgroundGeneration.get(taskId) !== generation) return;
+    if (this.doingBackgroundInflight.has(taskId)) {
+      this.scheduleDoingBackgroundTick(taskId, generation, attempt + 1);
+      return;
+    }
+    this.doingBackgroundInflight.add(taskId);
+    try {
+      const task = this.tasks().find((item) => item.task_id === taskId);
+      if (!task || !taskNeedsDoingBackgroundPoll(task, task.subproject_id ? this.subprojectCursorAgentId(task.subproject_id) : undefined)) {
+        this.stopDoingBackgroundWatch(taskId);
+        return;
+      }
+      if (task.output_type === 'subproject' && task.subproject_id) {
+        const page = await this.api.listProjectMessages(task.subproject_id);
+        if (this.doingBackgroundGeneration.get(taskId) !== generation) return;
+        await this.reloadProjects();
+        const freshTask = this.tasks().find((item) => item.task_id === taskId) ?? task;
+        this.cacheSubprojectTaskChat(taskId, page, freshTask);
+        if (this.watchingTaskChat(taskId, this.selection())) this.applyConversation(page);
+        const refreshed = await this.api.listTaskMessages(taskId);
+        if (this.doingBackgroundGeneration.get(taskId) !== generation) return;
+        this.cacheTaskConversation(refreshed);
+        this.replaceTask(refreshed.task);
+        if (refreshed.task.status !== 'DOING') {
+          this.stopDoingBackgroundWatch(taskId);
+          return;
+        }
+      } else {
+        const result = await this.api.listTaskMessages(taskId);
+        if (this.doingBackgroundGeneration.get(taskId) !== generation) return;
+        this.applyTaskConversation(result);
+        if (result.task.status !== 'DOING') {
+          if (this.watchingTaskChat(taskId, this.selection())) await this.refreshOutput(result.task);
+          this.stopDoingBackgroundWatch(taskId);
+          return;
+        }
+      }
+    } catch {
+      // Keep polling; transient failures should not stop background sync.
+    } finally {
+      this.doingBackgroundInflight.delete(taskId);
+    }
+    if (this.doingBackgroundGeneration.get(taskId) === generation) {
+      this.scheduleDoingBackgroundTick(taskId, generation, attempt + 1);
+    }
+  }
+
+  private cacheTaskConversation(result: { messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }): void {
+    this.taskChatCache.set(result.task.task_id, {
+      messages: result.messages,
+      artifacts: result.artifacts ?? [],
+      task: result.task,
+    });
+  }
+
+  private cacheSubprojectTaskChat(taskId: string, page: ConversationPage, task: ProjectTask): void {
+    this.taskChatCache.set(taskId, {
+      messages: page.messages,
+      artifacts: page.artifacts ?? [],
+      task,
+    });
+  }
+
   private watchProject(projectId: string, runId: string): Promise<void> {
     return this.poll(async (generation) => {
       if (!this.stillWatching(generation) || !this.watchingProjectChat(projectId)) return true;
@@ -788,11 +916,11 @@ export class BattleplanStore {
 
   private poll(load: (generation: number) => Promise<boolean>): Promise<void> {
     this.stopWatch();
-    const generation = ++this.watchGeneration;
+    const generation = ++this.foregroundWatchGeneration;
     this.pendingReply.set(true);
     return new Promise((resolve) => {
       const finish = (done: boolean, timedOut: boolean) => {
-        if (generation !== this.watchGeneration) {
+        if (generation !== this.foregroundWatchGeneration) {
           resolve();
           return;
         }
@@ -824,7 +952,7 @@ export class BattleplanStore {
             finish(done, !done);
             return;
           }
-          this.watchTimer = setTimeout(() => tick(attempt + 1), POLL_INTERVAL_MS);
+          this.foregroundWatchTimer = setTimeout(() => tick(attempt + 1), POLL_INTERVAL_MS);
         })();
       };
       tick(0);
@@ -832,13 +960,13 @@ export class BattleplanStore {
   }
 
   private stillWatching(generation: number): boolean {
-    return generation === this.watchGeneration;
+    return generation === this.foregroundWatchGeneration;
   }
 
   private stopWatch(): void {
-    this.watchGeneration += 1;
-    if (this.watchTimer) clearTimeout(this.watchTimer);
-    this.watchTimer = undefined;
+    this.foregroundWatchGeneration += 1;
+    if (this.foregroundWatchTimer) clearTimeout(this.foregroundWatchTimer);
+    this.foregroundWatchTimer = undefined;
     this.pendingReply.set(false);
   }
 
@@ -848,9 +976,12 @@ export class BattleplanStore {
   }
 
   private applyTaskConversation(result: { messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }): void {
-    this.messages.set(result.messages);
-    this.artifacts.set(result.artifacts ?? []);
+    this.cacheTaskConversation(result);
     this.replaceTask(result.task);
+    if (this.watchingTaskChat(result.task.task_id, this.selection())) {
+      this.messages.set(result.messages);
+      this.artifacts.set(result.artifacts ?? []);
+    }
   }
 
   private rememberMessage(message: ChatMessage): void {
@@ -877,6 +1008,7 @@ export class BattleplanStore {
     this.codeOutputs.set(code);
     this.researchOutputs.set(research);
     await this.refreshPendingChanges();
+    this.syncDoingBackgroundWatches();
   }
 
   private resumeWatchForSelection(): void {
@@ -885,6 +1017,7 @@ export class BattleplanStore {
     const selection = this.selection();
     if (selection.kind === 'project') this.continueProjectWatch(projectId);
     else if (selection.kind === 'task' || selection.kind === 'subproject') this.continueTaskWatch(selection.taskId);
+    this.syncDoingBackgroundWatches();
   }
 
   private async refreshOutput(task: ProjectTask): Promise<void> {

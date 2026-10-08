@@ -405,6 +405,61 @@ describe('LocalEngine', () => {
     expect((await repo.getProject('p1'))?.status).toBe('DOING');
   });
 
+  it('moves a DOING task to REVIEW when the agent run finishes', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    client.listRuns = async () => [{
+      id: 'run-1',
+      agentId: 'agent-1',
+      status: 'FINISHED',
+      result: 'Done.',
+    }];
+    client.getRun = async () => ({
+      id: 'run-1',
+      agentId: 'agent-1',
+      status: 'FINISHED',
+      result: 'Done.',
+    });
+    const engine = new LocalEngine(repo, client, () => '2026-10-02T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    await repo.saveTask({
+      task_id: 't1',
+      project_id: 'p1',
+      title: 'Work',
+      prompt: '',
+      dependencies: [],
+      status: 'DOING',
+      output_type: 'code',
+      order: 0,
+      cursor_agent_id: 'agent-1',
+      latest_run_id: 'run-1',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    await repo.saveMessage({
+      message_id: 'm-user',
+      scope: 'task',
+      project_id: 'p1',
+      task_id: 't1',
+      role: 'user',
+      content: 'Go',
+      created_at: '2026-10-02T00:00:00.000Z',
+      run_id: 'run-1',
+      intent: 'chat',
+    });
+    const page = await engine.listTaskMessages('t1');
+    expect(page.task.status).toBe('REVIEW');
+    expect(page.messages.some((message) => message.role === 'assistant')).toBe(true);
+  });
+
   it('blocks execution for abandoned tasks', async () => {
     const repo = new MemoryRepository();
     const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => 'id-1');
