@@ -521,6 +521,7 @@ export class LocalEngine {
     if (!project.cursor_agent_id) {
       throw new Error('Execute the subproject with its Initial Prompt before sending chat messages.');
     }
+    await this.markProjectDoingOnAgentChat(project);
     return this.dispatchProject(projectId, content, 'chat');
   }
 
@@ -656,9 +657,7 @@ export class LocalEngine {
     }
     const active = await this.requireTaskById(taskId);
     if (!active.cursor_agent_id) throw new Error('Start the task before sending feedback.');
-    if (active.status === 'REVIEW') {
-      applyTaskStatusTransition(active, 'DOING', 'execute_or_send');
-    }
+    this.markTaskDoingOnAgentChat(active);
     const output = active.output_type === 'code'
       ? await this.repo.getCodeOutput(taskId)
       : await this.repo.getResearchOutput(taskId);
@@ -1050,6 +1049,32 @@ export class LocalEngine {
       merged_to_develop_at: timestamp,
     }));
     await this.repo.savePendingChanges(projectId, appendPendingChangeRows(current, rows));
+  }
+
+  private markTaskDoingOnAgentChat(task: ProjectTask): void {
+    if (task.status === 'DONE' || task.status === 'ABANDONED' || task.status === 'DOING') return;
+    try {
+      applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
+    } catch {
+      applyTaskStatusTransition(task, 'DOING', 'manual');
+    }
+    task.updated_at = this.now();
+  }
+
+  private async markProjectDoingOnAgentChat(project: Project): Promise<void> {
+    if (project.parent_task_id) {
+      const parentTask = await this.repo.getTask(project.parent_task_id);
+      if (parentTask && parentTask.subproject_id === project.project_id) {
+        this.markTaskDoingOnAgentChat(parentTask);
+        await this.repo.saveTask(parentTask);
+      }
+      return;
+    }
+    if (project.parent_project_id) return;
+    if (project.status === 'DONE' || project.status === 'ABANDONED' || project.status === 'DOING') return;
+    project.status = 'DOING';
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
   }
 
   private async applyStatus(task: ProjectTask, status: TaskStatus, manual: boolean): Promise<void> {

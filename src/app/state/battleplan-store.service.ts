@@ -319,6 +319,7 @@ export class BattleplanStore {
       const sent = await this.api.sendProjectMessage(projectId, message);
       runId = sent.run_id;
       this.rememberMessage(sent);
+      await this.reloadProjects();
     });
     if (runId && !this.error()) {
       await this.syncProjectUserRun(projectId, runId);
@@ -443,6 +444,7 @@ export class BattleplanStore {
       Number.isFinite(project.map_x) && Number.isFinite(project.map_y)
         ? { x: project.map_x as number, y: project.map_y as number }
         : undefined,
+      project.status,
     );
     const source = layout.nodes.find((node) => node.id === input.sourceId);
     if (!source) return null;
@@ -614,6 +616,7 @@ export class BattleplanStore {
       this.rememberMessage(sent);
       if (task.output_type === 'subproject' && task.subproject_id) {
         watchProjectId = task.subproject_id;
+        await this.reloadTasks();
         this.applyConversation(await this.api.listProjectMessages(task.subproject_id));
       } else {
         this.applyTaskConversation(await this.api.listTaskMessages(task.task_id));

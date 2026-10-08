@@ -364,6 +364,47 @@ describe('LocalEngine', () => {
     expect(client.prompts.length).toBe(2);
   });
 
+  it('marks a task DOING when chat feedback is sent', async () => {
+    const repo = new MemoryRepository();
+    const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      cursor_agent_id: 'agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const task = await engine.createTask('p1', {
+      title: 'Work',
+      output_type: 'code',
+      initial_prompt: 'Go',
+    });
+    task.cursor_agent_id = 'agent-task';
+    task.status = 'TODO';
+    await repo.saveTask(task);
+    await engine.sendTaskMessage(task.task_id, 'Keep going');
+    expect((await repo.getTask(task.task_id))?.status).toBe('DOING');
+  });
+
+  it('marks the root project DOING when project chat is sent', async () => {
+    const repo = new MemoryRepository();
+    const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      cursor_agent_id: 'agent-1',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    await engine.sendProjectMessage('p1', 'Continue planning');
+    expect((await repo.getProject('p1'))?.status).toBe('DOING');
+  });
+
   it('moves a DOING task to REVIEW when the agent run finishes', async () => {
     const repo = new MemoryRepository();
     const client = cursor();
