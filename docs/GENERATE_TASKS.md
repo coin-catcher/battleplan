@@ -1,0 +1,87 @@
+# Generate Tasks
+
+**Generate Tasks** turns a settled Cursor conversation into Battleplan task nodes on the mindmap. It is available from the project chat toolbar and from an open task (typically a **research** task after the agent has produced a plan).
+
+## End-to-end flow
+
+1. **User** clicks **Generate Tasks** in the right-hand panel (`BattleplanStore.generateTasks()`).
+2. **Scope**
+   - **Project chat**: sends a generate instruction to the project’s Cursor agent (`LocalEngine.generateTasks`).
+   - **Task chat**: sends a task-specific message to that task’s agent (or the project agent if the task has not started its own) via `LocalEngine.generateTaskTasks`.
+3. **Cursor** runs with `intent: 'generate_tasks'`. The app waits for the run to finish and reloads messages/artifacts.
+4. **Parse** — `parseGeneratedTaskListFromSources()` reads a JSON array from the assistant reply or a `.json` artifact (`parse-tasks.ts`).
+5. **Anchor (task scope only)** — if Generate Tasks was invoked from a task, any draft with `depends_on: []` is rewritten to list that task’s title so new nodes become **children of that task** (`anchorDraftsUnderParentTask()` in `generate-tasks.ts`).
+6. **Create** — `LocalEngine.createTasks()` normalizes drafts, creates `ProjectTask` rows, and wires the mindmap graph (`bindDependencies()`).
+7. **UI** — tasks reload; new nodes appear on the left-hand mindmap.
+
+## JSON shape the agent must return
+
+Each element of the array:
+
+| Field | Meaning |
+|--------|---------|
+| `title` | Short label on the mindmap |
+| `prompt` | Becomes the task **initial prompt** (what Execute sends to the agent) |
+| `output_type` | `"code"` or `"research"` (or `both`-style values split into research + code tasks) |
+| `depends_on` | Titles of **parent** tasks in this same array (see linking below) |
+
+## How the mindmap graph is built
+
+Battleplan stores dependencies as **parent → child** links: `parent.dependencies` contains child task IDs (`dependencies.ts`).
+
+When `bindDependencies()` processes a draft:
+
+- For each title `T` in the draft’s `depends_on`, the task named `T` is the **parent**, and the new task is added as **T’s child** on the mindmap.
+
+So:
+
+- `depends_on: []` at project scope → new tasks are **roots** attached directly to the **project** circle.
+- `depends_on: []` at research-task scope → after anchoring, `depends_on: ["<research title>"]` → new tasks appear as **children of that research node**.
+- `depends_on: ["Foundation task"]` → the new task is drawn **under** “Foundation task”.
+
+The layout engine (`mindmap.ts`) places root tasks in a ring around the project and hangs children outward from their parent. **Many `depends_on` links between generated tasks produce a deep tree** (for example a parent “Ship skills catalog v1” with multiple nested code children), which is what you see when the agent emits a hierarchical plan.
+
+## Research task: intended default vs advanced plans
+
+### Default (base case)
+
+After a **research** task conversation, you usually want:
+
+- A **flat, one-dimensional list of code tasks** — siblings under the research node.
+- **No** research tasks in that list unless you explicitly need another research pass.
+- **`depends_on: []`** on each generated code task (Battleplan anchors them under the research task automatically).
+
+The research-specific prompt in `generate-tasks.ts` tells the agent to follow that shape.
+
+### Advanced (when prerequisites are real)
+
+Use extra structure only when the plan needs it:
+
+| Need | Typical tasks |
+|------|----------------|
+| Data not yet collected | Child **research** task; optionally a small **code** child to automate retrieval |
+| Shared interfaces / base classes / process template | **Foundation code** task first; other code tasks list it in `depends_on` |
+
+Avoid long chains of code→code dependencies unless execution order truly requires it.
+
+## Project-level Generate Tasks
+
+From **project chat**, the instruction is broader (`generateTasksInstructionForProject()`): decompose the whole battleplan. The agent may emit both research and code tasks and may use `depends_on` for real ordering. Nothing is auto-anchored to a single parent task.
+
+## Code references
+
+| Piece | Location |
+|--------|-----------|
+| UI button | `app.component.html` → `store.generateTasks()` |
+| Orchestration | `battleplan-store.service.ts` → `generateTasks()` |
+| Agent messages | `local-engine.ts` → `generateTasks`, `generateTaskTasks` |
+| Prompts + anchoring | `core/generate-tasks.ts` |
+| JSON parsing | `core/parse-tasks.ts` |
+| Persist + graph | `local-engine.ts` → `createTasks`, `bindDependencies` |
+| Layout | `core/mindmap.ts`, `core/dependencies.ts` |
+
+## Tips for consistent flat lists from research
+
+1. Run **Generate Tasks** from the **research task** (not project chat) so anchoring applies.
+2. In the research task **Data and Rules**, state that output should be a **flat list of code tasks** with no nested dependencies unless prerequisites are required.
+3. If the agent still returns a deep graph, edit tasks on the mindmap or regenerate after clarifying in chat that siblings should use empty `depends_on`.

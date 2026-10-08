@@ -23,8 +23,12 @@ export interface Project {
   latest_run_id?: string;
   repo_url?: string;
   starting_ref?: string;
+  /** GitHub PAT for programmatic PR create/merge (stored locally in project_config.json). */
+  github_pat?: string;
   map_x?: number;
   map_y?: number;
+  /** Mindmap status for the root project node (nested subprojects use their task node). */
+  status?: TaskStatus;
   /** When set, this project is nested under another project or task. */
   parent_project_id?: string;
   parent_task_id?: string;
