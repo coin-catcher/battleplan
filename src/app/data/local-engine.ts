@@ -50,6 +50,7 @@ import {
   generateTasksInstructionForProject,
 } from '../core/generate-tasks';
 import { defaultDarForOutputType, taskDar, taskInitialPrompt } from '../core/task-fields';
+import { applyTaskStatusTransition, assertTaskTransition } from '../core/task-state-machine';
 
 const TERMINAL_RUN = new Set(['FINISHED', 'ERROR', 'CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED']);
 const ASSISTANT_PLACEHOLDER = 'The agent finished. Attached files are shown with this conversation.';
@@ -57,15 +58,6 @@ const TEXT_ARTIFACT = /\.(md|markdown|txt|json|csv|ya?ml|html|log|xml|tsv|rst)$/
 const IMAGE_ARTIFACT = /\.(png|jpe?g|gif|webp|svg)$/i;
 const MAX_TEXT_BYTES = 200_000;
 const MAX_TEXT_CHARS = 100_000;
-
-const GUIDED: Record<TaskStatus, TaskStatus[]> = {
-  TODO: ['DOING', 'BLOCKED', 'ABANDONED'],
-  DOING: ['REVIEW', 'TODO', 'DONE', 'BLOCKED', 'ABANDONED'],
-  REVIEW: ['DOING', 'DONE', 'BLOCKED', 'ABANDONED'],
-  BLOCKED: ['TODO', 'DOING', 'ABANDONED'],
-  DONE: [],
-  ABANDONED: [],
-};
 
 export interface ConversationPage {
   messages: ChatMessage[];
@@ -155,6 +147,7 @@ export class LocalEngine {
     project.latest_run_id = created.run.id;
     project.updated_at = timestamp;
     await this.repo.saveProject(project);
+    await this.markSubprojectTaskDoing(project, created.run.id);
     const message = await this.record({
       scope: 'project',
       project_id: projectId,
@@ -664,9 +657,7 @@ export class LocalEngine {
     const active = await this.requireTaskById(taskId);
     if (!active.cursor_agent_id) throw new Error('Start the task before sending feedback.');
     if (active.status === 'REVIEW') {
-      assertCanTransition('REVIEW', 'DOING', false);
-      active.status = 'DOING';
-      active.pending_action = undefined;
+      applyTaskStatusTransition(active, 'DOING', 'execute_or_send');
     }
     const output = active.output_type === 'code'
       ? await this.repo.getCodeOutput(taskId)
@@ -723,9 +714,7 @@ export class LocalEngine {
     if (task.output_type === 'code') await this.repo.saveCodeOutput(mergedOutput);
     else await this.repo.saveResearchOutput(mergedOutput as import('../core/models').TaskResearchOutput);
     await this.appendPendingChangesFromCommits(task.project_id, task, commits, pull.html_url);
-    assertCanTransition('REVIEW', 'DONE', false);
-    task.status = 'DONE';
-    task.pending_action = undefined;
+    applyTaskStatusTransition(task, 'DONE', 'approve_merge');
     task.updated_at = this.now();
     await this.repo.saveTask(task);
     await this.record({
@@ -774,7 +763,7 @@ export class LocalEngine {
     project.latest_run_id = run.id;
     project.updated_at = this.now();
     await this.repo.saveProject(project);
-    return this.record({
+    const message = await this.record({
       scope: 'project',
       project_id: projectId,
       role: 'user',
@@ -782,6 +771,8 @@ export class LocalEngine {
       run_id: run.id,
       intent,
     });
+    await this.markSubprojectTaskDoing(project, run.id);
+    return message;
   }
 
   private async importFinishedRuns(
@@ -816,6 +807,7 @@ export class LocalEngine {
         if (index >= 0) existing[index] = saved;
       }
       if (target.scope === 'task') await this.applyTaskRun(target.taskId, run);
+      else await this.applySubprojectParentRun(target.projectId, run);
     }
   }
 
@@ -936,42 +928,62 @@ export class LocalEngine {
       branch = branchNames[branchNames.length - 1];
     }
     const branchInfo = pickBranchInfoFromRun(run.git?.branches, branch);
-    if (!branchInfo?.branch && !branch) return;
-    const resolvedBranch = branch ?? branchInfo!.branch!;
-    const shared = {
-      task_id: task.task_id,
-      repo: normalizeRepoUrl(branchInfo?.repoUrl || project.repo_url || ''),
-      branch: resolvedBranch,
-      pr_message: (run.result ?? task.title).slice(0, 500),
-      pr_link: '',
-    };
-    let hasChanges = false;
-    if (token && slug) {
-      try {
-        const compare = await compareBranches(slug.owner, slug.repo, base, resolvedBranch, token);
-        hasChanges = compare.ahead_by > 0;
-      } catch {
+    const resolvedBranch = branch ?? branchInfo?.branch;
+    if (resolvedBranch) {
+      const shared = {
+        task_id: task.task_id,
+        repo: normalizeRepoUrl(branchInfo?.repoUrl || project.repo_url || ''),
+        branch: resolvedBranch,
+        pr_message: (run.result ?? task.title).slice(0, 500),
+        pr_link: '',
+      };
+      let hasChanges = false;
+      if (token && slug) {
+        try {
+          const compare = await compareBranches(slug.owner, slug.repo, base, resolvedBranch, token);
+          hasChanges = compare.ahead_by > 0;
+        } catch {
+          hasChanges = true;
+        }
+      } else {
         hasChanges = true;
       }
-    } else {
-      hasChanges = true;
-    }
-    if (hasChanges) {
-      if (task.output_type === 'code') await this.repo.saveCodeOutput(shared);
-      else {
-        await this.repo.saveResearchOutput({
-          ...shared,
-          path: `research/${task.project_id}/${task.task_id}/`,
-        });
+      if (hasChanges) {
+        if (task.output_type === 'code') await this.repo.saveCodeOutput(shared);
+        else {
+          await this.repo.saveResearchOutput({
+            ...shared,
+            path: `research/${task.project_id}/${task.task_id}/`,
+          });
+        }
       }
-      if (task.status === 'DOING') {
-        assertCanTransition('DOING', 'REVIEW', false);
-        task.status = 'REVIEW';
-      }
-    } else if (task.status === 'DOING') {
-      assertCanTransition('DOING', 'TODO', false);
-      task.status = 'TODO';
     }
+    if (task.status === 'DOING') {
+      applyTaskStatusTransition(task, 'REVIEW', 'agent_finished');
+    }
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+  }
+
+  private async applySubprojectParentRun(projectId: string, run: CursorRun): Promise<void> {
+    const project = await this.repo.getProject(projectId);
+    if (!project?.parent_task_id || project.latest_run_id !== run.id || run.status !== 'FINISHED') return;
+    const task = await this.repo.getTask(project.parent_task_id);
+    if (!task || task.subproject_id !== projectId || task.output_type !== 'subproject') return;
+    if (task.status !== 'DOING') return;
+    applyTaskStatusTransition(task, 'REVIEW', 'agent_finished');
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+  }
+
+  private async markSubprojectTaskDoing(project: Project, latestRunId?: string): Promise<void> {
+    if (!project.parent_task_id) return;
+    const task = await this.repo.getTask(project.parent_task_id);
+    if (!task || task.subproject_id !== project.project_id) return;
+    if (task.status === 'TODO' || task.status === 'REVIEW') {
+      applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
+    }
+    if (latestRunId) task.latest_run_id = latestRunId;
     task.updated_at = this.now();
     await this.repo.saveTask(task);
   }
@@ -1041,12 +1053,15 @@ export class LocalEngine {
   }
 
   private async applyStatus(task: ProjectTask, status: TaskStatus, manual: boolean): Promise<void> {
-    assertCanTransition(task.status, status, manual);
+    assertTaskTransition(task.status, status, manual ? 'manual' : 'execute_or_send');
     if (status === 'DOING' && !task.cursor_agent_id && task.output_type !== 'subproject' && !manual) {
       await this.assertDependenciesDone(task);
     }
-    task.status = status;
-    if (status !== 'DOING') task.pending_action = undefined;
+    if (manual) {
+      applyTaskStatusTransition(task, status, 'manual');
+    } else {
+      applyTaskStatusTransition(task, status, 'execute_or_send');
+    }
   }
 
   private async assertDependenciesDone(task: ProjectTask): Promise<void> {
@@ -1097,7 +1112,7 @@ export class LocalEngine {
     task.cursor_agent_id = created.agent.id;
     task.cursor_chat_link = created.agent.url;
     task.latest_run_id = created.run.id;
-    task.status = 'DOING';
+    applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
     task.updated_at = this.now();
     await this.repo.saveTask(task);
     return this.record({
@@ -1233,14 +1248,6 @@ export class LocalEngine {
 
 function isStatus(value: string): value is TaskStatus {
   return (TASK_STATUSES as readonly string[]).includes(value);
-}
-
-function assertCanTransition(from: TaskStatus, to: TaskStatus, manual: boolean): void {
-  if (from === to) return;
-  if (manual) return;
-  if (!GUIDED[from].includes(to)) {
-    throw new Error(`Cannot move a task from ${from} to ${to}. Expected one of: ${GUIDED[from].join(', ') || 'a manual change'}.`);
-  }
 }
 
 function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
