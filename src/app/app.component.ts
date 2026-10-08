@@ -50,6 +50,7 @@ export class AppComponent implements OnInit {
   readonly editDraft = signal('');
   readonly mapDraggingNodeId = signal<string | null>(null);
   readonly mapStage = viewChild<ElementRef<HTMLElement>>('mapStage');
+  readonly chatTranscript = viewChild<ElementRef<HTMLElement>>('chatTranscript');
   private edgeHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private convertHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private edgeLongPressFired = false;
@@ -120,6 +121,9 @@ export class AppComponent implements OnInit {
   private titleSignature = '';
   private boundTaskFormId = '';
   private outputSignature = '';
+  private readonly chatTranscriptAutoScrolled = new Set<string>();
+  private chatTranscriptScrollObserver: ResizeObserver | undefined;
+  private chatTranscriptScrollTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly onMapWheelCapture = (event: WheelEvent): void => {
     this.onMapWheel(event);
   };
@@ -213,6 +217,16 @@ export class AppComponent implements OnInit {
       if (!this.convertPanel()) return;
       window.addEventListener('pointerdown', this.onMapDismissCapture, true);
       onCleanup(() => window.removeEventListener('pointerdown', this.onMapDismissCapture, true));
+    });
+
+    effect((onCleanup) => {
+      const key = this.chatPanelScrollKey();
+      if (!key || this.store.editorLoading()) return;
+      if (this.chatTranscriptAutoScrolled.has(key)) return;
+      this.store.messages().length;
+      this.store.artifacts().length;
+      onCleanup(() => this.clearChatTranscriptInitialScroll());
+      requestAnimationFrame(() => this.armChatTranscriptInitialScroll(key));
     });
 
     effect(() => {
@@ -610,6 +624,50 @@ export class AppComponent implements OnInit {
     if (node.kind === 'project') return selection.kind === 'project';
     return (selection.kind === 'task' || selection.kind === 'subproject' || selection.kind === 'code' || selection.kind === 'research')
       && selection.taskId === node.id;
+  }
+
+  private chatPanelScrollKey(): string | null {
+    const selection = this.store.selection();
+    const projectId = this.store.project()?.project_id;
+    if (!projectId) return null;
+    switch (selection.kind) {
+      case 'project':
+        return `${projectId}:project`;
+      case 'task':
+        return selection.taskId ? `${projectId}:task:${selection.taskId}` : null;
+      case 'subproject':
+        return selection.taskId ? `${projectId}:subproject:${selection.taskId}` : null;
+      default:
+        return null;
+    }
+  }
+
+  private clearChatTranscriptInitialScroll(): void {
+    this.chatTranscriptScrollObserver?.disconnect();
+    this.chatTranscriptScrollObserver = undefined;
+    if (this.chatTranscriptScrollTimer) {
+      clearTimeout(this.chatTranscriptScrollTimer);
+      this.chatTranscriptScrollTimer = undefined;
+    }
+  }
+
+  private armChatTranscriptInitialScroll(key: string): void {
+    if (this.chatTranscriptAutoScrolled.has(key)) return;
+    const element = this.chatTranscript()?.nativeElement;
+    if (!element) return;
+    this.clearChatTranscriptInitialScroll();
+    const scrollToBottom = (): void => {
+      element.scrollTop = element.scrollHeight;
+    };
+    scrollToBottom();
+    requestAnimationFrame(scrollToBottom);
+    this.chatTranscriptScrollObserver = new ResizeObserver(scrollToBottom);
+    this.chatTranscriptScrollObserver.observe(element);
+    this.chatTranscriptScrollTimer = setTimeout(() => {
+      scrollToBottom();
+      this.chatTranscriptAutoScrolled.add(key);
+      this.clearChatTranscriptInitialScroll();
+    }, 1500);
   }
 
   timeline(): Array<
