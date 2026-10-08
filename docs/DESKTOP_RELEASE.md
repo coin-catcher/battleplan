@@ -65,7 +65,7 @@ GitHub also attaches **Source code (zip/tar.gz)** on every tag. Installers are t
 
 **Actions → Release Battleplan desktop → Run workflow** and enter an existing tag (e.g. `v1.0.1`) to rebuild and re-upload installers without moving the tag.
 
-The desktop app checks GitHub Releases on startup. When a newer **production** tag is available, it prompts to download and restart.
+The desktop app checks GitHub Releases on startup using the GitHub PAT saved under **File → GitHub Token (Updates)**. It compares the installed semver with the newest production tag (excluding `v*-test-*` develop builds). When a newer release is available, it prompts to download the platform installer from that release and install it.
 
 ## Local development
 

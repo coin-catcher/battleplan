@@ -1,5 +1,4 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { autoUpdater } from 'electron-updater';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildApplicationMenu, rebuildApplicationMenu, setExportProjectEnabled, setSaveEnabled } from './application-menu';
@@ -7,6 +6,17 @@ import { readJsonFile } from './atomic-write';
 import { exportProject, importProject } from './battleplan-archive';
 import type { AppConfigDocument } from './document-types';
 import { FileRepository } from './file-repository';
+import { downloadReleaseAsset, installDownloadedRelease } from './release-installer';
+import {
+  BATTLEPLAN_RELEASE_REPO,
+  githubAuthHeaders,
+  isNewerVersion,
+  latestProductionRelease,
+  normalizeVersion,
+  selectInstallerAsset,
+  type GithubRelease,
+  type GithubReleaseAsset,
+} from '../src/app/core/desktop-release-update';
 import type {
   ChatArtifact,
   ChatMessage,
@@ -16,12 +26,12 @@ import type {
   TaskResearchOutput,
 } from '../src/app/core/models';
 
-const GITHUB_OWNER = 'coin-catcher';
-const GITHUB_REPO = 'battleplan';
+const GITHUB_OWNER = BATTLEPLAN_RELEASE_REPO.owner;
+const GITHUB_REPO = BATTLEPLAN_RELEASE_REPO.repo;
 
 let mainWindow: BrowserWindow | null = null;
 let repository: FileRepository | null = null;
-let pendingUpdateVersion: string | null = null;
+let pendingRelease: { version: string; asset: GithubReleaseAsset } | null = null;
 
 function dataRoot(): string {
   return path.join(app.getPath('userData'), 'projects');
@@ -116,12 +126,7 @@ function registerRepositoryHandlers(): void {
         throw error;
       }
     },
-    'update:install': async () => {
-      if (!pendingUpdateVersion) return { ok: false };
-      await autoUpdater.downloadUpdate();
-      autoUpdater.quitAndInstall();
-      return { ok: true };
-    },
+    'update:install': async () => installPendingRelease(),
     'update:check': async () => checkForUpdatesFromGitHub(true),
     'shell:openExternal': async (url) => {
       await shell.openExternal(url as string);
@@ -180,45 +185,30 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[^\w.\- ]+/g, '_').trim() || 'battleplan-project';
 }
 
-function normalizeVersion(value: string): string {
-  return value.trim().replace(/^v/i, '');
+async function readGithubPat(): Promise<string> {
+  const config = await repo().readAppConfig();
+  const token = config.github_pat?.trim();
+  if (!token) {
+    throw new Error('Add a GitHub personal access token under File → GitHub Token (Updates).');
+  }
+  return token;
 }
 
-async function fetchLatestReleaseTag(): Promise<string | null> {
-  const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`, {
-    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'battleplan-desktop' },
+async function fetchGithubReleases(token: string): Promise<GithubRelease[]> {
+  const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=100`, {
+    headers: githubAuthHeaders(token),
   });
-  if (!response.ok) return null;
-  const payload = (await response.json()) as { tag_name?: string };
-  return payload.tag_name ? normalizeVersion(payload.tag_name) : null;
+  if (!response.ok) {
+    throw new Error(`Could not read GitHub releases (${response.status}).`);
+  }
+  return await response.json() as GithubRelease[];
 }
 
-function configureAutoUpdater(): void {
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.setFeedURL({
-    provider: 'github',
-    owner: GITHUB_OWNER,
-    repo: GITHUB_REPO,
-  });
-
-  autoUpdater.on('update-available', (info) => {
-    pendingUpdateVersion = info.version ? normalizeVersion(info.version) : pendingUpdateVersion;
-    mainWindow?.webContents.send('update:available', {
-      version: info.version,
-      releaseNotes: info.releaseNotes,
-    });
-  });
-
-  autoUpdater.on('update-not-available', () => {
-    pendingUpdateVersion = null;
-  });
-
-  autoUpdater.on('error', (error) => {
-    console.error('Auto-update error', error);
-    mainWindow?.webContents.send('update:error', {
-      message: error instanceof Error ? error.message : 'Update check failed.',
-    });
+function notifyUpdateAvailable(release: GithubRelease, version: string, asset: GithubReleaseAsset): void {
+  pendingRelease = { version, asset };
+  mainWindow?.webContents.send('update:available', {
+    version,
+    releaseNotes: release.body ?? 'A newer Battleplan release is available.',
   });
 }
 
@@ -232,18 +222,26 @@ async function checkForUpdatesFromGitHub(notifyWhenCurrent: boolean): Promise<{
   if (!app.isPackaged) {
     return { ok: false, message: 'Updates are only available in the packaged desktop app.' };
   }
-  const current = normalizeVersion(app.getVersion());
-  const latest = await fetchLatestReleaseTag();
-  if (!latest) return { ok: false, message: 'Could not read the latest GitHub release.' };
-  if (latest === current) {
-    if (notifyWhenCurrent) {
-      mainWindow?.webContents.send('update:status', { upToDate: true, current, latest });
-    }
-    return { ok: true, upToDate: true, current, latest };
-  }
-  pendingUpdateVersion = latest;
   try {
-    await autoUpdater.checkForUpdates();
+    const token = await readGithubPat();
+    const current = normalizeVersion(app.getVersion());
+    const latestRelease = latestProductionRelease(await fetchGithubReleases(token));
+    if (!latestRelease) return { ok: false, message: 'Could not read the latest GitHub release.' };
+    const latest = normalizeVersion(latestRelease.tag_name);
+    const asset = selectInstallerAsset(latestRelease.assets, process.platform);
+    if (!asset) {
+      return { ok: false, message: `Release ${latest} has no installer for ${process.platform}.` };
+    }
+    if (!isNewerVersion(latest, current)) {
+      pendingRelease = null;
+      if (notifyWhenCurrent) {
+        mainWindow?.webContents.send('update:status', { upToDate: true, current, latest });
+      }
+      return { ok: true, upToDate: true, current, latest };
+    }
+    pendingRelease = { version: latest, asset };
+    notifyUpdateAvailable(latestRelease, latest, asset);
+    return { ok: true, upToDate: false, current, latest };
   } catch (error) {
     console.error('Could not check for updates', error);
     return {
@@ -251,7 +249,30 @@ async function checkForUpdatesFromGitHub(notifyWhenCurrent: boolean): Promise<{
       message: error instanceof Error ? error.message : 'Update check failed.',
     };
   }
-  return { ok: true, upToDate: false, current, latest };
+}
+
+async function installPendingRelease(): Promise<{ ok: boolean; message?: string }> {
+  if (!pendingRelease) return { ok: false, message: 'No update is ready to install.' };
+  try {
+    const token = await readGithubPat();
+    const destination = path.join(app.getPath('temp'), pendingRelease.asset.name);
+    await downloadReleaseAsset({
+      assetApiUrl: pendingRelease.asset.url,
+      token,
+      destinationPath: destination,
+    });
+    await installDownloadedRelease(destination, process.platform);
+    if (process.platform === 'win32' || process.platform === 'linux') {
+      app.quit();
+    }
+    return { ok: true };
+  } catch (error) {
+    console.error('Could not install update', error);
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : 'Update install failed.',
+    };
+  }
 }
 
 async function checkForUpdatesOnStartup(): Promise<void> {
@@ -260,7 +281,6 @@ async function checkForUpdatesOnStartup(): Promise<void> {
 
 app.whenReady().then(async () => {
   registerRepositoryHandlers();
-  configureAutoUpdater();
   buildApplicationMenu(() => mainWindow);
   createWindow();
   await checkForUpdatesOnStartup();

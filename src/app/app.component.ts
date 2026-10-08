@@ -39,6 +39,7 @@ export class AppComponent implements OnInit {
   private readonly zone = inject(NgZone);
   readonly statuses = TASK_STATUSES;
   readonly signingOpen = signal(false);
+  readonly githubPatOpen = signal(false);
   readonly zoom = signal(1);
   readonly dragPins = signal<Record<string, { x: number; y: number }>>({});
   readonly hoveredConnect = signal<{ nodeId: string; direction: CardinalDirection } | null>(null);
@@ -78,6 +79,9 @@ export class AppComponent implements OnInit {
   apiKey = '';
   keyError = '';
   replacingKey = false;
+  githubPatDraft = '';
+  githubPatError = '';
+  replacingGithubPat = false;
   readonly themeId = signal<ThemeId>('harbor');
   readonly paneWidth = signal(640);
   readonly updatePrompt = signal<{ version: string; notes: string } | null>(null);
@@ -299,6 +303,9 @@ export class AppComponent implements OnInit {
       case 'cursor-api-key':
         this.openCursorKey();
         break;
+      case 'github-pat':
+        this.openGithubPat();
+        break;
       default:
         break;
     }
@@ -498,6 +505,10 @@ export class AppComponent implements OnInit {
     return !this.cursorKey.ready() || this.signingOpen();
   }
 
+  showGithubPat(): boolean {
+    return this.githubPatOpen();
+  }
+
   openCursorKey(): void {
     this.keyError = '';
     this.replacingKey = false;
@@ -528,6 +539,36 @@ export class AppComponent implements OnInit {
     this.apiKey = '';
     this.replacingKey = false;
     this.signingOpen.set(true);
+  }
+
+  openGithubPat(): void {
+    this.githubPatError = '';
+    this.githubPatDraft = this.preferences.githubPat();
+    this.replacingGithubPat = false;
+    this.githubPatOpen.set(true);
+  }
+
+  closeGithubPat(): void {
+    this.githubPatDraft = '';
+    this.githubPatError = '';
+    this.replacingGithubPat = false;
+    this.githubPatOpen.set(false);
+  }
+
+  saveGithubPat(): void {
+    this.githubPatError = '';
+    void this.preferences.saveGithubPat(this.githubPatDraft).then(() => {
+      this.closeGithubPat();
+      this.store.notice.set('GitHub token saved for desktop updates.');
+    }).catch((error) => {
+      this.githubPatError = error instanceof Error ? error.message : 'Could not save that token.';
+    });
+  }
+
+  clearGithubPat(): void {
+    void this.preferences.clearGithubPat();
+    this.githubPatDraft = '';
+    this.replacingGithubPat = true;
   }
 
   planMarkdown(value: string | undefined): string {
@@ -694,8 +735,8 @@ export class AppComponent implements OnInit {
   }
 
   installUpdate(): void {
-    void electronBridge()?.invoke<{ ok: boolean }>('update:install').then((result) => {
-      if (!result.ok) this.store.error.set('Could not install the update.');
+    void electronBridge()?.invoke<{ ok: boolean; message?: string }>('update:install').then((result) => {
+      if (!result.ok) this.store.error.set(result.message ?? 'Could not install the update.');
     });
   }
 

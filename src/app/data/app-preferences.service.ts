@@ -6,12 +6,14 @@ import { electronBridge, isElectronApp } from './electron-bridge';
 export interface AppPreferencesDocument {
   current_project_id: string | null;
   cursor_api_key: string;
+  github_pat: string;
   theme: ThemeId;
   pane_width: number;
   auto_save: boolean;
 }
 
 const CURSOR_KEY = 'battleplan-cursor-api-key';
+const GITHUB_PAT_KEY = 'battleplan-github-pat';
 const THEME_KEY = 'battleplan-theme';
 const PANE_KEY = 'battleplan-pane-width';
 const CURRENT_PROJECT_KEY = 'battleplan-current-project';
@@ -23,6 +25,7 @@ export class AppPreferences {
   private cached: AppPreferencesDocument = {
     current_project_id: null,
     cursor_api_key: '',
+    github_pat: '',
     theme: 'harbor',
     pane_width: 420,
     auto_save: false,
@@ -34,6 +37,7 @@ export class AppPreferences {
       this.cached = {
         current_project_id: config.current_project_id,
         cursor_api_key: config.cursor_api_key ?? '',
+        github_pat: config.github_pat ?? '',
         theme: normalizeTheme(config.theme),
         pane_width: normalizePaneWidth(config.pane_width),
         auto_save: Boolean(config.auto_save),
@@ -42,6 +46,7 @@ export class AppPreferences {
       this.cached = {
         current_project_id: localStorage.getItem(CURRENT_PROJECT_KEY),
         cursor_api_key: localStorage.getItem(CURSOR_KEY) ?? '',
+        github_pat: localStorage.getItem(GITHUB_PAT_KEY) ?? '',
         theme: normalizeTheme(localStorage.getItem(THEME_KEY)),
         pane_width: normalizePaneWidth(Number(localStorage.getItem(PANE_KEY))),
         auto_save: localStorage.getItem(AUTO_SAVE_KEY) === '1',
@@ -75,6 +80,22 @@ export class AppPreferences {
     this.cached.cursor_api_key = '';
     await this.persist({ cursor_api_key: '' });
     this.ready.set(false);
+  }
+
+  githubPat(): string {
+    return this.cached.github_pat;
+  }
+
+  async saveGithubPat(token: string): Promise<void> {
+    const next = token.trim();
+    if (!next) throw new Error('Paste a GitHub personal access token.');
+    this.cached.github_pat = next;
+    await this.persist({ github_pat: next });
+  }
+
+  async clearGithubPat(): Promise<void> {
+    this.cached.github_pat = '';
+    await this.persist({ github_pat: '' });
   }
 
   theme(): ThemeId {
@@ -116,6 +137,10 @@ export class AppPreferences {
     if (patch.cursor_api_key !== undefined) {
       if (patch.cursor_api_key) localStorage.setItem(CURSOR_KEY, patch.cursor_api_key);
       else localStorage.removeItem(CURSOR_KEY);
+    }
+    if (patch.github_pat !== undefined) {
+      if (patch.github_pat) localStorage.setItem(GITHUB_PAT_KEY, patch.github_pat);
+      else localStorage.removeItem(GITHUB_PAT_KEY);
     }
     if (patch.theme !== undefined) localStorage.setItem(THEME_KEY, patch.theme);
     if (patch.pane_width !== undefined) localStorage.setItem(PANE_KEY, String(patch.pane_width));
