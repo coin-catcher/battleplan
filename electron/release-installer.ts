@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { shell } from 'electron';
-import { githubAssetDownloadHeaders } from '../src/app/core/desktop-release-update';
+import { githubAssetDownloadHeaders } from './desktop-release-update';
 
 export async function downloadReleaseAsset(input: {
   assetApiUrl: string;
