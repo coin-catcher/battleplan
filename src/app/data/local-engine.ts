@@ -1,6 +1,7 @@
 import type {
   ChatArtifact,
   ChatMessage,
+  ConversationPage,
   OutputType,
   PendingChange,
   Project,
@@ -15,10 +16,10 @@ import {
   appendPendingChangeRows,
   DEFAULT_DEVELOP_BRANCH,
   DEFAULT_MAIN_BRANCH,
-  POST_MAIN_MERGE_PROJECT_MESSAGE,
   projectRepoSlug,
   syncPendingChangesForProject,
 } from '../core/pending-changes';
+import { parseReleaseVersionBranch, VERSION_BUMP_AGENT_MESSAGE } from '../core/release-version';
 import type { GithubCompareCommit } from '../core/github-client';
 import {
   agentBranchPolicyLines,
@@ -57,7 +58,7 @@ import {
   generateTasksInstructionForProject,
 } from '../core/generate-tasks';
 import { defaultDarForOutputType, taskDar, taskInitialPrompt } from '../core/task-fields';
-import { applyTaskStatusTransition, assertTaskTransition } from '../core/task-state-machine';
+import { applyTaskStatusTransition, assertTaskTransition, type TaskTransitionTrigger } from '../core/task-state-machine';
 import {
   cursorLaunchFromLibrary,
   findProjectAgent,
@@ -77,9 +78,15 @@ const IMAGE_ARTIFACT = /\.(png|jpe?g|gif|webp|svg)$/i;
 const MAX_TEXT_BYTES = 200_000;
 const MAX_TEXT_CHARS = 100_000;
 
-export interface ConversationPage {
-  messages: ChatMessage[];
-  artifacts: ChatArtifact[];
+function rootProjectStatus(project: Project): TaskStatus {
+  return project.status ?? 'TODO';
+}
+
+function applyProjectStatusTransition(project: Project, to: TaskStatus, trigger: TaskTransitionTrigger): void {
+  const shim = { status: rootProjectStatus(project) } as ProjectTask;
+  applyTaskStatusTransition(shim, to, trigger);
+  project.status = shim.status;
+  if (to !== 'DOING') project.pending_action = undefined;
 }
 
 interface NormalizedDraft {
@@ -122,6 +129,7 @@ export class LocalEngine {
       latest_run_id: created.run.id,
       repo_url: input.repo_url?.trim() || undefined,
       starting_ref: input.starting_ref?.trim() || undefined,
+      status: 'TODO',
       created_at: timestamp,
       updated_at: timestamp,
     };
@@ -197,6 +205,8 @@ export class LocalEngine {
     map_y?: number;
     default_research_agent_id?: string;
     default_code_agent_id?: string;
+    status?: TaskStatus;
+    manual?: boolean;
   }): Promise<Project> {
     const project = await this.requireProject(projectId);
     const changes: string[] = [];
@@ -244,6 +254,11 @@ export class LocalEngine {
       const next = patch.default_code_agent_id.trim();
       if (next !== (project.default_code_agent_id ?? '')) changes.push('Default code agent updated.');
       project.default_code_agent_id = next || undefined;
+    }
+    if (patch.status !== undefined) {
+      if (!TASK_STATUSES.includes(patch.status)) throw new Error('Unknown project status.');
+      if (patch.status !== rootProjectStatus(project)) changes.push(`Status: ${patch.status}`);
+      applyProjectStatusTransition(project, patch.status, patch.manual ? 'manual' : 'execute_or_send');
     }
     project.updated_at = this.now();
     await this.repo.saveProject(project);
@@ -548,7 +563,12 @@ export class LocalEngine {
     return {
       messages: await this.repo.listProjectMessages(projectId),
       artifacts: await this.repo.listArtifacts('project', projectId),
+      project: await this.requireProject(projectId),
     };
+  }
+
+  transitionProject(projectId: string, status: TaskStatus, manual: boolean): Promise<Project> {
+    return this.updateProject(projectId, { status, manual });
   }
 
   listPendingChanges(projectId: string): Promise<PendingChange[]> {
@@ -848,7 +868,74 @@ export class LocalEngine {
       token,
     });
     await this.repo.savePendingChanges(projectId, []);
-    return this.dispatchProject(projectId, POST_MAIN_MERGE_PROJECT_MESSAGE, 'chat');
+    const agentPrompt = wrapAgentRunPrompt(VERSION_BUMP_AGENT_MESSAGE, { baseBranch: develop });
+    applyProjectStatusTransition(project, 'DOING', 'manual');
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    return this.dispatchProject(projectId, agentPrompt, 'release_version_bump', VERSION_BUMP_AGENT_MESSAGE);
+  }
+
+  async approveProjectRelease(projectId: string): Promise<Project> {
+    const project = await this.requireProject(projectId);
+    if (project.parent_task_id || project.parent_project_id) {
+      throw new Error('Approve and merge is only available on the root project.');
+    }
+    if (rootProjectStatus(project) !== 'REVIEW') {
+      throw new Error('Project must be in REVIEW before merging the version branch.');
+    }
+    const token = requireProjectGithubPat(project);
+    const { owner, repo } = repoSlugFromProject(project);
+    const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
+    let head = project.release_version_branch?.trim();
+    if (!head && project.cursor_agent_id) {
+      const runs = await this.cursor.listRuns(project.cursor_agent_id);
+      for (const summary of runs) {
+        if (!TERMINAL_RUN.has(summary.status)) continue;
+        const run = await this.resolveTerminalRun(project.cursor_agent_id, summary);
+        const picked = await pickTaskAgentBranch({
+          branchNames: branchNamesFromRun(run),
+          preferred: head,
+          owner,
+          repo,
+          base,
+          token,
+        });
+        if (picked?.branch && picked.aheadBy > 0) {
+          head = picked.branch;
+          break;
+        }
+      }
+    }
+    if (!head) throw new Error('No version branch is recorded for this project. Wait for the agent response.');
+    const pull = await createPullRequest({
+      owner,
+      repo,
+      head,
+      base,
+      title: `Release version bump: ${project.title}`,
+      body: 'Merge semver bump branch into develop after Release Changes.',
+      token,
+    });
+    try {
+      await mergePullRequest(owner, repo, pull.number, token);
+    } catch (error) {
+      if (isGithubMergeConflictError(error)) {
+        throw new Error('Pull request has merge conflicts. Resolve them on GitHub or ask the agent to update the branch.');
+      }
+      throw error;
+    }
+    project.release_version_branch = undefined;
+    applyProjectStatusTransition(project, 'DONE', 'approve_merge');
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    await this.record({
+      scope: 'project',
+      project_id: projectId,
+      role: 'user',
+      content: `Approved. Merged version branch \`${head}\` into \`${base}\`.`,
+      intent: 'approve',
+    });
+    return project;
   }
 
   private async dispatchProject(
@@ -864,6 +951,7 @@ export class LocalEngine {
     const run = await this.cursor.createRun(project.cursor_agent_id, { text: content, mode: 'plan' });
     project.latest_run_id = run.id;
     project.updated_at = this.now();
+    await this.markProjectDoingOnAgentChat(project);
     await this.repo.saveProject(project);
     const message = await this.record({
       scope: 'project',
@@ -909,8 +997,44 @@ export class LocalEngine {
         if (index >= 0) existing[index] = saved;
       }
       if (target.scope === 'task') await this.applyTaskRun(target.taskId, run);
-      else await this.applySubprojectParentRun(target.projectId, run);
+      else {
+        await this.applySubprojectParentRun(target.projectId, run);
+        await this.applyRootProjectRun(target.projectId, run);
+      }
     }
+  }
+
+  private async applyRootProjectRun(projectId: string, run: CursorRun): Promise<void> {
+    const project = await this.repo.getProject(projectId);
+    if (!project || project.parent_task_id || project.parent_project_id) return;
+    if (project.latest_run_id !== run.id || run.status !== 'FINISHED') return;
+    if (rootProjectStatus(project) !== 'DOING') return;
+    const user = (await this.repo.listProjectMessages(projectId))
+      .find((message) => message.run_id === run.id && message.role === 'user');
+    if (user?.intent !== 'release_version_bump') return;
+
+    const token = project.github_pat?.trim();
+    const slug = projectRepoSlug(project);
+    const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
+    const branchNames = branchNamesFromRun(run);
+    let branch = parseReleaseVersionBranch(await this.assistantText(project.cursor_agent_id!, run));
+    if (token && slug) {
+      const picked = await pickTaskAgentBranch({
+        branchNames: branch ? [branch, ...branchNames] : branchNames,
+        preferred: branch ?? project.release_version_branch,
+        owner: slug.owner,
+        repo: slug.repo,
+        base,
+        token,
+      });
+      if (picked?.branch) branch = picked.branch;
+    } else if (!branch && branchNames.length > 0) {
+      branch = branchNames[branchNames.length - 1];
+    }
+    if (branch) project.release_version_branch = branch;
+    applyProjectStatusTransition(project, 'REVIEW', 'agent_finished');
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
   }
 
   private async importReferencedRuns(

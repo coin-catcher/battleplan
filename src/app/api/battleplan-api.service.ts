@@ -54,8 +54,14 @@ export class BattleplanApi {
     map_y?: number;
     default_research_agent_id?: string;
     default_code_agent_id?: string;
+    status?: TaskStatus;
+    manual?: boolean;
   }): Promise<Project> {
     return this.engine.updateProject(projectId, patch);
+  }
+
+  transitionProject(projectId: string, status: TaskStatus, manual: boolean): Promise<Project> {
+    return this.engine.transitionProject(projectId, status, manual);
   }
 
   ensureAgentLibrary(projectId: string): Promise<Project> {
@@ -212,6 +218,10 @@ export class BattleplanApi {
 
   releaseProjectChanges(projectId: string): Promise<ChatMessage> {
     return this.engine.releaseProjectChanges(projectId);
+  }
+
+  approveProjectRelease(projectId: string): Promise<Project> {
+    return this.engine.approveProjectRelease(projectId);
   }
 
   getAgentUsageLedger(projectId: string): Promise<Record<string, import('../core/models').AgentUsageLedger>> {
