@@ -36,10 +36,13 @@ import {
   isGithubMergeConflictError,
   listPullCommits,
   MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL,
+  deleteBranch,
+  isGithubMissingRefError,
   mergePullRequest,
   requireProjectGithubPat,
   repoSlugFromProject,
 } from '../core/github-client';
+import { reparentChildrenOnTaskDelete } from '../core/task-delete';
 import { TASK_STATUSES } from '../core/models';
 import type { CursorClient, CursorRun } from './cursor-browser';
 import { normalizeRepoUrl } from './cursor-browser';
@@ -544,8 +547,62 @@ export class LocalEngine {
 
   async deleteTask(projectId: string, taskId: string): Promise<void> {
     const task = await this.requireTask(projectId, taskId);
-    if (task.cursor_agent_id) await this.cursor.archiveAgent(task.cursor_agent_id);
+    if (task.cursor_agent_id) {
+      await this.cursor.archiveAgent(task.cursor_agent_id);
+      await this.deleteTaskAgentBranch(task);
+    }
+    const tasks = await this.repo.listTasks(projectId);
+    const reparented = reparentChildrenOnTaskDelete(tasks, taskId);
+    const timestamp = this.now();
+    for (const updated of reparented) {
+      if (updated.task_id === taskId) continue;
+      const previous = tasks.find((item) => item.task_id === updated.task_id);
+      if (!previous) continue;
+      const depsChanged = updated.dependencies.join(',') !== previous.dependencies.join(',');
+      const siblingsChanged = (updated.sibling_dependencies ?? []).join(',') !== (previous.sibling_dependencies ?? []).join(',');
+      if (!depsChanged && !siblingsChanged) continue;
+      updated.updated_at = timestamp;
+      await this.repo.saveTask(updated);
+    }
+    await this.detachSubprojectReferences(projectId, task);
     await this.repo.deleteTask(taskId);
+  }
+
+  private async deleteTaskAgentBranch(task: ProjectTask): Promise<void> {
+    const output = task.output_type === 'code'
+      ? await this.repo.getCodeOutput(task.task_id)
+      : await this.repo.getResearchOutput(task.task_id);
+    const branch = output?.branch?.trim();
+    if (!branch) return;
+    const project = await this.requireProject(task.project_id);
+    const token = project.github_pat?.trim();
+    const slug = projectRepoSlug(project);
+    if (!token || !slug) return;
+    try {
+      await deleteBranch(slug.owner, slug.repo, branch, token);
+    } catch (error) {
+      if (!isGithubMissingRefError(error)) throw error;
+    }
+  }
+
+  private async detachSubprojectReferences(projectId: string, task: ProjectTask): Promise<void> {
+    const nestedId = task.subproject_id?.trim();
+    if (!nestedId) return;
+    const project = await this.repo.getProject(projectId);
+    if (project?.subproject_ids?.includes(nestedId)) {
+      project.subproject_ids = project.subproject_ids.filter((id) => id !== nestedId);
+      project.updated_at = this.now();
+      await this.repo.saveProject(project);
+    }
+    const tasks = await this.repo.listTasks(projectId);
+    for (const candidate of tasks) {
+      if (candidate.task_id === task.task_id) continue;
+      const ids = candidate.subproject_ids ?? [];
+      if (!ids.includes(nestedId)) continue;
+      candidate.subproject_ids = ids.filter((id) => id !== nestedId);
+      candidate.updated_at = this.now();
+      await this.repo.saveTask(candidate);
+    }
   }
 
   async reorderTasks(projectId: string, taskIds: string[]): Promise<ProjectTask[]> {

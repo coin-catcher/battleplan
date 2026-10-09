@@ -63,10 +63,12 @@ class MemoryRepository implements BattleplanRepository {
   }
 }
 
-function cursor(): CursorClient & { prompts: string[] } {
+function cursor(): CursorClient & { prompts: string[]; archived: string[] } {
   const prompts: string[] = [];
+  const archived: string[] = [];
   return {
     prompts,
+    archived,
     async createAgent(input) {
       prompts.push(input.prompt);
       return {
@@ -74,7 +76,9 @@ function cursor(): CursorClient & { prompts: string[] } {
         run: { id: 'run-1', agentId: 'agent-1', status: 'RUNNING' },
       };
     },
-    async archiveAgent() {},
+    async archiveAgent(agentId) {
+      archived.push(agentId);
+    },
     async createRun() { return { id: 'run-2', agentId: 'agent-1', status: 'RUNNING' }; },
     async listRuns() { return []; },
     async getRun() { return { id: 'run-1', agentId: 'agent-1', status: 'RUNNING' }; },
@@ -594,5 +598,38 @@ describe('LocalEngine', () => {
     const task = await engine.createTask('p1', { title: 'Work', output_type: 'code', initial_prompt: 'Go' });
     await engine.transition('p1', task.task_id, 'ABANDONED', true);
     await expect(engine.executeTask(task.task_id)).rejects.toThrow(/abandoned/i);
+  });
+
+  it('reparents child tasks and removes the deleted task', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    let tick = 0;
+    const engine = new LocalEngine(repo, client, () => '2026-10-09T12:00:00.000Z', () => `task-${tick++}`);
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const parent = await engine.createTask('p1', { title: 'Parent', output_type: 'code' });
+    const middle = await engine.createTask('p1', {
+      title: 'Middle',
+      output_type: 'code',
+      depends_on: parent.task_id,
+      initial_prompt: 'Go',
+    });
+    const leaf = await engine.createTask('p1', { title: 'Leaf', output_type: 'code', initial_prompt: 'Go' });
+    middle.dependencies = [leaf.task_id];
+    middle.cursor_agent_id = 'agent-middle';
+    parent.dependencies = [middle.task_id];
+    await repo.saveTask(parent);
+    await repo.saveTask(middle);
+    await engine.deleteTask('p1', middle.task_id);
+    expect(await repo.getTask(middle.task_id)).toBeNull();
+    expect((await repo.getTask(parent.task_id))?.dependencies).toEqual([leaf.task_id]);
+    expect(client.archived).toContain('agent-middle');
   });
 });

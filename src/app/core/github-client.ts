@@ -202,3 +202,23 @@ export function repoSlugFromProject(project: { repo_url?: string }): { owner: st
   if (!slug) throw new Error('Add a repository URL to the project.');
   return slug;
 }
+
+export async function deleteBranch(
+  owner: string,
+  repo: string,
+  branch: string,
+  token: string,
+): Promise<void> {
+  const ref = branch.startsWith('refs/heads/') ? branch.slice('refs/heads/'.length) : branch;
+  await githubJson(
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(ref)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export function isGithubMissingRefError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return message.includes('github api 404') || message.includes('github api 422') || message.includes('reference does not exist');
+}
