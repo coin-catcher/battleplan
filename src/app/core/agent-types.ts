@@ -114,7 +114,15 @@ export const AGENT_TYPE_REGISTRY: Record<AgentType, AgentTypeDefinition> = {
       adminKeyHint: 'Organization Admin API key (not the same as project sk- key).',
     },
     specificOptions: [
-      { key: 'model', label: 'Model', control: 'select', default: 'gpt-4.1-mini', choices: ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'] },
+      {
+        key: 'model',
+        label: 'Model',
+        control: 'select',
+        default: 'gpt-4.1-mini',
+        choices: ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'],
+        dynamic: true,
+        help: 'Loaded from GET /v1/models when an API key is available (Test Connection or opening the editor).',
+      },
       {
         key: 'reasoning_effort',
         label: 'Reasoning effort',

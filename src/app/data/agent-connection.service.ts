@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import {
+  listAgentModels,
   runAgentConnectionTest,
   type AgentConnectionInput,
   type AgentConnectionResult,
@@ -41,5 +42,19 @@ export class AgentConnectionService {
       return bridge.invoke<AgentConnectionResult>('agent:testConnection', payload);
     }
     return runAgentConnectionTest(payload);
+  }
+
+  async listModels(input: AgentConnectionInput): Promise<string[]> {
+    const limitation = this.browserLimitationMessage(input.type);
+    if (limitation) return [];
+
+    const apiKey = input.apiKey.trim()
+      || (input.type === 'Cursor Agent' ? this.cursorKey.value().trim() : '');
+    const payload: AgentConnectionInput = { ...input, apiKey };
+    const bridge = electronBridge();
+    if (bridge) {
+      return bridge.invoke<string[]>('agent:listModels', payload);
+    }
+    return listAgentModels(payload);
   }
 }

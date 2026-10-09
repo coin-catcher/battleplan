@@ -4,7 +4,9 @@ import {
   agentConnectionUserMessage,
   applyDynamicModelsToOptions,
   buildAgentTestConnectionRequest,
+  filterOpenAiSelectableModelIds,
   joinAgentApiUrl,
+  listAgentModels,
   parseOpenAiModelIds,
   runAgentConnectionTest,
   selectChoicesForOption,
@@ -171,6 +173,15 @@ describe('LocalLLM connection', () => {
     const merged = applyDynamicModelsToOptions('LocalLLM', { model: '' }, ['alpha', 'beta']);
     expect(merged.model).toBe('alpha');
   });
+
+  it('uses live OpenAI models when loaded, else static fallback', () => {
+    expect(
+      selectChoicesForOption('OpenAI', 'model', ['gpt-4.1-mini'], ['gpt-4o', 'gpt-4.1-nano']),
+    ).toEqual(['gpt-4o', 'gpt-4.1-nano']);
+    expect(
+      selectChoicesForOption('OpenAI', 'model', ['gpt-4.1-mini'], []),
+    ).toEqual(['gpt-4.1-mini']);
+  });
 });
 
 describe('parseOpenAiModelIds', () => {
@@ -180,6 +191,19 @@ describe('parseOpenAiModelIds', () => {
         data: [{ id: 'b' }, { id: 'a' }, { id: 'b' }],
       }),
     ).toEqual(['a', 'b']);
+  });
+});
+
+describe('filterOpenAiSelectableModelIds', () => {
+  it('removes embeddings and audio models', () => {
+    expect(
+      filterOpenAiSelectableModelIds([
+        'gpt-4o',
+        'text-embedding-3-small',
+        'whisper-1',
+        'o3-mini',
+      ]),
+    ).toEqual(['gpt-4o', 'o3-mini']);
   });
 });
 
@@ -199,8 +223,25 @@ describe('runAgentConnectionTest (OpenAI)', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.message).toMatch(/successful/i);
+    expect(result.message).toMatch(/model\(s\) available/i);
+    expect(result.models).toEqual(['gpt-4o']);
     expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('listAgentModels returns filtered chat models for OpenAI', async () => {
+    const fetchFn = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          data: [{ id: 'gpt-4o' }, { id: 'text-embedding-3-small' }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const models = await listAgentModels(
+      { type: 'OpenAI', url: 'https://api.openai.com/v1', apiKey: 'sk-valid' },
+      fetchFn,
+    );
+    expect(models).toEqual(['gpt-4o']);
   });
 
   it('returns a stable mapped error for invalid keys until a later success', async () => {

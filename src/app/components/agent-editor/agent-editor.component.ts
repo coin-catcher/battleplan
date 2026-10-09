@@ -13,6 +13,7 @@ import {
   agentLogoPublicPath,
   agentOptionRows,
   agentTypesForKind,
+  agentModelOptionDefinition,
   getAgentTypeDefinition,
   isAgentOptionVisible,
   type AgentOptionDefinition,
@@ -86,6 +87,7 @@ export class AgentEditorComponent {
         this.testState.set('idle');
         this.testMessage.set('');
       }
+      void this.refreshDynamicModelChoices();
     });
   }
 
@@ -112,6 +114,7 @@ export class AgentEditorComponent {
     this.dynamicModelChoices.set([]);
     this.form.set({ ...form, options: { ...form.options } });
     this.syncDraft();
+    void this.refreshDynamicModelChoices();
   }
 
   onNameInput(value: string): void {
@@ -201,6 +204,25 @@ export class AgentEditorComponent {
     if (agent && isAgentDraftId(agent.agent_id)) {
       this.store.discardAgentDraft(agent.agent_id);
     }
+  }
+
+  private async refreshDynamicModelChoices(): Promise<void> {
+    const agent = this.agentInput();
+    const form = this.form();
+    if (!agent || !form) return;
+    if (!agentModelOptionDefinition(form.type)?.dynamic) return;
+    const apiKey = form.apiKeyTouched ? form.api_key.trim() : (agent.api_key ?? form.api_key).trim();
+    if (!apiKey && form.type !== 'LocalLLM') return;
+    const models = await this.connections.listModels({
+      type: form.type,
+      url: form.url.trim() || getAgentTypeDefinition(form.type).defaultUrl,
+      apiKey,
+    });
+    if (!models.length) return;
+    this.dynamicModelChoices.set(models);
+    form.options = applyDynamicModelsToOptions(form.type, form.options, models);
+    this.form.set({ ...form, options: { ...form.options } });
+    this.syncDraft();
   }
 
   async testConnection(): Promise<void> {

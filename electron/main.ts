@@ -152,6 +152,10 @@ function registerRepositoryHandlers(): void {
     },
     'agent:testConnection': async (params) =>
       runAgentConnectionInMain(params as import('../src/app/core/agent-connection').AgentConnectionInput),
+    'agent:listModels': async (params) =>
+      import('../src/app/core/agent-connection').then(({ listAgentModels }) =>
+        listAgentModels(params as import('../src/app/core/agent-connection').AgentConnectionInput, fetch),
+      ),
     'agent:fetchStatistics': async (params) =>
       fetchAgentStatisticsLive(params as import('./agent-statistics').AgentStatisticsFetchInput),
     'menu:sync-state': async (state) => {
