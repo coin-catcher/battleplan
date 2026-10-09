@@ -103,6 +103,7 @@ types:
     statistics:
       adapter: anthropic_admin
       requires_separate_admin_key: true
+      admin_key_hint: Messages API key (sk-ant-api...) is not the same as Admin API key (sk-ant-admin...) for usage and cost reports.
     specific_options:
       - key: model
         label: Model

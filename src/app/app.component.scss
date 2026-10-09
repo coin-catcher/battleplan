@@ -17,6 +17,126 @@
   color: var(--accent-ink);
 }
 
+.agent-toolbox {
+  position: absolute;
+  top: 90px;
+  right: 10px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-height: calc(100% - 100px);
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+.agent-toolbox-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.agent-toolbox-entry.active .agent-toolbox-icon {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.agent-toolbox-icon {
+  width: 100px;
+  height: 100px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  display: grid;
+  place-items: center;
+}
+
+.agent-toolbox-icon img {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+}
+
+.agent-toolbox-label {
+  max-width: 100px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-toolbox-add .agent-toolbox-icon-add {
+  border-radius: 50%;
+  background: #2e7d32;
+  color: #fff;
+  font-size: 36px;
+  line-height: 1;
+  border: 0;
+}
+
+.agent-editor-head {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.agent-editor-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.agent-editor-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+}
+
+.agent-editor-actions {
+  margin-left: auto;
+}
+
+.agent-type-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.agent-type-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.agent-options table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.agent-options th,
+.agent-options td {
+  text-align: left;
+  vertical-align: top;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.agent-option-help {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
 .map-canvas { transform-origin: 0 0; }
 .config { display: grid; grid-template-columns: 1.1fr 1.4fr 0.7fr; gap: 12px; }
 .map-node { touch-action: none; }
