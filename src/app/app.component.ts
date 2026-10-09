@@ -883,6 +883,20 @@ export class AppComponent implements OnInit {
     void this.store.approve().finally(() => this.store.chatActionPending.set(null));
   }
 
+  approveProjectRelease(): void {
+    this.store.chatActionPending.set('merge');
+    void this.store.approveProjectRelease().finally(() => this.store.chatActionPending.set(null));
+  }
+
+  projectRootStatus(project: { status?: TaskStatus }): TaskStatus {
+    return project.status ?? 'TODO';
+  }
+
+  onProjectStatusChange(event: Event): void {
+    const status = (event.target as HTMLSelectElement).value as TaskStatus;
+    void this.store.transitionProject(status, true);
+  }
+
   chatActionsLocked(): boolean {
     return this.store.chatActionPending() !== null || this.store.busy();
   }

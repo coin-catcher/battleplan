@@ -406,6 +406,60 @@ describe('LocalEngine', () => {
     expect((await repo.getTask(task.task_id))?.status).toBe('DOING');
   });
 
+  it('moves a DOING project to REVIEW after a version bump agent run', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    client.listRuns = async () => [{
+      id: 'run-version',
+      agentId: 'agent-1',
+      status: 'FINISHED',
+      result: 'Branch name: cursor/release-1.0.13',
+    }];
+    client.getRun = async () => ({
+      id: 'run-version',
+      agentId: 'agent-1',
+      status: 'FINISHED',
+      result: 'Branch name: cursor/release-1.0.13',
+      git: { branches: [{ branch: 'cursor/release-1.0.13' }] },
+    });
+    const engine = new LocalEngine(repo, client, () => '2026-10-09T12:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      cursor_agent_id: 'agent-1',
+      status: 'DOING',
+      latest_run_id: 'run-version',
+      github_pat: 'ghp_test',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      starting_ref: 'develop',
+      created_at: '2026-10-09T00:00:00.000Z',
+      updated_at: '2026-10-09T00:00:00.000Z',
+    });
+    await repo.saveMessage({
+      message_id: 'm-user',
+      scope: 'project',
+      project_id: 'p1',
+      role: 'user',
+      content: 'bump version',
+      created_at: '2026-10-09T00:00:00.000Z',
+      run_id: 'run-version',
+      intent: 'release_version_bump',
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/compare/')) {
+        return new Response(JSON.stringify({ ahead_by: 1, commits: [] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({}), { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const page = await engine.listProjectMessages('p1');
+    expect(page.project?.status).toBe('REVIEW');
+    expect(page.project?.release_version_branch).toBe('cursor/release-1.0.13');
+    vi.unstubAllGlobals();
+  });
+
   it('marks the root project DOING when project chat is sent', async () => {
     const repo = new MemoryRepository();
     const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => 'id-1');

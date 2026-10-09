@@ -346,13 +346,40 @@ export class BattleplanStore {
       const message = await this.api.releaseProjectChanges(projectId);
       runId = message.run_id ?? undefined;
       this.pendingChanges.set([]);
-      this.applyConversation(await this.api.listProjectMessages(projectId));
-      this.notice.set('Released pending changes to main.');
+      const page = await this.api.listProjectMessages(projectId);
+      this.applyConversation(page);
+      this.notice.set('Released to main. Version bump agent started.');
     });
     if (runId && !this.error()) {
       await this.syncProjectUserRun(projectId, runId);
       void this.watchProject(projectId, runId);
     }
+  }
+
+  async transitionProject(status: TaskStatus, manual: boolean): Promise<void> {
+    const project = this.project();
+    if (!project) return;
+    await this.run(async () => {
+      const updated = await this.api.transitionProject(project.project_id, status, manual);
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === updated.project_id ? updated : item
+      )));
+      this.applyConversation(await this.api.listProjectMessages(project.project_id));
+    });
+  }
+
+  async approveProjectRelease(): Promise<void> {
+    const project = this.project();
+    if (!project) return;
+    const projectId = project.project_id;
+    await this.run(async () => {
+      const updated = await this.api.approveProjectRelease(projectId);
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === updated.project_id ? updated : item
+      )));
+      this.applyConversation(await this.api.listProjectMessages(projectId));
+      this.notice.set('Version branch merged into develop.');
+    });
   }
 
   showCreate(): void {
@@ -1160,6 +1187,11 @@ export class BattleplanStore {
   private applyConversation(page: ConversationPage): void {
     this.messages.set(page.messages);
     this.artifacts.set(page.artifacts ?? []);
+    if (page.project) {
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === page.project!.project_id ? page.project! : item
+      )));
+    }
   }
 
   private applyTaskConversation(result: { messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }): void {
