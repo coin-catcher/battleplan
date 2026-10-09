@@ -23,6 +23,7 @@ import {
   isAgentOptionVisible,
   mergeAgentOptions,
 } from './core/agent-types';
+import { agentCredentialFieldLabel, agentUsesServiceAccountJson } from './core/agent-api-key';
 import { applyDynamicModelsToOptions, selectChoicesForOption } from './core/agent-connection';
 import type { AgentOptionDefinition } from './core/agent-types';
 import { isAgentDraftId } from './core/agent-id';
@@ -1198,6 +1199,14 @@ export class AppComponent implements OnInit {
 
   agentLogoFor(type: AgentType): string {
     return agentLogoPublicPath(type);
+  }
+
+  agentCredentialFieldLabel(): string {
+    return agentCredentialFieldLabel(this.agentType);
+  }
+
+  agentUsesServiceAccountJson(): boolean {
+    return agentUsesServiceAccountJson(this.agentType);
   }
 
   agentTypesForSelection(): AgentType[] {

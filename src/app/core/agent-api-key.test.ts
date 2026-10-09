@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agentApiKeyRequired, resolveAgentApiKey } from './agent-api-key';
+import { agentApiKeyRequired, agentCredentialFieldLabel, agentUsesServiceAccountJson, resolveAgentApiKey } from './agent-api-key';
 
 describe('resolveAgentApiKey', () => {
   it('uses per-agent key when set', () => {
@@ -18,5 +18,12 @@ describe('resolveAgentApiKey', () => {
   it('marks Cursor as optional api key on agent record', () => {
     expect(agentApiKeyRequired('Cursor Agent')).toBe(false);
     expect(agentApiKeyRequired('OpenAI')).toBe(true);
+  });
+
+  it('uses service account JSON labeling for Gemini', () => {
+    expect(agentUsesServiceAccountJson('Gemini')).toBe(true);
+    expect(agentUsesServiceAccountJson('OpenAI')).toBe(false);
+    expect(agentCredentialFieldLabel('Gemini')).toBe('Service account JSON');
+    expect(agentCredentialFieldLabel('OpenAI')).toBe('API key');
   });
 });
