@@ -30,6 +30,8 @@ export interface AgentTestConnectionRecipe {
   queryParam?: string;
   basicPasswordEmpty?: boolean;
   fallbackPath?: string;
+  fallbackMethod?: 'GET' | 'POST';
+  fallbackBody?: unknown;
   altPath?: string;
   note?: string;
 }
@@ -214,7 +216,25 @@ export const AGENT_TYPE_REGISTRY: Record<AgentType, AgentTypeDefinition> = {
     defaultUrl: 'https://api.x.ai/v1',
     logoAsset: 'xai.svg',
     logoAlt: 'xAI Grok',
-    testConnection: { method: 'GET', path: '/models', auth: 'bearer', successHttp: [200] },
+    testConnection: {
+      method: 'GET',
+      path: '/models',
+      auth: 'bearer',
+      successHttp: [200],
+      userErrorMap: {
+        401: 'Invalid xAI API key.',
+        403: 'API key cannot list models; connection may still work via Responses API.',
+      },
+      fallbackMethod: 'POST',
+      fallbackPath: '/responses',
+      fallbackBody: {
+        model: 'grok-4-1-fast-non-reasoning',
+        input: [{ role: 'user', content: 'ping' }],
+        max_output_tokens: 1,
+        store: false,
+      },
+      note: 'Grok research uses POST /v1/responses; fall back when GET /models is unavailable for the key tier.',
+    },
     statistics: { adapter: 'local_ledger', priceHintUsdPerMtok: { input: 2.0, output: 6.0, model: 'grok-4.7' } },
     specificOptions: [
       { key: 'model', label: 'Model', control: 'select', default: 'grok-4.7', choices: ['grok-4.7', 'grok-4-1-fast-reasoning', 'grok-4-1-fast-non-reasoning'] },

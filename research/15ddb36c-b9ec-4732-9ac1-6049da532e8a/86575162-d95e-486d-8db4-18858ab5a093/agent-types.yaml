@@ -221,6 +221,19 @@ types:
       path: /models
       auth: bearer
       success_http: [200]
+      user_error_map:
+        401: Invalid xAI API key.
+        403: API key cannot list models; connection may still work via Responses API.
+      fallback_method: POST
+      fallback_path: /responses
+      fallback_body:
+        model: grok-4-1-fast-non-reasoning
+        input:
+          - role: user
+            content: ping
+        max_output_tokens: 1
+        store: false
+      note: Grok research uses POST /v1/responses; fall back when GET /models is unavailable for the key tier.
     statistics:
       adapter: local_ledger
       price_hint_usd_per_mtok:

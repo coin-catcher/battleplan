@@ -51,4 +51,41 @@ describe('agent-schema.json', () => {
     expect(validate(sample)).toBe(true);
     expect(validate.errors).toBeNull();
   });
+
+  it('validates a Grok research agent with Responses API options', () => {
+    const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+    const ajv = new Ajv2020({ allErrors: true, strict: false });
+    addFormats(ajv);
+    const validate = ajv.compile(schema);
+
+    const sample = {
+      agents: [
+        {
+          agent_id: 'agent-grok-1',
+          kind: 'research',
+          type: 'Grok',
+          name: 'Grok Research',
+          url: 'https://api.x.ai/v1',
+          api_key: 'xai-test',
+          options: {
+            system_prompt: 'Research assistant.',
+            use_reasoning: true,
+            use_tool_calls: true,
+            model: 'grok-4.7',
+            reasoning_effort: 'high',
+            prompt_cache_key: 'project-thread-1',
+            builtin_web_search: true,
+            builtin_x_search: false,
+            builtin_code_interpreter: false,
+            custom_functions_json: '[]',
+          },
+          created_at: '2026-10-09T00:00:00.000Z',
+          updated_at: '2026-10-09T00:00:00.000Z',
+        },
+      ],
+    };
+
+    expect(validate(sample)).toBe(true);
+    expect(validate.errors).toBeNull();
+  });
 });
