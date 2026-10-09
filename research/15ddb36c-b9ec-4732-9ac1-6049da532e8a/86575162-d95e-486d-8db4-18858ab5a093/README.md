@@ -36,7 +36,8 @@ Toolbox: vertical list of **100×100** icons + labels; last two slots are green 
 2. **Secrets in project_config** — API keys encrypted-at-rest is out of scope for v1 research; match existing plaintext PAT/key patterns (`github_pat`, `cursor_api_key`) but never log keys in renderer devtools or test-connection error messages.
 3. **Type registry** — One module (`agent-types.yaml` → runtime registry) drives dropdown icons, default names/URLs, option rows, and test/statistics adapters.
 4. **Do not break Cursor-first workflow** — Existing `local-engine.ts` launch paths keep working; Agent Library is additive until a later task wires research chat to non-Cursor agents.
-5. **Statistics honesty** — Show “live from API”, “estimated”, or “recorded locally” badges; use ∞ for LocalLLM tokens remaining; $0 cost for LocalLLM.
+5. **Legacy Cursor binding** — Until users add a library entry, `project.cursor_agent_id` appears in the toolbox as read-only **Primary Cursor Agent (legacy)** (`LEGACY_PRIMARY_CURSOR_AGENT_ID` in `agent-toolbox.ts`); consolidate into `agents[]` when ready.
+6. **Statistics honesty** — Show “live from API”, “estimated”, or “recorded locally” badges; use ∞ for LocalLLM tokens remaining; $0 cost for LocalLLM.
 
 ## UI/UX notes mapped to codebase
 
