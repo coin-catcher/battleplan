@@ -92,6 +92,22 @@ function registerRepositoryHandlers(): void {
       await repo().savePendingChanges(projectId as string, changes as import('../src/app/core/models').PendingChange[]);
       return { ok: true };
     },
+    'repo:listProjectAgents': (projectId) => repo().listProjectAgents(projectId as string),
+    'repo:saveProjectAgents': async (projectId, agents) => {
+      await repo().saveProjectAgents(
+        projectId as string,
+        agents as import('../src/app/core/models').ProjectAgent[],
+      );
+      return { ok: true };
+    },
+    'repo:getAgentUsageLedger': (projectId) => repo().getAgentUsageLedger(projectId as string),
+    'repo:saveAgentUsageLedger': async (projectId, ledger) => {
+      await repo().saveAgentUsageLedger(
+        projectId as string,
+        ledger as Record<string, import('../src/app/core/models').AgentUsageLedger>,
+      );
+      return { ok: true };
+    },
     'repo:listArtifacts': async (scope, ownerId) => enrichArtifacts(scope as 'project' | 'task', ownerId as string),
     'repo:saveArtifact': (artifact) => repo().saveArtifact(artifact as ChatArtifact),
     'config:read': () => repo().readAppConfig(),

@@ -1,8 +1,10 @@
 import type {
+  AgentUsageLedger,
   ChatArtifact,
   ChatMessage,
   PendingChange,
   Project,
+  ProjectAgent,
   ProjectTask,
   TaskCodeOutput,
   TaskResearchOutput,
@@ -23,6 +25,8 @@ export interface ProjectDocument {
   messages: ChatMessage[];
   artifacts: StoredArtifact[];
   pending_changes?: PendingChange[];
+  agents?: ProjectAgent[];
+  agent_usage_ledger?: Record<string, AgentUsageLedger>;
 }
 
 export interface TaskDocument {
