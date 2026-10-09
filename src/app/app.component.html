@@ -59,38 +59,42 @@
           <button type="button" (click)="zoomBy(1 / 1.15)" aria-label="Zoom out">−</button>
         </div>
         <nav class="agent-toolbox" aria-label="Agent library">
-          @for (agent of store.toolboxAgents(); track agent.agent_id) {
+          <div class="agent-toolbox-scroll">
+            @for (agent of store.toolboxAgents(); track agent.agent_id) {
+              <button
+                type="button"
+                class="agent-toolbox-entry"
+                [class.active]="isToolboxAgentSelected(agent.agent_id)"
+                [attr.aria-label]="'Open agent ' + agent.name"
+                (click)="openAgent(agent.agent_id)"
+              >
+                <span class="agent-toolbox-icon">
+                  <img [src]="agentLogoFor(agent.type)" [alt]="" aria-hidden="true" />
+                </span>
+                <span class="agent-toolbox-label">{{ agent.name }}</span>
+              </button>
+            }
+          </div>
+          <div class="agent-toolbox-add-row">
             <button
               type="button"
-              class="agent-toolbox-entry"
-              [class.active]="isToolboxAgentSelected(agent.agent_id)"
-              [attr.aria-label]="'Open agent ' + agent.name"
-              (click)="openAgent(agent.agent_id)"
+              class="agent-toolbox-entry agent-toolbox-add"
+              aria-label="Add code agent"
+              (click)="openAgentCreate('code')"
             >
-              <span class="agent-toolbox-icon">
-                <img [src]="agentLogoFor(agent.type)" [alt]="" />
-              </span>
-              <span class="agent-toolbox-label">{{ agent.name }}</span>
+              <span class="agent-toolbox-icon agent-toolbox-icon-add" aria-hidden="true">+</span>
+              <span class="agent-toolbox-label">Code Agent</span>
             </button>
-          }
-          <button
-            type="button"
-            class="agent-toolbox-entry agent-toolbox-add"
-            aria-label="Add code agent"
-            (click)="openAgentCreate('code')"
-          >
-            <span class="agent-toolbox-icon agent-toolbox-icon-add">+</span>
-            <span class="agent-toolbox-label">Code Agent</span>
-          </button>
-          <button
-            type="button"
-            class="agent-toolbox-entry agent-toolbox-add"
-            aria-label="Add research agent"
-            (click)="openAgentCreate('research')"
-          >
-            <span class="agent-toolbox-icon agent-toolbox-icon-add">+</span>
-            <span class="agent-toolbox-label">Research Agent</span>
-          </button>
+            <button
+              type="button"
+              class="agent-toolbox-entry agent-toolbox-add"
+              aria-label="Add research agent"
+              (click)="openAgentCreate('research')"
+            >
+              <span class="agent-toolbox-icon agent-toolbox-icon-add" aria-hidden="true">+</span>
+              <span class="agent-toolbox-label">Research Agent</span>
+            </button>
+          </div>
         </nav>
         <div #mapStage class="map-stage" aria-label="Project mindmap" (pointerdown)="onStagePointerDown($event)">
           <div class="map-scaler" [style.width.px]="map().width * zoom()" [style.height.px]="map().height * zoom()">
@@ -743,6 +747,20 @@
               </div>
               <div class="composer-actions agent-editor-actions">
                 <button type="button" class="ghost" [disabled]="store.busy()" (click)="testAgentConnection()">Test Connection</button>
+                @if (agentTestSuccess()) {
+                  <span
+                    class="agent-connection-indicator success"
+                    role="status"
+                    aria-live="polite"
+                    aria-label="Connection test succeeded"
+                  >✓</span>
+                } @else if (agentTestMessage() && !agentTestSuccess()) {
+                  <span
+                    class="agent-connection-indicator error"
+                    role="img"
+                    aria-label="Connection test failed"
+                  >✕</span>
+                }
                 @if (agentShowSaveButton()) {
                   <button type="button" class="primary" [disabled]="store.busy() || !agentName.trim()" (click)="saveAgentExplicit()">Save</button>
                 }
@@ -754,7 +772,7 @@
             @if (agentTestMessage() && !agentTestSuccess()) {
               <p class="banner error" role="alert">{{ agentTestMessage() }}</p>
             } @else if (agentTestMessage() && agentTestSuccess()) {
-              <p class="banner notice">{{ agentTestMessage() }}</p>
+              <p class="banner notice" role="status">{{ agentTestMessage() }}</p>
             }
             @if (agentLocalLlmBrowserNotice(); as llmNotice) {
               <p class="banner pending" role="status">{{ llmNotice }}</p>
@@ -912,13 +930,28 @@
               </div>
               <div class="composer-actions agent-editor-actions">
                 <button type="button" class="ghost" [disabled]="store.busy()" (click)="testAgentConnection()">Test Connection</button>
+                @if (agentTestSuccess()) {
+                  <span
+                    class="agent-connection-indicator success"
+                    role="status"
+                    aria-live="polite"
+                    aria-label="Connection test succeeded"
+                  >✓</span>
+                } @else if (agentTestMessage() && !agentTestSuccess()) {
+                  <span
+                    class="agent-connection-indicator error"
+                    role="img"
+                    aria-label="Connection test failed"
+                  >✕</span>
+                }
                 <button type="button" class="primary" [disabled]="store.busy() || !agentName.trim()" (click)="saveAgentExplicit()">Save</button>
+                <button type="button" class="ghost" (click)="cancelAgentCreate()">Cancel</button>
               </div>
             </header>
             @if (agentTestMessage() && !agentTestSuccess()) {
               <p class="banner error" role="alert">{{ agentTestMessage() }}</p>
             } @else if (agentTestMessage() && agentTestSuccess()) {
-              <p class="banner notice">{{ agentTestMessage() }}</p>
+              <p class="banner notice" role="status">{{ agentTestMessage() }}</p>
             }
             @if (agentLocalLlmBrowserNotice(); as llmNotice) {
               <p class="banner pending" role="status">{{ llmNotice }}</p>
@@ -926,7 +959,7 @@
             <label class="field">
               <span>Type</span>
               <div class="agent-type-field">
-                <img class="agent-type-logo" [src]="agentLogoFor(agentType)" [alt]="" />
+                <img class="agent-type-logo" [src]="agentLogoFor(agentType)" [alt]="" aria-hidden="true" />
                 <select
                   [ngModel]="agentType"
                   (ngModelChange)="onAgentTypeChange($event)"

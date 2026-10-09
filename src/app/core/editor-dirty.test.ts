@@ -153,6 +153,21 @@ describe('agentEditorDirty', () => {
     }, agent)).toBe(false);
   });
 
+  it('detects option value edits', () => {
+    const agent = savedAgent();
+    const options = { ...defaultOptionValues('OpenAI'), temperature: 0.5 };
+    expect(agentEditorDirty({
+      type: 'OpenAI',
+      name: 'OpenAI Research',
+      url: 'https://api.openai.com/v1',
+      api_key: '',
+      admin_api_key: '',
+      options,
+      apiKeyEdited: false,
+      adminApiKeyEdited: false,
+    }, agent)).toBe(true);
+  });
+
   it('detects name and api key edits', () => {
     const agent = savedAgent();
     expect(agentEditorDirty({

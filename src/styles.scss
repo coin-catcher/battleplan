@@ -7,6 +7,8 @@
   --status-abandoned: #111111;
   --danger: #c44b45;
   --sans: Helvetica, "Helvetica Neue", Arial, sans-serif;
+  --agent-toolbox-entry-height: 119px;
+  --agent-toolbox-entry-gap: 10px;
 }
 
 html[data-theme="harbor"],
@@ -33,6 +35,12 @@ html[data-theme="harbor"],
   --banner-error-ink: #7d241f;
   --banner-notice-bg: #e8f6ee;
   --banner-notice-ink: #1d5c38;
+  --agent-toolbox-add-bg: #2e7d32;
+  --agent-toolbox-add-ink: #ffffff;
+  --agent-connection-ok-bg: #1f6b3a;
+  --agent-connection-ok-ink: #e8f7ed;
+  --agent-connection-error-bg: #7a1f1f;
+  --agent-connection-error-ink: #ffe8e8;
 }
 
 html[data-theme="grove"] {
@@ -58,6 +66,12 @@ html[data-theme="grove"] {
   --banner-error-ink: #7d241f;
   --banner-notice-bg: #e5f5df;
   --banner-notice-ink: #1d4a22;
+  --agent-toolbox-add-bg: #3d7a2a;
+  --agent-toolbox-add-ink: #ffffff;
+  --agent-connection-ok-bg: #2f6b28;
+  --agent-connection-ok-ink: #e8f5e0;
+  --agent-connection-error-bg: #7a1f1f;
+  --agent-connection-error-ink: #ffe8e8;
 }
 
 html[data-theme="sunrise"] {
@@ -83,6 +97,12 @@ html[data-theme="sunrise"] {
   --banner-error-ink: #7d241f;
   --banner-notice-bg: #e8f6ee;
   --banner-notice-ink: #1d5c38;
+  --agent-toolbox-add-bg: #2e7d32;
+  --agent-toolbox-add-ink: #ffffff;
+  --agent-connection-ok-bg: #1f6b3a;
+  --agent-connection-ok-ink: #e8f7ed;
+  --agent-connection-error-bg: #8b2222;
+  --agent-connection-error-ink: #ffe8e8;
 }
 
 html[data-theme="dusk"] {
@@ -108,6 +128,12 @@ html[data-theme="dusk"] {
   --banner-error-ink: #ffd0cc;
   --banner-notice-bg: #1d3a2c;
   --banner-notice-ink: #c8f0d8;
+  --agent-toolbox-add-bg: #4caf50;
+  --agent-toolbox-add-ink: #0a1a0c;
+  --agent-connection-ok-bg: #2e7d46;
+  --agent-connection-ok-ink: #e8f7ed;
+  --agent-connection-error-bg: #9a3030;
+  --agent-connection-error-ink: #ffe8e8;
 }
 
 html[data-theme="glacier"] {
@@ -133,6 +159,12 @@ html[data-theme="glacier"] {
   --banner-error-ink: #7d241f;
   --banner-notice-bg: #e8f6ee;
   --banner-notice-ink: #1d5c38;
+  --agent-toolbox-add-bg: #2e7d32;
+  --agent-toolbox-add-ink: #ffffff;
+  --agent-connection-ok-bg: #1f6b3a;
+  --agent-connection-ok-ink: #e8f7ed;
+  --agent-connection-error-bg: #7a1f1f;
+  --agent-connection-error-ink: #ffe8e8;
 }
 
 * { box-sizing: border-box; }

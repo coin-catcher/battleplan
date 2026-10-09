@@ -58,7 +58,12 @@ function authHeaders(recipe: AgentTestConnectionRecipe, apiKey: string): Record<
   return headers;
 }
 
-function userMessage(recipe: AgentTestConnectionRecipe, status: number, bodyText: string): string {
+/** Map HTTP status and body to a single-line user-facing connection error (never includes secrets). */
+export function agentConnectionUserMessage(
+  recipe: AgentTestConnectionRecipe,
+  status: number,
+  bodyText: string,
+): string {
   const mapped = recipe.userErrorMap?.[status];
   if (mapped) return mapped;
   if (status === 0) return 'Could not reach the server. Check the URL and that the service is running.';
@@ -66,7 +71,14 @@ function userMessage(recipe: AgentTestConnectionRecipe, status: number, bodyText
   if (status === 403) return 'The API key lacks permission for this request.';
   if (status >= 500) return 'The provider returned a server error. Try again later.';
   const snippet = bodyText.replace(/\s+/g, ' ').trim().slice(0, 160);
+  if (/sk-[a-zA-Z0-9]{8,}/.test(snippet)) {
+    return snippet ? `Request failed (${status}).` : `Connection failed (HTTP ${status}).`;
+  }
   return snippet ? `Request failed (${status}): ${snippet}` : `Connection failed (HTTP ${status}).`;
+}
+
+function userMessage(recipe: AgentTestConnectionRecipe, status: number, bodyText: string): string {
+  return agentConnectionUserMessage(recipe, status, bodyText);
 }
 
 export function parseOpenAiModelIds(payload: unknown): string[] {

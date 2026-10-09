@@ -21,6 +21,15 @@ describe('effectiveLedgerMetrics', () => {
 });
 
 describe('recordAgentUsageEntry', () => {
+  it('resets period counters when the calendar month changes', () => {
+    const prior = recordAgentUsageEntry({}, 'a1', { tokens: 200, now: '2026-09-30T23:00:00.000Z' });
+    expect(prior.a1?.tokens_period).toBe(200);
+    const rolled = recordAgentUsageEntry(prior, 'a1', { tokens: 50, now: '2026-10-01T00:00:00.000Z' });
+    expect(rolled.a1?.calendar_month).toBe('2026-10');
+    expect(rolled.a1?.tokens_period).toBe(50);
+    expect(rolled.a1?.requests_period).toBe(1);
+  });
+
   it('increments request counters and rolls daily totals', () => {
     const first = recordAgentUsageEntry({}, 'a1', { tokens: 100, now: '2026-10-09T10:00:00.000Z' });
     expect(first.a1?.requests_today).toBe(1);

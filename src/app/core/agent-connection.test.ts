@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getAgentTypeDefinition } from './agent-types';
 import {
+  agentConnectionUserMessage,
   applyDynamicModelsToOptions,
   buildAgentTestConnectionRequest,
   joinAgentApiUrl,
@@ -20,6 +21,36 @@ const cursorAgent = (): ProjectAgent => ({
   url: 'https://api.cursor.com/v1',
   created_at: '2026-10-09T00:00:00.000Z',
   updated_at: '2026-10-09T00:00:00.000Z',
+});
+
+describe('agentConnectionUserMessage', () => {
+  it('maps generic HTTP failures', () => {
+    const recipe = { ...getAgentTypeDefinition('LocalLLM').testConnection, userErrorMap: undefined };
+    expect(agentConnectionUserMessage(recipe, 401, '')).toBe('Authentication failed. Check the API key.');
+    expect(agentConnectionUserMessage(recipe, 403, '')).toBe('The API key lacks permission for this request.');
+    expect(agentConnectionUserMessage(recipe, 503, '')).toBe('The provider returned a server error. Try again later.');
+    expect(agentConnectionUserMessage(recipe, 0, '')).toMatch(/Could not reach the server/);
+  });
+
+  it('prefers registry userErrorMap over generic messages', () => {
+    const recipe = getAgentTypeDefinition('OpenAI').testConnection;
+    expect(agentConnectionUserMessage(recipe, 401, '')).toMatch(/Invalid API key/i);
+  });
+
+  it('does not echo API key material in error snippets', () => {
+    const recipe = getAgentTypeDefinition('OpenAI').testConnection;
+    const message = agentConnectionUserMessage(recipe, 400, 'invalid key sk-abcdefghijklmnopqrstuvwxyz');
+    expect(message).not.toMatch(/sk-/);
+    expect(message).toContain('400');
+  });
+
+  it('uses recipe userErrorMap when present', () => {
+    const recipe = {
+      ...getAgentTypeDefinition('OpenAI').testConnection,
+      userErrorMap: { 429: 'Rate limited — wait and retry.' },
+    };
+    expect(agentConnectionUserMessage(recipe, 429, '')).toBe('Rate limited — wait and retry.');
+  });
 });
 
 describe('joinAgentApiUrl', () => {
