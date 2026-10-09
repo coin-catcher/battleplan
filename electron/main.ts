@@ -17,12 +17,11 @@ import {
   type GithubRelease,
   type GithubReleaseAsset,
 } from './desktop-release-update';
-import { testProjectAgentConnection } from '../src/app/core/agent-connection';
+import { runAgentConnectionTest } from '../src/app/core/agent-connection';
 import type {
   ChatArtifact,
   ChatMessage,
   Project,
-  ProjectAgent,
   ProjectTask,
   TaskCodeOutput,
   TaskResearchOutput,
@@ -172,9 +171,8 @@ function registerRepositoryHandlers(): void {
       );
       return { ok: true };
     },
-    'agent:testConnection': async (agent, globalCursorApiKey) => testProjectAgentConnection(
-      agent as ProjectAgent,
-      String(globalCursorApiKey ?? ''),
+    'agent:testConnection': (input) => runAgentConnectionTest(
+      input as import('../src/app/core/agent-connection').AgentConnectionInput,
       (url, init) => fetch(url, init),
     ),
   };

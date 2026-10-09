@@ -1,6 +1,9 @@
 import { Injectable, inject } from '@angular/core';
-import { testProjectAgentConnection, type AgentConnectionTestResult } from '../core/agent-connection';
-import type { ProjectAgent } from '../core/models';
+import {
+  runAgentConnectionTest,
+  type AgentConnectionInput,
+  type AgentConnectionResult,
+} from '../core/agent-connection';
 import { CursorKey } from './cursor-key.service';
 import { electronBridge } from './electron-bridge';
 
@@ -8,12 +11,14 @@ import { electronBridge } from './electron-bridge';
 export class AgentConnectionService {
   private readonly cursorKey = inject(CursorKey);
 
-  async testConnection(agent: ProjectAgent): Promise<AgentConnectionTestResult> {
-    const globalKey = this.cursorKey.value();
+  async testConnection(input: AgentConnectionInput): Promise<AgentConnectionResult> {
+    const apiKey = input.apiKey.trim()
+      || (input.type === 'Cursor Agent' ? this.cursorKey.value().trim() : '');
+    const payload: AgentConnectionInput = { ...input, apiKey };
     const bridge = electronBridge();
     if (bridge) {
-      return bridge.invoke<AgentConnectionTestResult>('agent:testConnection', agent, globalKey);
+      return bridge.invoke<AgentConnectionResult>('agent:testConnection', payload);
     }
-    return testProjectAgentConnection(agent, globalKey, (url, init) => fetch(url, init));
+    return runAgentConnectionTest(payload);
   }
 }

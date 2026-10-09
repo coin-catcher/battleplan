@@ -1,18 +1,30 @@
-import { getAgentTypeDefinition } from './agent-types';
 import { resolveAgentApiKey } from './agent-api-key';
-import type { AgentTestConnectionRecipe } from './agent-types';
-import type { ProjectAgent } from './models';
+import type { AgentType, ProjectAgent } from './models';
+import { getAgentTypeDefinition, type AgentTestConnectionRecipe, type AgentTypeDefinition } from './agent-types';
+
+export interface AgentConnectionInput {
+  type: AgentType;
+  url: string;
+  apiKey: string;
+}
+
+export interface AgentConnectionResult {
+  ok: boolean;
+  status?: number;
+  message: string;
+}
+
+export interface AgentTestConnectionRequest {
+  url: string;
+  method: 'GET' | 'POST';
+  headers: Record<string, string>;
+  body?: unknown;
+}
 
 export type AgentConnectionFetch = (
   input: string,
-  init?: { method?: string; headers?: Record<string, string>; body?: string },
-) => Promise<{ ok: boolean; status: number; statusText: string; text: () => Promise<string> }>;
-
-export interface AgentConnectionTestResult {
-  ok: boolean;
-  message: string;
-  httpStatus?: number;
-}
+  init?: RequestInit,
+) => Promise<Response>;
 
 export function joinAgentApiUrl(baseUrl: string, requestPath: string): string {
   const base = baseUrl.trim().replace(/\/+$/, '');
@@ -28,105 +40,81 @@ export function joinAgentApiUrl(baseUrl: string, requestPath: string): string {
   }
 }
 
-function buildAuthHeaders(
-  recipe: AgentTestConnectionRecipe,
-  apiKey: string,
-): Record<string, string> {
-  const headers: Record<string, string> = { ...(recipe.headers ?? {}), accept: 'application/json' };
-  switch (recipe.auth) {
-    case 'bearer':
-      if (apiKey) headers['authorization'] = `Bearer ${apiKey}`;
-      break;
-    case 'x-api-key':
-      if (apiKey) headers['x-api-key'] = apiKey;
-      break;
-    case 'basic': {
-      const password = recipe.basicPasswordEmpty ? '' : apiKey;
-      const username = recipe.basicPasswordEmpty ? apiKey : apiKey;
-      if (username || password) {
-        headers['authorization'] = `Basic ${btoa(`${username}:${password}`)}`;
-      }
-      break;
-    }
-    case 'query_key':
-    case 'none':
-      break;
-    default:
-      break;
+function encodeBasicAuth(username: string, password: string): string {
+  const credentials = `${username}:${password}`;
+  if (typeof globalThis.btoa === 'function') {
+    return globalThis.btoa(credentials);
   }
+  return Buffer.from(credentials, 'utf8').toString('base64');
+}
+
+function authHeaders(recipe: AgentTestConnectionRecipe, apiKey: string): Record<string, string> {
+  const headers: Record<string, string> = { ...(recipe.headers ?? {}), accept: 'application/json' };
+  if (recipe.auth === 'bearer') headers['Authorization'] = `Bearer ${apiKey}`;
+  if (recipe.auth === 'x-api-key') headers['x-api-key'] = apiKey;
   return headers;
 }
 
-function appendQueryKey(url: string, recipe: AgentTestConnectionRecipe, apiKey: string): string {
-  if (recipe.auth !== 'query_key' || !recipe.queryParam || !apiKey) return url;
-  const parsed = new URL(url);
-  parsed.searchParams.set(recipe.queryParam, apiKey);
-  return parsed.toString();
-}
-
-function humanizeConnectionFailure(
-  recipe: AgentTestConnectionRecipe,
-  status: number,
-  bodyText: string,
-): string {
+function userMessage(recipe: AgentTestConnectionRecipe, status: number, bodyText: string): string {
   const mapped = recipe.userErrorMap?.[status];
   if (mapped) return mapped;
   if (status === 401) return 'Authentication failed. Check the API key.';
   if (status === 403) return 'The API key lacks permission for this request.';
   if (status >= 500) return 'The provider returned a server error. Try again later.';
   const snippet = bodyText.replace(/\s+/g, ' ').trim().slice(0, 160);
-  return snippet ? `Request failed (${status}): ${snippet}` : `Request failed with status ${status}.`;
+  return snippet ? `Request failed (${status}): ${snippet}` : `Connection failed (HTTP ${status}).`;
 }
 
-async function attemptConnection(
-  agent: ProjectAgent,
-  recipe: AgentTestConnectionRecipe,
+/** Build HTTP request parameters for a registry test-connection recipe. */
+export function buildAgentTestConnectionRequest(
+  definition: AgentTypeDefinition,
   apiKey: string,
-  fetchFn: AgentConnectionFetch,
-  path: string,
-): Promise<AgentConnectionTestResult> {
-  const successCodes = recipe.successHttp ?? [200];
-  let url = joinAgentApiUrl(agent.url, path);
-  url = appendQueryKey(url, recipe, apiKey);
+  baseUrl?: string,
+): AgentTestConnectionRequest {
+  const recipe = definition.testConnection;
+  const root = baseUrl?.trim() || definition.defaultUrl;
+  const path = recipe.path.startsWith('/') ? recipe.path : `/${recipe.path}`;
+  const url = new URL(joinAgentApiUrl(root, path));
+  const headers: Record<string, string> = { ...(recipe.headers ?? {}), accept: 'application/json' };
 
-  const headers = buildAuthHeaders(recipe, apiKey);
-  if (recipe.method === 'POST' && recipe.body !== undefined) {
-    headers['content-type'] = 'application/json';
+  switch (recipe.auth) {
+    case 'bearer':
+      headers.Authorization = `Bearer ${apiKey}`;
+      break;
+    case 'x-api-key':
+      headers['x-api-key'] = apiKey;
+      break;
+    case 'query_key':
+      if (recipe.queryParam) url.searchParams.set(recipe.queryParam, apiKey);
+      break;
+    case 'basic': {
+      const password = recipe.basicPasswordEmpty ? '' : apiKey;
+      headers.Authorization = `Basic ${encodeBasicAuth(apiKey, password)}`;
+      break;
+    }
+    case 'none':
+      break;
+    default:
+      break;
   }
 
-  let response: Awaited<ReturnType<AgentConnectionFetch>>;
-  try {
-    response = await fetchFn(url, {
-      method: recipe.method,
-      headers,
-      body: recipe.method === 'POST' && recipe.body !== undefined ? JSON.stringify(recipe.body) : undefined,
-    });
-  } catch {
-    return { ok: false, message: 'Could not reach the provider. Check the URL and network.' };
-  }
-
-  const bodyText = await response.text();
-  if (successCodes.includes(response.status)) {
-    return { ok: true, message: 'Connection successful.', httpStatus: response.status };
-  }
   return {
-    ok: false,
-    message: humanizeConnectionFailure(recipe, response.status, bodyText),
-    httpStatus: response.status,
+    url: url.toString(),
+    method: recipe.method,
+    headers,
+    body: recipe.body,
   };
 }
 
-export async function testProjectAgentConnection(
-  agent: ProjectAgent,
-  globalCursorApiKey: string,
-  fetchFn: AgentConnectionFetch,
-): Promise<AgentConnectionTestResult> {
-  const definition = getAgentTypeDefinition(agent.type);
-  const recipe = definition.testConnection;
-  const apiKey = resolveAgentApiKey(agent, globalCursorApiKey);
-
-  if (!apiKey && recipe.auth !== 'none') {
-    if (agent.type === 'Cursor Agent') {
+export async function runAgentConnectionTest(
+  input: AgentConnectionInput,
+  fetchFn: AgentConnectionFetch = fetch,
+): Promise<AgentConnectionResult> {
+  const recipe = getAgentTypeDefinition(input.type).testConnection;
+  const successCodes = recipe.successHttp ?? [200];
+  const apiKey = input.apiKey.trim();
+  if (recipe.auth !== 'none' && !apiKey) {
+    if (input.type === 'Cursor Agent') {
       return {
         ok: false,
         message: 'Save a Cursor API key in the Cursor API key panel or on this agent.',
@@ -135,12 +123,69 @@ export async function testProjectAgentConnection(
     return { ok: false, message: 'Enter an API key before testing the connection.' };
   }
 
-  const primary = await attemptConnection(agent, recipe, apiKey, fetchFn, recipe.path);
-  if (primary.ok) return primary;
+  const attempt = async (
+    path: string,
+    method = recipe.method,
+    body: unknown = recipe.body,
+  ): Promise<AgentConnectionResult> => {
+    let requestUrl = joinAgentApiUrl(input.url, path);
+    const init: RequestInit = { method, headers: authHeaders(recipe, apiKey) };
+    if (recipe.auth === 'basic') {
+      const password = recipe.basicPasswordEmpty ? '' : apiKey;
+      init.headers = { ...init.headers, Authorization: `Basic ${encodeBasicAuth(apiKey, password)}` };
+    }
+    if (recipe.auth === 'query_key' && recipe.queryParam) {
+      const url = new URL(requestUrl);
+      url.searchParams.set(recipe.queryParam, apiKey);
+      requestUrl = url.toString();
+    }
+    if (method === 'POST' && body !== undefined) {
+      init.headers = { ...init.headers, 'Content-Type': 'application/json' };
+      init.body = JSON.stringify(body);
+    }
+    try {
+      const response = await fetchFn(requestUrl, init);
+      const bodyText = await response.text();
+      if (successCodes.includes(response.status)) {
+        return { ok: true, status: response.status, message: 'Connection successful.' };
+      }
+      return {
+        ok: false,
+        status: response.status,
+        message: userMessage(recipe, response.status, bodyText),
+      };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Network error';
+      return { ok: false, message: `Could not reach the server (${detail}).` };
+    }
+  };
 
-  const fallbackPath = recipe.fallbackPath ?? recipe.altPath;
-  if (!fallbackPath) return primary;
+  let result = await attempt(recipe.path);
+  if (!result.ok && recipe.fallbackPath) {
+    result = await attempt(
+      recipe.fallbackPath,
+      recipe.fallbackMethod ?? recipe.method,
+      recipe.fallbackBody ?? recipe.body,
+    );
+  }
+  if (!result.ok && recipe.altPath) {
+    result = await attempt(recipe.altPath);
+  }
+  return result;
+}
 
-  const fallback = await attemptConnection(agent, recipe, apiKey, fetchFn, fallbackPath);
-  return fallback.ok ? fallback : primary;
+/** Test connection for a saved agent record, resolving Cursor API key fallback. */
+export async function testProjectAgentConnection(
+  agent: ProjectAgent,
+  globalCursorApiKey: string,
+  fetchFn: AgentConnectionFetch = fetch,
+): Promise<AgentConnectionResult> {
+  return runAgentConnectionTest(
+    {
+      type: agent.type,
+      url: agent.url,
+      apiKey: resolveAgentApiKey(agent, globalCursorApiKey),
+    },
+    fetchFn,
+  );
 }

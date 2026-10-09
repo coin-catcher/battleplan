@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { joinAgentApiUrl, testProjectAgentConnection } from './agent-connection';
+import { getAgentTypeDefinition } from './agent-types';
+import { buildAgentTestConnectionRequest, joinAgentApiUrl, testProjectAgentConnection } from './agent-connection';
 import type { ProjectAgent } from './models';
 
 const cursorAgent = (): ProjectAgent => ({
@@ -19,13 +20,44 @@ describe('joinAgentApiUrl', () => {
   });
 });
 
+describe('buildAgentTestConnectionRequest', () => {
+  it('builds Gemini GET /models with key query param', () => {
+    const definition = getAgentTypeDefinition('Gemini');
+    const request = buildAgentTestConnectionRequest(definition, 'test-gemini-key');
+    expect(request.method).toBe('GET');
+    expect(request.url).toBe('https://generativelanguage.googleapis.com/v1beta/models?key=test-gemini-key');
+    expect(request.headers).toEqual({ accept: 'application/json' });
+  });
+
+  it('respects a custom base URL for Gemini', () => {
+    const definition = getAgentTypeDefinition('Gemini');
+    const request = buildAgentTestConnectionRequest(
+      definition,
+      'k',
+      'https://generativelanguage.googleapis.com/v1beta/',
+    );
+    expect(request.url).toBe('https://generativelanguage.googleapis.com/v1beta/models?key=k');
+  });
+
+  it('defines Grok fallback POST /responses for connection testing', () => {
+    const recipe = getAgentTypeDefinition('Grok').testConnection;
+    expect(recipe.fallbackPath).toBe('/responses');
+    expect(recipe.fallbackMethod).toBe('POST');
+    expect(recipe.fallbackBody).toMatchObject({
+      model: 'grok-4-1-fast-non-reasoning',
+      max_output_tokens: 1,
+    });
+  });
+});
+
 describe('testProjectAgentConnection (Cursor Agent)', () => {
   it('succeeds with Basic auth using global Cursor key', async () => {
     const calls: string[] = [];
-    const fetchFn = vi.fn(async (url: string, init?: { headers?: Record<string, string> }) => {
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
       calls.push(url);
-      expect(init?.headers?.['authorization']).toBe(`Basic ${btoa('cursor-key:')}`);
-      return { ok: true, status: 200, statusText: 'OK', text: async () => '{}' };
+      const headers = init?.headers as Record<string, string> | undefined;
+      expect(headers?.['Authorization']).toBe(`Basic ${btoa('cursor-key:')}`);
+      return new Response('{}', { status: 200 });
     });
     const result = await testProjectAgentConnection(cursorAgent(), 'cursor-key', fetchFn);
     expect(result.ok).toBe(true);
@@ -35,9 +67,9 @@ describe('testProjectAgentConnection (Cursor Agent)', () => {
   it('falls back to /v1/agents when /v1/me fails', async () => {
     const fetchFn = vi.fn(async (url: string) => {
       if (url.endsWith('/v1/me')) {
-        return { ok: false, status: 404, statusText: 'Not Found', text: async () => '' };
+        return new Response('', { status: 404 });
       }
-      return { ok: true, status: 200, statusText: 'OK', text: async () => '{"items":[]}' };
+      return new Response('{"items":[]}', { status: 200 });
     });
     const result = await testProjectAgentConnection(cursorAgent(), 'cursor-key', fetchFn);
     expect(result.ok).toBe(true);
