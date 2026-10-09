@@ -20,4 +20,14 @@ describe('buildAgentTestConnectionRequest', () => {
     );
     expect(request.url).toBe('https://generativelanguage.googleapis.com/v1beta/models?key=k');
   });
+
+  it('defines Grok fallback POST /responses for connection testing', () => {
+    const recipe = getAgentTypeDefinition('Grok').testConnection;
+    expect(recipe.fallbackPath).toBe('/responses');
+    expect(recipe.fallbackMethod).toBe('POST');
+    expect(recipe.fallbackBody).toMatchObject({
+      model: 'grok-4-1-fast-non-reasoning',
+      max_output_tokens: 1,
+    });
+  });
 });

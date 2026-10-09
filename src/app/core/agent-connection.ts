@@ -94,7 +94,11 @@ export async function runAgentConnectionTest(input: AgentConnectionInput): Promi
     return { ok: false, message: 'Enter an API key before testing the connection.' };
   }
 
-  const attempt = async (path: string, method = recipe.method): Promise<AgentConnectionResult> => {
+  const attempt = async (
+    path: string,
+    method = recipe.method,
+    body: unknown = recipe.body,
+  ): Promise<AgentConnectionResult> => {
     let requestUrl = joinUrl(input.url, path);
     const init: RequestInit = { method, headers: authHeaders(recipe, apiKey) };
     if (recipe.auth === 'basic') {
@@ -106,9 +110,9 @@ export async function runAgentConnectionTest(input: AgentConnectionInput): Promi
       url.searchParams.set(recipe.queryParam, apiKey);
       requestUrl = url.toString();
     }
-    if (method === 'POST' && recipe.body !== undefined) {
+    if (method === 'POST' && body !== undefined) {
       init.headers = { ...init.headers, 'Content-Type': 'application/json' };
-      init.body = JSON.stringify(recipe.body);
+      init.body = JSON.stringify(body);
     }
     try {
       const response = await fetch(requestUrl, init);
@@ -128,7 +132,11 @@ export async function runAgentConnectionTest(input: AgentConnectionInput): Promi
 
   let result = await attempt(recipe.path);
   if (!result.ok && recipe.fallbackPath) {
-    result = await attempt(recipe.fallbackPath);
+    result = await attempt(
+      recipe.fallbackPath,
+      recipe.fallbackMethod ?? recipe.method,
+      recipe.fallbackBody ?? recipe.body,
+    );
   }
   if (!result.ok && recipe.altPath) {
     result = await attempt(recipe.altPath);
