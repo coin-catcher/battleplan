@@ -187,7 +187,7 @@ export function buildAgentTestConnectionRequest(
       if (recipe.queryParam) url.searchParams.set(recipe.queryParam, apiKey);
       break;
     case 'google_service_account':
-      headers.Authorization = `Bearer ${apiKey}`;
+      headers['Authorization'] = `Bearer ${apiKey}`;
       break;
     case 'basic': {
       const password = recipe.basicPasswordEmpty ? '' : apiKey;

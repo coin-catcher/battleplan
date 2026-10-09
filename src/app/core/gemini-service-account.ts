@@ -17,6 +17,9 @@ export interface GoogleServiceAccountJson {
 
 const GEMINI_OAUTH_SCOPE = 'https://www.googleapis.com/auth/generative-language';
 
+/** Minimal fetch signature used for OAuth token exchange (matches AgentConnectionFetch). */
+export type GoogleOAuthFetch = (input: string, init?: RequestInit) => Promise<Response>;
+
 const REQUIRED_SERVICE_ACCOUNT_FIELDS: (keyof GoogleServiceAccountJson)[] = [
   'type',
   'project_id',
@@ -61,7 +64,24 @@ export function parseGoogleServiceAccountJson(raw: string): GoogleServiceAccount
   if (!String(record['private_key']).includes('BEGIN PRIVATE KEY')) {
     throw new Error('Service account JSON must include a PEM private_key.');
   }
-  return record as GoogleServiceAccountJson;
+  const credentials: GoogleServiceAccountJson = {
+    type: String(record['type']),
+    project_id: String(record['project_id']),
+    private_key_id: String(record['private_key_id']),
+    private_key: String(record['private_key']),
+    client_email: String(record['client_email']),
+    client_id: String(record['client_id']),
+    token_uri: String(record['token_uri']),
+  };
+  if (typeof record['auth_uri'] === 'string') credentials.auth_uri = record['auth_uri'];
+  if (typeof record['auth_provider_x509_cert_url'] === 'string') {
+    credentials.auth_provider_x509_cert_url = record['auth_provider_x509_cert_url'];
+  }
+  if (typeof record['client_x509_cert_url'] === 'string') {
+    credentials.client_x509_cert_url = record['client_x509_cert_url'];
+  }
+  if (typeof record['universe_domain'] === 'string') credentials.universe_domain = record['universe_domain'];
+  return credentials;
 }
 
 type TokenCacheEntry = { cacheKey: string; token: string; expiresAtMs: number };
@@ -78,7 +98,7 @@ export function clearGeminiAccessTokenCache(): void {
 
 export async function fetchGoogleAccessToken(
   credentials: GoogleServiceAccountJson,
-  fetchFn: typeof fetch = fetch,
+  fetchFn: GoogleOAuthFetch = fetch,
 ): Promise<string> {
   const cacheKey = cacheKeyFor(credentials);
   const now = Date.now();
@@ -135,7 +155,7 @@ export async function fetchGoogleAccessToken(
 
 export async function geminiAccessTokenFromCredentialsJson(
   credentialsJson: string,
-  fetchFn: typeof fetch = fetch,
+  fetchFn: GoogleOAuthFetch = fetch,
 ): Promise<string> {
   const credentials = parseGoogleServiceAccountJson(credentialsJson);
   return fetchGoogleAccessToken(credentials, fetchFn);
