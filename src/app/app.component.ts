@@ -36,6 +36,8 @@ import { ProjectPortability } from './data/project-portability.service';
 import {
   cardinalAnchor,
   layoutMindmap,
+  mindmapNodesInWorldRect,
+  normalizeWorldRect,
   pickCardinalEdge,
   pickNorthWestCorner,
   pointerToWorld,
@@ -43,6 +45,7 @@ import {
   type MindmapEdge,
   type MindmapNode,
   mindmapNodeAtPoint,
+  type WorldRect,
 } from './core/mindmap';
 import { linkKey, type MindmapLinkRef } from './core/link-relocation';
 import { MarkdownComponent } from 'ngx-markdown';
@@ -79,8 +82,11 @@ export class AppComponent implements OnInit {
   readonly editingNodeId = signal<string | null>(null);
   readonly editDraft = signal('');
   readonly mapDraggingNodeId = signal<string | null>(null);
+  readonly mapGroupSelection = signal<readonly string[]>([]);
+  readonly mapMarquee = signal<WorldRect | null>(null);
   readonly mapStage = viewChild<ElementRef<HTMLElement>>('mapStage');
   readonly chatTranscript = viewChild<ElementRef<HTMLElement>>('chatTranscript');
+  private mapGroupProjectId: string | undefined;
   private edgeHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private convertHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private edgeLongPressFired = false;
@@ -228,6 +234,13 @@ export class AppComponent implements OnInit {
         this.subprojectInitialPrompt = project?.initial_prompt ?? '';
       }
     });
+    effect(() => {
+      const projectId = this.store.project()?.project_id;
+      if (projectId === this.mapGroupProjectId) return;
+      this.mapGroupProjectId = projectId;
+      this.clearMapGroupSelection();
+    });
+
     effect(() => {
       const projectId = this.store.project()?.project_id;
       const stage = this.mapStage()?.nativeElement;
@@ -829,6 +842,37 @@ export class AppComponent implements OnInit {
       && selection.taskId === node.id;
   }
 
+  isMapGroupSelected(node: MindmapNode): boolean {
+    return this.mapGroupSelection().includes(node.id);
+  }
+
+  mapMarqueeStyle(rect: WorldRect): { left: string; top: string; width: string; height: string } {
+    return {
+      left: `${rect.left}px`,
+      top: `${rect.top}px`,
+      width: `${rect.right - rect.left}px`,
+      height: `${rect.bottom - rect.top}px`,
+    };
+  }
+
+  clearMapGroupSelection(): void {
+    this.mapGroupSelection.set([]);
+    this.mapMarquee.set(null);
+  }
+
+  private worldPointFromPointer(event: PointerEvent): { x: number; y: number } | null {
+    const stage = this.mapStage()?.nativeElement;
+    if (!stage) return null;
+    return pointerToWorld(
+      event.clientX,
+      event.clientY,
+      stage.getBoundingClientRect(),
+      stage.scrollLeft,
+      stage.scrollTop,
+      this.zoom(),
+    );
+  }
+
   private chatPanelScrollKey(): string | null {
     const selection = this.store.selection();
     const projectId = this.store.project()?.project_id;
@@ -1047,38 +1091,62 @@ export class AppComponent implements OnInit {
 
   onStagePointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-play-children, .map-link-handle, .map-link-hit, .zoom-controls')) return;
+    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-play-children, .map-link-handle, .map-link-hit, .zoom-controls, .agent-toolbox')) return;
     this.selectedMindmapLink.set(null);
     if (this.connectPanel()) {
       this.dismissConnectPanel();
       return;
     }
-    const stage = this.mapStage()?.nativeElement;
-    if (!stage) return;
+    const startWorld = this.worldPointFromPointer(event);
+    if (!startWorld) return;
     const startX = event.clientX;
     const startY = event.clientY;
-    const scrollLeft = stage.scrollLeft;
-    const scrollTop = stage.scrollTop;
+    let marqueeActive = false;
     const move = (ev: PointerEvent) => {
-      stage.scrollLeft = scrollLeft - (ev.clientX - startX);
-      stage.scrollTop = scrollTop - (ev.clientY - startY);
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (!marqueeActive && Math.hypot(dx, dy) < 4) return;
+      marqueeActive = true;
+      const currentWorld = this.worldPointFromPointer(ev);
+      if (!currentWorld) return;
+      this.mapMarquee.set(normalizeWorldRect(startWorld.x, startWorld.y, currentWorld.x, currentWorld.y));
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      if (marqueeActive) {
+        const box = this.mapMarquee();
+        if (box) {
+          this.mapGroupSelection.set(mindmapNodesInWorldRect(this.map().nodes, box));
+        }
+        this.mapMarquee.set(null);
+      } else {
+        this.clearMapGroupSelection();
+      }
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
   }
 
   onNodePointerDown(node: MindmapNode, event: PointerEvent): void {
     if (this.editingNodeId() === node.id) return;
     if ((event.target as HTMLElement).closest('.map-edge-arrow, .map-connect-panel, .map-play-children')) return;
     event.stopPropagation();
+    const group = this.mapGroupSelection();
+    const inGroup = group.includes(node.id);
+    if (group.length > 0 && !inGroup) {
+      this.clearMapGroupSelection();
+    }
+    const dragIds = inGroup && group.length > 0 ? [...group] : [node.id];
+    const origins = new Map<string, { x: number; y: number }>();
+    for (const id of dragIds) {
+      const layoutNode = this.map().nodes.find((item) => item.id === id);
+      if (layoutNode) origins.set(id, { x: layoutNode.x, y: layoutNode.y });
+    }
     const startX = event.clientX;
     const startY = event.clientY;
-    const originX = node.x;
-    const originY = node.y;
     let dragged = false;
     const move = (ev: PointerEvent) => {
       const dx = (ev.clientX - startX) / this.zoom();
@@ -1087,26 +1155,37 @@ export class AppComponent implements OnInit {
       dragged = true;
       this.mapDraggingNodeId.set(node.id);
       this.hoveredConnect.set(null);
-      this.dragPins.update((pins) => ({ ...pins, [node.id]: { x: originX + dx, y: originY + dy } }));
+      this.dragPins.update((pins) => {
+        const next = { ...pins };
+        for (const [id, origin] of origins) {
+          next[id] = { x: origin.x + dx, y: origin.y + dy };
+        }
+        return next;
+      });
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
       this.mapDraggingNodeId.set(null);
-      const pin = this.dragPins()[node.id];
-      if (dragged && pin) {
-        void this.store.placeNode(node.id, pin.x, pin.y);
-      } else if (!dragged) {
+      const pins = this.dragPins();
+      if (dragged) {
+        for (const id of dragIds) {
+          const pin = pins[id];
+          if (pin) void this.store.placeNode(id, pin.x, pin.y);
+        }
+      } else {
         this.selectMapNode(node);
       }
       this.dragPins.update((pins) => {
         const next = { ...pins };
-        delete next[node.id];
+        for (const id of dragIds) delete next[id];
         return next;
       });
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
   }
 
   selectMapNode(node: MindmapNode): void {
