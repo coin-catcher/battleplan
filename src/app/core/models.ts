@@ -126,7 +126,9 @@ export type Selection =
   | { kind: 'task'; taskId: string }
   | { kind: 'subproject'; taskId: string }
   | { kind: 'code'; taskId: string }
-  | { kind: 'research'; taskId: string };
+  | { kind: 'research'; taskId: string }
+  | { kind: 'agent'; agentId: string }
+  | { kind: 'agent-create'; role: 'research' | 'code' };
 
 export const AGENT_KINDS = ['research', 'code'] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];

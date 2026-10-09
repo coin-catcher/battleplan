@@ -1,10 +1,13 @@
 import { Injectable, inject } from '@angular/core';
 import type {
+  AgentOptionValue,
+  AgentType,
   ChatMessage,
   ConversationPage,
   OutputType,
   PendingChange,
   Project,
+  ProjectAgent,
   ProjectTask,
   TaskCodeOutput,
   TaskDraft,
@@ -19,7 +22,8 @@ import { LocalEngine } from '../data/local-engine';
 @Injectable({ providedIn: 'root' })
 export class BattleplanApi {
   private readonly keys = inject(CursorKey);
-  private readonly engine = new LocalEngine(createBattleplanRepository(), new BrowserCursor(() => this.keys.value()));
+  private readonly repository = createBattleplanRepository();
+  private readonly engine = new LocalEngine(this.repository, new BrowserCursor(() => this.keys.value()));
 
   listProjects(): Promise<Project[]> {
     return this.engine.listProjects();
@@ -187,4 +191,21 @@ export class BattleplanApi {
   releaseProjectChanges(projectId: string): Promise<ChatMessage> {
     return this.engine.releaseProjectChanges(projectId);
   }
+
+  listProjectAgents(projectId: string): Promise<ProjectAgent[]> {
+    return this.repository.listProjectAgents(projectId);
+  }
+
+  saveProjectAgents(projectId: string, agents: ProjectAgent[]): Promise<void> {
+    return this.repository.saveProjectAgents(projectId, agents);
+  }
 }
+
+export type AgentEditorSaveInput = {
+  type: AgentType;
+  name: string;
+  url: string;
+  api_key?: string;
+  apiKeyEdited: boolean;
+  options: Record<string, AgentOptionValue>;
+};
