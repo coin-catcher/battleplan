@@ -16,6 +16,7 @@ import {
   agentLogoPublicPath,
   agentOptionRows,
   agentTypesForKind,
+  applyAgentTypeChange,
   defaultOptionValues,
   getAgentTypeDefinition,
   isAgentOptionVisible,
@@ -1032,11 +1033,19 @@ export class AppComponent implements OnInit {
   }
 
   onAgentTypeChange(type: AgentType): void {
-    this.agentType = type;
-    const definition = getAgentTypeDefinition(type);
-    if (!this.agentNameTouched) this.agentName = definition.defaultName;
-    if (!this.agentUrlTouched) this.agentUrl = definition.defaultUrl;
-    this.agentOptions = defaultOptionValues(type);
+    const changed = applyAgentTypeChange({
+      previousType: this.agentType,
+      nextType: type,
+      name: this.agentName,
+      url: this.agentUrl,
+      options: this.agentOptions,
+      nameTouched: this.agentNameTouched,
+      urlTouched: this.agentUrlTouched,
+    });
+    this.agentType = changed.type;
+    this.agentName = changed.name;
+    this.agentUrl = changed.url;
+    this.agentOptions = changed.options;
   }
 
   onAgentNameInput(value: string): void {
