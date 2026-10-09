@@ -1,5 +1,6 @@
 import type { AgentKind, AgentOptionValue, AgentType } from './models';
 import { AGENT_TYPES } from './models';
+import { agentLogoAssetUrl } from './public-asset';
 
 export type AgentOptionControl = 'text' | 'textarea' | 'number' | 'checkbox' | 'select';
 
@@ -309,7 +310,7 @@ export function getAgentTypeDefinition(type: AgentType): AgentTypeDefinition {
 }
 
 export function agentLogoPublicPath(type: AgentType): string {
-  return `/assets/agents/${AGENT_TYPE_REGISTRY[type].logoAsset}`;
+  return agentLogoAssetUrl(AGENT_TYPE_REGISTRY[type].logoAsset);
 }
 
 export function agentOptionRows(type: AgentType): readonly AgentOptionDefinition[] {

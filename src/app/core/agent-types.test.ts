@@ -39,12 +39,12 @@ describe('agent-types registry', () => {
   });
 
   it('maps logo assets under public/assets/agents', () => {
-    expect(agentLogoPublicPath('Anthropic')).toBe('/assets/agents/anthropic.svg');
+    expect(agentLogoPublicPath('Anthropic')).toBe('assets/agents/anthropic.svg');
     expect(defaultOptionValues('Cursor Agent').default_mode).toBe('agent');
   });
 
   it('defines LocalLLM defaults and dynamic model option', () => {
-    expect(agentLogoPublicPath('LocalLLM')).toBe('/assets/agents/vllm.svg');
+    expect(agentLogoPublicPath('LocalLLM')).toBe('assets/agents/vllm.svg');
     const model = agentOptionRows('LocalLLM').find((row) => row.key === 'model');
     expect(model?.dynamic).toBe(true);
     expect(defaultOptionValues('LocalLLM').temperature).toBe(0.7);
@@ -116,7 +116,7 @@ describe('agent-types registry', () => {
       options: openAiOptions,
     });
 
-    expect(changed.logoPath).toBe('/assets/agents/anthropic.svg');
+    expect(changed.logoPath).toBe('assets/agents/anthropic.svg');
     expect(changed.name).toBe('Anthropic Research');
     expect(changed.url).toBe('https://api.anthropic.com');
     expect(changed.options.use_reasoning).toBe(true);
@@ -133,7 +133,7 @@ describe('Gemini agent type', () => {
     const definition = getAgentTypeDefinition('Gemini');
     expect(definition.defaultUrl).toBe('https://generativelanguage.googleapis.com/v1beta');
     expect(definition.defaultName).toBe('Gemini Research');
-    expect(agentLogoPublicPath('Gemini')).toBe('/assets/agents/googlegemini.svg');
+    expect(agentLogoPublicPath('Gemini')).toBe('assets/agents/googlegemini.svg');
     const model = agentModelOptionDefinition('Gemini');
     expect(model?.default).toBe('gemini-2.5-flash');
     expect(model?.choices).toEqual(['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash']);
@@ -167,7 +167,7 @@ describe('Gemini agent type', () => {
       url: 'https://api.openai.com/v1',
       options: { use_reasoning: true, use_tool_calls: true, model: 'gpt-4.1-mini' },
     });
-    expect(updated.logoPath).toBe('/assets/agents/googlegemini.svg');
+    expect(updated.logoPath).toBe('assets/agents/googlegemini.svg');
     expect(updated.name).toBe('Gemini Research');
     expect(updated.url).toBe('https://generativelanguage.googleapis.com/v1beta');
     expect(updated.options.model).toBe('gemini-2.5-flash');
@@ -198,7 +198,7 @@ describe('Grok (xAI) provider configuration', () => {
     expect(def.defaultName).toBe('Grok Research');
     expect(def.defaultUrl).toBe('https://api.x.ai/v1');
     expect(def.logoAsset).toBe('xai.svg');
-    expect(agentLogoPublicPath('Grok')).toBe('/assets/agents/xai.svg');
+    expect(agentLogoPublicPath('Grok')).toBe('assets/agents/xai.svg');
     expect(def.statistics.adapter).toBe('local_ledger');
     expect(def.statistics.priceHintUsdPerMtok).toEqual({ input: 2.0, output: 6.0, model: 'grok-4.7' });
     expect(def.testConnection.path).toBe('/models');
