@@ -170,9 +170,10 @@ export class AppComponent implements OnInit {
   private boundTaskFormId = '';
   private boundAgentFormId = '';
   private outputSignature = '';
-  private readonly chatTranscriptAutoScrolled = new Set<string>();
   private chatTranscriptScrollObserver: ResizeObserver | undefined;
   private chatTranscriptScrollTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastChatPanelScrollKey = '';
+  private chatScrollSignature = '';
   private readonly onMapWheelCapture = (event: WheelEvent): void => {
     this.onMapWheel(event);
   };
@@ -294,12 +295,21 @@ export class AppComponent implements OnInit {
 
     effect((onCleanup) => {
       const key = this.chatPanelScrollKey();
-      if (!key || this.store.editorLoading()) return;
-      if (this.chatTranscriptAutoScrolled.has(key)) return;
-      this.store.messages().length;
-      this.store.artifacts().length;
+      if (!key) {
+        this.lastChatPanelScrollKey = '';
+        this.chatScrollSignature = '';
+        return;
+      }
+      if (key !== this.lastChatPanelScrollKey) {
+        this.lastChatPanelScrollKey = key;
+        this.chatScrollSignature = '';
+      }
+      if (this.store.editorLoading()) return;
+      const signature = `${key}:${this.store.messages().length}:${this.store.artifacts().length}`;
+      if (signature === this.chatScrollSignature) return;
+      this.chatScrollSignature = signature;
       onCleanup(() => this.clearChatTranscriptInitialScroll());
-      requestAnimationFrame(() => this.armChatTranscriptInitialScroll(key));
+      queueMicrotask(() => this.scheduleChatTranscriptScrollToBottom());
     });
 
     effect(() => {
@@ -763,10 +773,14 @@ export class AppComponent implements OnInit {
     }
   }
 
-  private armChatTranscriptInitialScroll(key: string): void {
-    if (this.chatTranscriptAutoScrolled.has(key)) return;
+  private scheduleChatTranscriptScrollToBottom(attempt = 0): void {
     const element = this.chatTranscript()?.nativeElement;
-    if (!element) return;
+    if (!element) {
+      if (attempt < 30) {
+        requestAnimationFrame(() => this.scheduleChatTranscriptScrollToBottom(attempt + 1));
+      }
+      return;
+    }
     this.clearChatTranscriptInitialScroll();
     const scrollToBottom = (): void => {
       element.scrollTop = element.scrollHeight;
@@ -777,9 +791,8 @@ export class AppComponent implements OnInit {
     this.chatTranscriptScrollObserver.observe(element);
     this.chatTranscriptScrollTimer = setTimeout(() => {
       scrollToBottom();
-      this.chatTranscriptAutoScrolled.add(key);
       this.clearChatTranscriptInitialScroll();
-    }, 1500);
+    }, 3000);
   }
 
   timeline(): Array<
