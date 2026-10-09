@@ -144,7 +144,12 @@ export const AGENT_TYPE_REGISTRY: Record<AgentType, AgentTypeDefinition> = {
       successHttp: [200],
       userErrorMap: { 401: 'Invalid Anthropic API key.', 403: 'Key valid but model access denied.' },
     },
-    statistics: { adapter: 'anthropic_admin', requiresSeparateAdminKey: true },
+    statistics: {
+      adapter: 'anthropic_admin',
+      requiresSeparateAdminKey: true,
+      adminKeyHint:
+        'Messages API key (sk-ant-api...) is not the same as Admin API key (sk-ant-admin...) for usage and cost reports.',
+    },
     specificOptions: [
       {
         key: 'model',
@@ -278,4 +283,48 @@ export function isAgentOptionVisible(option: AgentOptionDefinition, options: Rec
 /** Merge registry defaults with saved options; saved values win. */
 export function mergeAgentOptions(type: AgentType, saved: Record<string, AgentOptionValue> | undefined): Record<string, AgentOptionValue> {
   return { ...defaultOptionValues(type), ...(saved ?? {}) };
+}
+
+const AGENT_COMMON_OPTION_KEYS = new Set(AGENT_COMMON_OPTIONS.map((row) => row.key));
+
+export interface AgentTypeChangeInput {
+  previousType: AgentType;
+  nextType: AgentType;
+  name: string;
+  url: string;
+  options: Record<string, AgentOptionValue>;
+  /** When false, Name resets to the new type default. */
+  nameTouched?: boolean;
+  /** When false, URL resets to the new type default. */
+  urlTouched?: boolean;
+}
+
+export interface AgentTypeChangeResult {
+  type: AgentType;
+  name: string;
+  url: string;
+  options: Record<string, AgentOptionValue>;
+  logoPath: string;
+}
+
+/** Apply registry defaults when the user picks a different agent Type in the editor. */
+export function applyAgentTypeChange(input: AgentTypeChangeInput): AgentTypeChangeResult {
+  const def = getAgentTypeDefinition(input.nextType);
+  const nextDefaults = defaultOptionValues(input.nextType);
+  const nextKeys = new Set(agentOptionRows(input.nextType).map((row) => row.key));
+
+  const preserved: Record<string, AgentOptionValue> = {};
+  for (const [key, value] of Object.entries(input.options)) {
+    if (AGENT_COMMON_OPTION_KEYS.has(key) && nextKeys.has(key)) {
+      preserved[key] = value;
+    }
+  }
+
+  return {
+    type: input.nextType,
+    name: input.nameTouched ? input.name : def.defaultName,
+    url: input.urlTouched ? input.url : def.defaultUrl,
+    options: { ...nextDefaults, ...preserved },
+    logoPath: agentLogoPublicPath(input.nextType),
+  };
 }
