@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { agentBranchPolicyLines, branchNamesFromRun, pickTaskAgentBranch } from './agent-branch';
+import {
+  agentBranchPolicyLines,
+  branchNamesFromRun,
+  mergeConflictRecoveryPrompt,
+  pickTaskAgentBranch,
+} from './agent-branch';
 import type { CursorRun } from '../data/cursor-browser';
 
 describe('branchNamesFromRun', () => {
@@ -56,5 +61,15 @@ describe('agentBranchPolicyLines', () => {
     const lines = agentBranchPolicyLines({ baseBranch: 'develop', agentBranch: 'cursor/task-1' });
     expect(lines.join('\n')).toContain('Do not create, update, or merge pull requests');
     expect(lines.join('\n')).toContain('cursor/task-1');
+  });
+});
+
+describe('mergeConflictRecoveryPrompt', () => {
+  it('instructs the agent to merge develop and resolve conflicts', () => {
+    const text = mergeConflictRecoveryPrompt({ baseBranch: 'develop', agentBranch: 'cursor/task-1' });
+    expect(text).toContain('merge conflicts');
+    expect(text).toContain('develop');
+    expect(text).toContain('cursor/task-1');
+    expect(text).toContain('summarize which files conflicted');
   });
 });

@@ -7,16 +7,6 @@ export type TaskTransitionTrigger =
   | 'agent_finished'
   | 'approve_merge';
 
-/** Statuses a user may pick manually in the UI (same as legacy guided map). */
-export const MANUAL_GUIDED_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-  TODO: ['DOING', 'BLOCKED', 'ABANDONED'],
-  DOING: ['REVIEW', 'TODO', 'DONE', 'BLOCKED', 'ABANDONED'],
-  REVIEW: ['DOING', 'DONE', 'BLOCKED', 'ABANDONED'],
-  BLOCKED: ['TODO', 'DOING', 'ABANDONED'],
-  DONE: [],
-  ABANDONED: [],
-};
-
 const AUTOMATIC_TRANSITIONS: Partial<Record<TaskStatus, Partial<Record<TaskStatus, TaskTransitionTrigger[]>>>> = {
   TODO: { DOING: ['execute_or_send'] },
   DOING: { REVIEW: ['agent_finished'] },
@@ -28,14 +18,7 @@ const AUTOMATIC_TRANSITIONS: Partial<Record<TaskStatus, Partial<Record<TaskStatu
 
 export function assertTaskTransition(from: TaskStatus, to: TaskStatus, trigger: TaskTransitionTrigger): void {
   if (from === to) return;
-  if (trigger === 'manual') {
-    if (!MANUAL_GUIDED_TRANSITIONS[from].includes(to)) {
-      throw new Error(
-        `Cannot move a task from ${from} to ${to}. Expected one of: ${MANUAL_GUIDED_TRANSITIONS[from].join(', ') || 'a manual change'}.`,
-      );
-    }
-    return;
-  }
+  if (trigger === 'manual') return;
   const allowed = AUTOMATIC_TRANSITIONS[from]?.[to];
   if (!allowed?.includes(trigger)) {
     throw new Error(`Cannot move a task from ${from} to ${to} via ${trigger}.`);

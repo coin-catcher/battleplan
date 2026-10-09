@@ -58,6 +58,44 @@
           <button type="button" (click)="zoomBy(1.15)" aria-label="Zoom in">+</button>
           <button type="button" (click)="zoomBy(1 / 1.15)" aria-label="Zoom out">−</button>
         </div>
+        <nav class="agent-toolbox" aria-label="Agent library">
+          <div class="agent-toolbox-scroll">
+            @for (agent of store.toolboxAgents(); track agent.agent_id) {
+              <button
+                type="button"
+                class="agent-toolbox-entry"
+                [class.active]="isToolboxAgentSelected(agent.agent_id)"
+                [attr.aria-label]="'Open agent ' + agent.name"
+                (click)="openAgent(agent.agent_id)"
+              >
+                <span class="agent-toolbox-icon">
+                  <img [src]="agentLogoFor(agent.type)" [alt]="" aria-hidden="true" />
+                </span>
+                <span class="agent-toolbox-label">{{ agent.name }}</span>
+              </button>
+            }
+          </div>
+          <div class="agent-toolbox-add-row">
+            <button
+              type="button"
+              class="agent-toolbox-entry agent-toolbox-add"
+              aria-label="Add code agent"
+              (click)="openAgentCreate('code')"
+            >
+              <span class="agent-toolbox-icon agent-toolbox-icon-add" aria-hidden="true">+</span>
+              <span class="agent-toolbox-label">Code Agent</span>
+            </button>
+            <button
+              type="button"
+              class="agent-toolbox-entry agent-toolbox-add"
+              aria-label="Add research agent"
+              (click)="openAgentCreate('research')"
+            >
+              <span class="agent-toolbox-icon agent-toolbox-icon-add" aria-hidden="true">+</span>
+              <span class="agent-toolbox-label">Research Agent</span>
+            </button>
+          </div>
+        </nav>
         <div #mapStage class="map-stage" aria-label="Project mindmap" (pointerdown)="onStagePointerDown($event)">
           <div class="map-scaler" [style.width.px]="map().width * zoom()" [style.height.px]="map().height * zoom()">
             <div class="map-canvas" [style.width.px]="map().width" [style.height.px]="map().height" [style.transform]="'scale(' + zoom() + ')'">
@@ -358,6 +396,24 @@
                   <span>GitHub personal access token</span>
                   <input type="password" autocomplete="off" [(ngModel)]="projectGithubPat" name="projectGithubPat" placeholder="ghp_…" (blur)="onEditorFieldBlur()" />
                 </label>
+                <label class="field">
+                  <span>Default research agent</span>
+                  <select [(ngModel)]="defaultResearchAgentId" name="defaultResearchAgentId" (change)="onEditorFieldAutoSave()">
+                    <option value="">None</option>
+                    @for (agent of libraryAgents('research'); track agent.agent_id) {
+                      <option [value]="agent.agent_id">{{ agent.name }}</option>
+                    }
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Default code agent</span>
+                  <select [(ngModel)]="defaultCodeAgentId" name="defaultCodeAgentId" (change)="onEditorFieldAutoSave()">
+                    <option value="">None</option>
+                    @for (agent of libraryAgents('code'); track agent.agent_id) {
+                      <option [value]="agent.agent_id">{{ agent.name }}</option>
+                    }
+                  </select>
+                </label>
               </div>
               <p class="pending">Task agents branch from this base. Approve and merge creates and merges PRs into it using the token above.</p>
               <details class="editor-disclosure">
@@ -459,6 +515,28 @@
                     }
                   </select>
                 </label>
+                @if (task.output_type === 'research') {
+                  <label class="field">
+                    <span>Research agent</span>
+                    <select [(ngModel)]="taskResearchAgentId" [name]="'taskResearchAgent-' + task.task_id" (change)="onEditorFieldAutoSave()">
+                      <option value="">Project default</option>
+                      @for (agent of libraryAgents('research'); track agent.agent_id) {
+                        <option [value]="agent.agent_id">{{ agent.name }}</option>
+                      }
+                    </select>
+                  </label>
+                }
+                @if (task.output_type === 'code') {
+                  <label class="field">
+                    <span>Code agent</span>
+                    <select [(ngModel)]="taskCodeAgentId" [name]="'taskCodeAgent-' + task.task_id" (change)="onEditorFieldAutoSave()">
+                      <option value="">Project default</option>
+                      @for (agent of libraryAgents('code'); track agent.agent_id) {
+                        <option [value]="agent.agent_id">{{ agent.name }}</option>
+                      }
+                    </select>
+                  </label>
+                }
               </div>
               <details class="editor-disclosure">
                 <summary>Data and Rules</summary>
@@ -689,6 +767,343 @@
               (click)="store.saveResearchOutput({ repo: researchRepo, branch: researchBranch, pr_message: researchMessage, pr_link: researchLink, path: researchPath })"
             >Save research output</button>
           </section>
+        }
+      }
+      @case ('agent') {
+        @if (store.selectedAgent(); as agent) {
+          <section class="panel agent-editor">
+            <header class="panel-head agent-editor-head">
+              <div class="agent-editor-title">
+                <img class="agent-editor-logo" [src]="agentLogoFor(agentType)" [alt]="agentType" />
+                <div>
+                  <p class="eyebrow">Agent</p>
+                  <h2>{{ agentEditorHeaderName() }}</h2>
+                </div>
+              </div>
+              <div class="composer-actions agent-editor-actions">
+                <button type="button" class="ghost" [disabled]="store.busy()" (click)="testAgentConnection()">Test Connection</button>
+                @if (agentTestSuccess()) {
+                  <span
+                    class="agent-connection-indicator success"
+                    role="status"
+                    aria-live="polite"
+                    aria-label="Connection test succeeded"
+                  >✓</span>
+                } @else if (agentTestMessage() && !agentTestSuccess()) {
+                  <span
+                    class="agent-connection-indicator error"
+                    role="img"
+                    aria-label="Connection test failed"
+                  >✕</span>
+                }
+                @if (agentShowSaveButton()) {
+                  <button type="button" class="primary" [disabled]="store.busy() || !agentName.trim()" (click)="saveAgentExplicit()">Save</button>
+                }
+                @if (agentShowDeleteButton()) {
+                  <button type="button" class="danger" [disabled]="store.busy()" (click)="deleteSelectedAgent()">Delete</button>
+                }
+              </div>
+            </header>
+            @if (agentTestMessage() && !agentTestSuccess()) {
+              <p class="banner error" role="alert">{{ agentTestMessage() }}</p>
+            } @else if (agentTestMessage() && agentTestSuccess()) {
+              <p class="banner notice" role="status">{{ agentTestMessage() }}</p>
+            }
+            @if (agentLocalLlmBrowserNotice(); as llmNotice) {
+              <p class="banner pending" role="status">{{ llmNotice }}</p>
+            }
+            <label class="field">
+              <span>Type</span>
+              <div class="agent-type-field">
+                <img class="agent-type-logo" [src]="agentLogoFor(agentType)" [alt]="" />
+                <select
+                  [ngModel]="agentType"
+                  (ngModelChange)="onAgentTypeChange($event)"
+                  [name]="'agentType-' + agent.agent_id"
+                >
+                  @for (type of agentTypesForSelection(); track type) {
+                    <option [ngValue]="type">{{ type }}</option>
+                  }
+                </select>
+              </div>
+            </label>
+            <label class="field">
+              <span>Name</span>
+              <input
+                [ngModel]="agentName"
+                (ngModelChange)="onAgentNameInput($event)"
+                [name]="'agentName-' + agent.agent_id"
+                (blur)="onEditorFieldBlur()"
+              />
+            </label>
+            <label class="field">
+              <span>URL</span>
+              <input
+                [ngModel]="agentUrl"
+                (ngModelChange)="onAgentUrlInput($event)"
+                [name]="'agentUrl-' + agent.agent_id"
+                (blur)="onEditorFieldBlur()"
+              />
+            </label>
+            <label class="field">
+              <span>API key</span>
+              <input
+                type="password"
+                autocomplete="off"
+                [value]="agentApiKeyInputValue()"
+                (input)="onAgentApiKeyInput($any($event.target).value)"
+                (focus)="onAgentApiKeyFocus()"
+                (blur)="onAgentApiKeyBlur()"
+                [name]="'agentApiKey-' + agent.agent_id"
+                placeholder="Optional for Cursor Agent (uses global key)"
+              />
+            </label>
+            @if (agentType === 'OpenAI') {
+              <label class="field">
+                <span>Organization Admin API key (optional)</span>
+                <input
+                  type="password"
+                  autocomplete="off"
+                  [value]="agentAdminApiKeyInputValue()"
+                  (input)="onAgentAdminApiKeyInput($any($event.target).value)"
+                  (focus)="onAgentAdminApiKeyFocus()"
+                  (blur)="onAgentAdminApiKeyBlur()"
+                  [name]="'agentAdminApiKey-' + agent.agent_id"
+                  placeholder="For usage statistics only — not used for chat"
+                />
+                <span class="agent-option-help">Separate from the project sk- key. Required for live OpenAI usage and cost metrics; tokens remaining are not available via standard API keys.</span>
+              </label>
+            }
+            <div class="agent-options">
+              <h3>Agent Options</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Option Name</th>
+                    <th scope="col">Option Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of visibleAgentOptionRows(); track row.key) {
+                    <tr>
+                      <td>
+                        {{ row.label }}
+                        @if (row.help) {
+                          <span class="agent-option-help">{{ row.help }}</span>
+                        }
+                      </td>
+                      <td>
+                        @switch (row.control) {
+                          @case ('checkbox') {
+                            <input
+                              type="checkbox"
+                              [checked]="!!agentOptions[row.key]"
+                              (change)="setAgentOption(row.key, $any($event.target).checked)"
+                              (blur)="onEditorFieldBlur()"
+                            />
+                          }
+                          @case ('textarea') {
+                            <textarea
+                              rows="3"
+                              [ngModel]="agentOptions[row.key]"
+                              (ngModelChange)="setAgentOption(row.key, $event)"
+                              [name]="'agentOpt-' + agent.agent_id + '-' + row.key"
+                              (blur)="onEditorFieldBlur()"
+                            ></textarea>
+                          }
+                          @case ('number') {
+                            <input
+                              type="number"
+                              [ngModel]="agentOptions[row.key]"
+                              (ngModelChange)="setAgentOption(row.key, $event)"
+                              [name]="'agentOpt-' + agent.agent_id + '-' + row.key"
+                              (blur)="onEditorFieldBlur()"
+                            />
+                          }
+                          @case ('select') {
+                            <select
+                              [ngModel]="agentOptions[row.key]"
+                              (ngModelChange)="setAgentOption(row.key, $event)"
+                              [name]="'agentOpt-' + agent.agent_id + '-' + row.key"
+                              (blur)="onEditorFieldBlur()"
+                            >
+                              @for (choice of agentSelectChoices(row); track choice) {
+                                <option [ngValue]="choice">{{ choice }}</option>
+                              }
+                            </select>
+                          }
+                          @default {
+                            <input
+                              [ngModel]="agentOptions[row.key]"
+                              (ngModelChange)="setAgentOption(row.key, $event)"
+                              [name]="'agentOpt-' + agent.agent_id + '-' + row.key"
+                              (blur)="onEditorFieldBlur()"
+                            />
+                          }
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+            <app-agent-stats [agent]="agentStatsPreview()" />
+          </section>
+        }
+      }
+      @case ('agent-create') {
+        @if (store.selection(); as selection) {
+          @if (selection.kind === 'agent-create') {
+          <section class="panel agent-editor">
+            <header class="panel-head agent-editor-head">
+              <div class="agent-editor-title">
+                <img class="agent-editor-logo" [src]="agentLogoFor(agentType)" [alt]="agentType" />
+                <div>
+                  <p class="eyebrow">New {{ selection.role }} agent</p>
+                  <h2>{{ agentEditorHeaderName() }}</h2>
+                </div>
+              </div>
+              <div class="composer-actions agent-editor-actions">
+                <button type="button" class="ghost" [disabled]="store.busy()" (click)="testAgentConnection()">Test Connection</button>
+                @if (agentTestSuccess()) {
+                  <span
+                    class="agent-connection-indicator success"
+                    role="status"
+                    aria-live="polite"
+                    aria-label="Connection test succeeded"
+                  >✓</span>
+                } @else if (agentTestMessage() && !agentTestSuccess()) {
+                  <span
+                    class="agent-connection-indicator error"
+                    role="img"
+                    aria-label="Connection test failed"
+                  >✕</span>
+                }
+                <button type="button" class="primary" [disabled]="store.busy() || !agentName.trim()" (click)="saveAgentExplicit()">Save</button>
+                <button type="button" class="ghost" (click)="cancelAgentCreate()">Cancel</button>
+              </div>
+            </header>
+            @if (agentTestMessage() && !agentTestSuccess()) {
+              <p class="banner error" role="alert">{{ agentTestMessage() }}</p>
+            } @else if (agentTestMessage() && agentTestSuccess()) {
+              <p class="banner notice" role="status">{{ agentTestMessage() }}</p>
+            }
+            @if (agentLocalLlmBrowserNotice(); as llmNotice) {
+              <p class="banner pending" role="status">{{ llmNotice }}</p>
+            }
+            <label class="field">
+              <span>Type</span>
+              <div class="agent-type-field">
+                <img class="agent-type-logo" [src]="agentLogoFor(agentType)" [alt]="" aria-hidden="true" />
+                <select
+                  [ngModel]="agentType"
+                  (ngModelChange)="onAgentTypeChange($event)"
+                  name="agentCreateType"
+                >
+                  @for (type of agentTypesForSelection(); track type) {
+                    <option [ngValue]="type">{{ type }}</option>
+                  }
+                </select>
+              </div>
+            </label>
+            <label class="field">
+              <span>Name</span>
+              <input [ngModel]="agentName" (ngModelChange)="onAgentNameInput($event)" name="agentCreateName" />
+            </label>
+            <label class="field">
+              <span>URL</span>
+              <input [ngModel]="agentUrl" (ngModelChange)="onAgentUrlInput($event)" name="agentCreateUrl" />
+            </label>
+            <label class="field">
+              <span>API key</span>
+              <input
+                type="password"
+                autocomplete="off"
+                [ngModel]="agentApiKey"
+                (ngModelChange)="onAgentApiKeyInput($event)"
+                name="agentCreateApiKey"
+              />
+            </label>
+            @if (agentType === 'OpenAI') {
+              <label class="field">
+                <span>Organization Admin API key (optional)</span>
+                <input
+                  type="password"
+                  autocomplete="off"
+                  [ngModel]="agentAdminApiKey"
+                  (ngModelChange)="onAgentAdminApiKeyInput($event)"
+                  name="agentCreateAdminApiKey"
+                  placeholder="For usage statistics only — not used for chat"
+                />
+                <span class="agent-option-help">Separate from the project sk- key. Required for live OpenAI usage and cost metrics; tokens remaining are not available via standard API keys.</span>
+              </label>
+            }
+            <div class="agent-options">
+              <h3>Agent Options</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Option Name</th>
+                    <th scope="col">Option Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of visibleAgentOptionRows(); track row.key) {
+                    <tr>
+                      <td>{{ row.label }}</td>
+                      <td>
+                        @switch (row.control) {
+                          @case ('checkbox') {
+                            <input
+                              type="checkbox"
+                              [checked]="!!agentOptions[row.key]"
+                              (change)="setAgentOption(row.key, $any($event.target).checked)"
+                            />
+                          }
+                          @case ('textarea') {
+                            <textarea
+                              rows="3"
+                              [ngModel]="agentOptions[row.key]"
+                              (ngModelChange)="setAgentOption(row.key, $event)"
+                              [name]="'agentCreateOpt-' + row.key"
+                            ></textarea>
+                          }
+                          @case ('number') {
+                            <input
+                              type="number"
+                              [ngModel]="agentOptions[row.key]"
+                              (ngModelChange)="setAgentOption(row.key, $event)"
+                              [name]="'agentCreateOpt-' + row.key"
+                            />
+                          }
+                          @case ('select') {
+                            <select
+                              [ngModel]="agentOptions[row.key]"
+                              (ngModelChange)="setAgentOption(row.key, $event)"
+                              [name]="'agentCreateOpt-' + row.key"
+                            >
+                              @for (choice of agentSelectChoices(row); track choice) {
+                                <option [ngValue]="choice">{{ choice }}</option>
+                              }
+                            </select>
+                          }
+                          @default {
+                            <input
+                              [ngModel]="agentOptions[row.key]"
+                              (ngModelChange)="setAgentOption(row.key, $event)"
+                              [name]="'agentCreateOpt-' + row.key"
+                            />
+                          }
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+            <app-agent-stats [agent]="agentStatsPreview()" />
+          </section>
+          }
         }
       }
       @default {

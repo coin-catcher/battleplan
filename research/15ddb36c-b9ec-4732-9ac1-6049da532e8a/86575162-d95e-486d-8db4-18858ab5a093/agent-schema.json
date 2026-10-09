@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://battleplan.local/schemas/project-agents.v1.json",
+  "title": "BattlePlan Project Agents (project_config.json extensions)",
+  "description": "Optional top-level fields on ProjectDocument alongside project, messages, artifacts.",
+  "type": "object",
+  "properties": {
+    "agents": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ProjectAgent" },
+      "default": []
+    },
+    "agent_usage_ledger": {
+      "type": "object",
+      "description": "Rolling counters when provider has no billing API (LocalLLM, some keys).",
+      "additionalProperties": { "$ref": "#/$defs/AgentUsageLedger" }
+    }
+  },
+  "$defs": {
+    "AgentKind": {
+      "type": "string",
+      "enum": ["research", "code"]
+    },
+    "AgentType": {
+      "type": "string",
+      "enum": ["OpenAI", "Anthropic", "Gemini", "Grok", "Cursor Agent", "LocalLLM"]
+    },
+    "AgentOptionValue": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "number" },
+        { "type": "boolean" }
+      ]
+    },
+    "ProjectAgent": {
+      "type": "object",
+      "required": ["agent_id", "kind", "type", "name", "url", "created_at", "updated_at"],
+      "properties": {
+        "agent_id": { "type": "string", "minLength": 1 },
+        "kind": { "$ref": "#/$defs/AgentKind" },
+        "type": { "$ref": "#/$defs/AgentType" },
+        "name": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "format": "uri" },
+        "api_key": {
+          "type": "string",
+          "description": "Plaintext in local project_config; omit on export if redaction enabled."
+        },
+        "admin_api_key": {
+          "type": "string",
+          "description": "Optional organization Admin API key for usage/cost statistics (not used for chat)."
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/AgentOptionValue" },
+          "default": {}
+        },
+        "icon_asset": {
+          "type": "string",
+          "description": "Optional override path under public/assets/agents/"
+        },
+        "cursor_agent_id": {
+          "type": "string",
+          "description": "Populated for Cursor Agent type after first successful cloud agent create (optional v1)."
+        },
+        "last_test_at": { "type": "string", "format": "date-time" },
+        "last_test_status": { "type": "string", "enum": ["success", "error"] },
+        "last_test_message": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "AgentUsageLedger": {
+      "type": "object",
+      "properties": {
+        "calendar_month": { "type": "string", "pattern": "^\\d{4}-\\d{2}$" },
+        "tokens_today": { "type": "integer", "minimum": 0 },
+        "tokens_period": { "type": "integer", "minimum": 0 },
+        "requests_today": { "type": "integer", "minimum": 0 },
+        "requests_period": { "type": "integer", "minimum": 0 },
+        "last_request_at": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

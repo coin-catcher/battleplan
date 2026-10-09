@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ChatArtifact, ChatMessage, Project, ProjectTask } from '../src/app/core/models';
+import type { AgentUsageLedger, ChatArtifact, ChatMessage, Project, ProjectAgent, ProjectTask } from '../src/app/core/models';
 import { FileRepository } from './file-repository';
 
 const tempDirs: string[] = [];
@@ -86,5 +86,36 @@ describe('FileRepository', () => {
     const saved = await repo.writeAppConfig({ theme: 'dusk', pane_width: 500, current_project_id: 'p1' });
     expect(saved.theme).toBe('dusk');
     expect((await repo.readAppConfig()).pane_width).toBe(500);
+  });
+
+  it('loads empty agents for legacy projects and round-trips agents with usage ledger', async () => {
+    const repo = await makeRepo();
+    await repo.saveProject(project('p1'));
+    expect(await repo.listProjectAgents('p1')).toEqual([]);
+
+    const agents: ProjectAgent[] = [
+      {
+        agent_id: 'a1',
+        kind: 'research',
+        type: 'OpenAI',
+        name: 'OpenAI Research',
+        url: 'https://api.openai.com/v1',
+        created_at: '2026-10-09T00:00:00.000Z',
+        updated_at: '2026-10-09T00:00:00.000Z',
+      },
+    ];
+    const ledger: Record<string, AgentUsageLedger> = {
+      a1: { calendar_month: '2026-10', tokens_today: 10, tokens_period: 100, requests_today: 1, requests_period: 5 },
+    };
+    await repo.saveProjectAgents('p1', agents);
+    await repo.saveAgentUsageLedger('p1', ledger);
+
+    await repo.saveProject({ ...project('p1'), title: 'Updated title' });
+    expect(await repo.listProjectAgents('p1')).toEqual(agents);
+    expect(await repo.getAgentUsageLedger('p1')).toEqual(ledger);
+
+    const raw = JSON.parse(await fs.readFile(path.join(await repo.root(), 'p1', 'project_config.json'), 'utf8'));
+    expect(raw.agents).toHaveLength(1);
+    expect(raw.agent_usage_ledger.a1.tokens_period).toBe(100);
   });
 });

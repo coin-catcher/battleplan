@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { appendPendingChangeRows } from './pending-changes';
-import { createPullRequest, mergePullRequest } from './github-client';
+import { createPullRequest, isGithubMergeConflictError, mergePullRequest } from './github-client';
 
 describe('appendPendingChangeRows', () => {
   it('merges rows by change_id', () => {
@@ -52,6 +52,13 @@ describe('github-client', () => {
       token: 'ghp_test',
     });
     expect(pull.number).toBe(7);
+  });
+
+  it('detects merge conflict API failures', () => {
+    const error = new Error('GitHub API 405: Pull Request has merge conflicts');
+    error.name = 'GithubMergeConflictError';
+    expect(isGithubMergeConflictError(error)).toBe(true);
+    expect(isGithubMergeConflictError(new Error('GitHub API 404: Not Found'))).toBe(false);
   });
 
   it('merges an existing pull request', async () => {

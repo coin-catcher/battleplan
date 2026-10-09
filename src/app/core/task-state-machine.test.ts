@@ -36,9 +36,11 @@ describe('task-state-machine', () => {
     expect(() => assertTaskTransition('TODO', 'BLOCKED', 'execute_or_send')).toThrow();
   });
 
-  it('allows manual moves including BLOCKED and ABANDONED', () => {
+  it('allows any manual status change including from terminal states', () => {
     expect(() => assertTaskTransition('TODO', 'BLOCKED', 'manual')).not.toThrow();
     expect(() => assertTaskTransition('BLOCKED', 'TODO', 'manual')).not.toThrow();
+    expect(() => assertTaskTransition('DONE', 'REVIEW', 'manual')).not.toThrow();
+    expect(() => assertTaskTransition('ABANDONED', 'TODO', 'manual')).not.toThrow();
   });
 
   it('applyTaskStatusTransition updates status and clears pending_action', () => {

@@ -4,6 +4,7 @@ import type {
   OutputType,
   PendingChange,
   Project,
+  ProjectAgent,
   ProjectTask,
   TaskCodeOutput,
   TaskDraft,
@@ -22,6 +23,7 @@ import type { GithubCompareCommit } from '../core/github-client';
 import {
   agentBranchPolicyLines,
   branchNamesFromRun,
+  mergeConflictRecoveryPrompt,
   pickBranchInfoFromRun,
   pickTaskAgentBranch,
   wrapAgentRunPrompt,
@@ -29,6 +31,11 @@ import {
 import {
   compareBranches,
   createAndMergePullRequest,
+  createPullRequest,
+  isGithubMergeConflictError,
+  listPullCommits,
+  MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL,
+  mergePullRequest,
   requireProjectGithubPat,
   repoSlugFromProject,
 } from '../core/github-client';
@@ -45,6 +52,7 @@ import {
   siblingDependencyIds,
 } from '../core/dependencies';
 import { availableDescendants, independentBatch } from '../core/execute-children';
+import { bindSequentialDraftLinks, linkCreatedTasksUnderParent } from '../core/generate-task-links';
 import { applyLinkRelocation, type MindmapLinkRef } from '../core/link-relocation';
 import {
   buildGenerateTaskTasksUserMessage,
@@ -52,6 +60,17 @@ import {
 } from '../core/generate-tasks';
 import { defaultDarForOutputType, taskDar, taskInitialPrompt } from '../core/task-fields';
 import { applyTaskStatusTransition, assertTaskTransition } from '../core/task-state-machine';
+import {
+  cursorLaunchFromLibrary,
+  findProjectAgent,
+  optionString,
+  resolveCodeAgentId,
+  resolveResearchAgentId,
+  usesResearchChatAdapter,
+} from '../core/agent-bindings';
+import { migrateAgentLibrary } from '../core/agent-library-migrate';
+import { recordAgentUsageEntry } from '../core/agent-usage-ledger';
+import { researchTurnsFromMessages, sendResearchAgentChat } from './research-agent-client';
 
 const TERMINAL_RUN = new Set(['FINISHED', 'ERROR', 'CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED']);
 const ASSISTANT_PLACEHOLDER = 'The agent finished. Attached files are shown with this conversation.';
@@ -70,6 +89,7 @@ interface NormalizedDraft {
   prompt: string;
   output_type: OutputType;
   depends_on: string[];
+  sequential_with: string[];
 }
 
 export class LocalEngine {
@@ -78,6 +98,7 @@ export class LocalEngine {
     private readonly cursor: CursorClient,
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly newId: () => string = () => crypto.randomUUID(),
+    private readonly cursorApiKey: () => string = () => '',
   ) {}
 
   listProjects(): Promise<Project[]> {
@@ -108,6 +129,7 @@ export class LocalEngine {
       updated_at: timestamp,
     };
     await this.repo.saveProject(project);
+    await this.seedAgentLibraryForProject(project.project_id);
     await this.repo.saveMessage({
       message_id: this.newId(),
       scope: 'project',
@@ -118,6 +140,13 @@ export class LocalEngine {
       run_id: created.run.id,
       intent: 'chat',
     });
+    return project;
+  }
+
+  async ensureAgentLibrary(projectId: string): Promise<Project> {
+    await this.requireProject(projectId);
+    await this.seedAgentLibraryForProject(projectId);
+    const project = await this.requireProject(projectId);
     return project;
   }
 
@@ -169,6 +198,8 @@ export class LocalEngine {
     github_pat?: string;
     map_x?: number;
     map_y?: number;
+    default_research_agent_id?: string;
+    default_code_agent_id?: string;
   }): Promise<Project> {
     const project = await this.requireProject(projectId);
     const changes: string[] = [];
@@ -207,6 +238,16 @@ export class LocalEngine {
     }
     if (patch.map_x !== undefined) project.map_x = patch.map_x;
     if (patch.map_y !== undefined) project.map_y = patch.map_y;
+    if (patch.default_research_agent_id !== undefined) {
+      const next = patch.default_research_agent_id.trim();
+      if (next !== (project.default_research_agent_id ?? '')) changes.push('Default research agent updated.');
+      project.default_research_agent_id = next || undefined;
+    }
+    if (patch.default_code_agent_id !== undefined) {
+      const next = patch.default_code_agent_id.trim();
+      if (next !== (project.default_code_agent_id ?? '')) changes.push('Default code agent updated.');
+      project.default_code_agent_id = next || undefined;
+    }
     project.updated_at = this.now();
     await this.repo.saveProject(project);
     if (changes.length > 0) {
@@ -234,7 +275,7 @@ export class LocalEngine {
   }
 
   async listTasks(projectId: string): Promise<ProjectTask[]> {
-    await this.requireProject(projectId);
+    await this.seedAgentLibraryForProject(projectId);
     const tasks = await this.repo.listTasks(projectId);
     let migrated = migrateLegacyDependencies(tasks);
     migrated = migrateMutualLinksToSiblingDependencies(tasks) || migrated;
@@ -253,7 +294,7 @@ export class LocalEngine {
     map_x?: number;
     map_y?: number;
   }): Promise<ProjectTask> {
-    await this.requireProject(projectId);
+    await this.seedAgentLibraryForProject(projectId);
     const existing = await this.repo.listTasks(projectId);
     const title = input.title?.trim() || 'New task';
     const outputType = input.output_type ?? 'research';
@@ -283,6 +324,13 @@ export class LocalEngine {
     };
     if (input.map_x !== undefined) task.map_x = input.map_x;
     if (input.map_y !== undefined) task.map_y = input.map_y;
+    const project = await this.requireProject(projectId);
+    if (outputType === 'research' && project.default_research_agent_id) {
+      task.research_agent_id = project.default_research_agent_id;
+    }
+    if (outputType === 'code' && project.default_code_agent_id) {
+      task.code_agent_id = project.default_code_agent_id;
+    }
     if (outputType === 'subproject') {
       const nested = await this.createNestedProject(projectId, {
         title,
@@ -316,11 +364,12 @@ export class LocalEngine {
     return task;
   }
 
-  async createTasks(projectId: string, drafts: TaskDraft[]): Promise<ProjectTask[]> {
+  async createTasks(projectId: string, drafts: TaskDraft[], parentTaskId?: string): Promise<ProjectTask[]> {
     await this.requireProject(projectId);
     const normalized = normalizeDrafts(drafts);
     const existing = await this.repo.listTasks(projectId);
     const timestamp = this.now();
+    const project = await this.requireProject(projectId);
     const created: ProjectTask[] = normalized.map((draft, index) => {
       const dar = defaultDarForOutputType(draft.output_type);
       const initialPrompt = draft.prompt.trim();
@@ -335,11 +384,17 @@ export class LocalEngine {
       status: 'TODO',
       output_type: draft.output_type,
       order: existing.length + index,
+      research_agent_id: draft.output_type === 'research' ? project.default_research_agent_id : undefined,
+      code_agent_id: draft.output_type === 'code' ? project.default_code_agent_id : undefined,
       created_at: timestamp,
       updated_at: timestamp,
     };
     });
     bindDependencies(existing, created, normalized);
+    bindSequentialDraftLinks(existing, created, normalized);
+    if (parentTaskId) {
+      linkCreatedTasksUnderParent(existing, created, parentTaskId);
+    }
     assertAcyclicNormalLinks([...existing, ...created]);
     await this.repo.saveTasks([...existing, ...created]);
     return created;
@@ -380,6 +435,8 @@ export class LocalEngine {
     manual?: boolean;
     map_x?: number;
     map_y?: number;
+    research_agent_id?: string;
+    code_agent_id?: string;
   }): Promise<ProjectTask> {
     const task = await this.requireTask(projectId, taskId);
     const changes: string[] = [];
@@ -450,6 +507,16 @@ export class LocalEngine {
     }
     if (patch.map_x !== undefined) task.map_x = patch.map_x;
     if (patch.map_y !== undefined) task.map_y = patch.map_y;
+    if (patch.research_agent_id !== undefined) {
+      const next = patch.research_agent_id.trim();
+      if (next !== (task.research_agent_id ?? '')) changes.push('Research agent updated.');
+      task.research_agent_id = next || undefined;
+    }
+    if (patch.code_agent_id !== undefined) {
+      const next = patch.code_agent_id.trim();
+      if (next !== (task.code_agent_id ?? '')) changes.push('Code agent updated.');
+      task.code_agent_id = next || undefined;
+    }
     task.updated_at = this.now();
     await this.repo.saveTask(task);
     if (changes.length > 0) await this.repo.saveMessage(this.taskNote(task, changes.join('\n')));
@@ -517,6 +584,14 @@ export class LocalEngine {
 
   listPendingChanges(projectId: string): Promise<PendingChange[]> {
     return this.repo.listPendingChanges(projectId);
+  }
+
+  listProjectAgents(projectId: string): Promise<ProjectAgent[]> {
+    return this.repo.listProjectAgents(projectId);
+  }
+
+  saveProjectAgents(projectId: string, agents: ProjectAgent[]): Promise<void> {
+    return this.repo.saveProjectAgents(projectId, agents);
   }
 
   savePendingChanges(projectId: string, changes: PendingChange[]): Promise<void> {
@@ -667,6 +742,13 @@ export class LocalEngine {
     const initial = taskInitialPrompt(task);
     if (!initial) throw new Error('Initial prompt is required.');
     await this.assertDependenciesDone(task);
+    const project = await this.requireProject(task.project_id);
+    await this.seedAgentLibraryForProject(task.project_id);
+    const agents = await this.repo.listProjectAgents(task.project_id);
+    const researchAgent = findProjectAgent(agents, resolveResearchAgentId(task, project));
+    if (task.output_type === 'research' && usesResearchChatAdapter(researchAgent)) {
+      return this.launchResearchLibraryFirstMessage(task, project, researchAgent!, initial);
+    }
     return this.launchWithFirstMessage(task, initial);
   }
 
@@ -677,6 +759,16 @@ export class LocalEngine {
     if (task.output_type === 'subproject' && task.subproject_id) {
       return this.sendProjectMessage(task.subproject_id, feedback);
     }
+    const project = await this.requireProject(task.project_id);
+    await this.seedAgentLibraryForProject(task.project_id);
+    const agents = await this.repo.listProjectAgents(task.project_id);
+    const researchAgent = findProjectAgent(agents, resolveResearchAgentId(task, project));
+    if (task.output_type === 'research' && usesResearchChatAdapter(researchAgent)) {
+      if (task.status === 'TODO') {
+        throw new Error('Execute the task with its Initial Prompt before sending chat messages.');
+      }
+      return this.sendResearchLibraryMessage(task, project, researchAgent!, feedback, 'feedback');
+    }
     if (!task.cursor_agent_id) {
       throw new Error('Execute the task with its Initial Prompt before sending chat messages.');
     }
@@ -686,15 +778,18 @@ export class LocalEngine {
     const output = active.output_type === 'code'
       ? await this.repo.getCodeOutput(taskId)
       : await this.repo.getResearchOutput(taskId);
-    const project = await this.requireProject(active.project_id);
-    const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
+    const codeAgent = findProjectAgent(agents, resolveCodeAgentId(active, project));
+    const launch = cursorLaunchFromLibrary(codeAgent, project, this.cursorApiKey());
+    const base = launch.startingRef?.trim() || project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
     const run = await this.cursor.createRun(active.cursor_agent_id!, {
       text: wrapAgentRunPrompt(feedbackPrompt(active, feedback), {
         baseBranch: base,
         agentBranch: output?.branch,
       }),
       mode: 'agent',
+      apiKey: launch.apiKey,
     });
+    if (codeAgent) await this.bumpAgentUsage(active.project_id, codeAgent.agent_id);
     active.latest_run_id = run.id;
     active.updated_at = this.now();
     await this.repo.saveTask(active);
@@ -721,7 +816,7 @@ export class LocalEngine {
     const { owner, repo } = repoSlugFromProject(project);
     const base = project.starting_ref?.trim() || DEFAULT_MAIN_BRANCH;
     const head = await this.resolveTaskMergeBranch(task, output?.branch, base, token, owner, repo);
-    const { pull, commits } = await createAndMergePullRequest({
+    const pull = await createPullRequest({
       owner,
       repo,
       head,
@@ -730,6 +825,20 @@ export class LocalEngine {
       body: output.pr_message || task.title,
       token,
     });
+    let commits: GithubCompareCommit[];
+    try {
+      await mergePullRequest(owner, repo, pull.number, token);
+      commits = await listPullCommits(owner, repo, pull.number, token);
+    } catch (error) {
+      if (isGithubMergeConflictError(error)) {
+        await this.dispatchMergeConflictRecovery(task, head, base);
+        throw new Error(
+          `Pull request has merge conflicts. Battleplan ${MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL} and resolve conflicts. `
+          + 'Try Approve and merge again after the agent finishes.',
+        );
+      }
+      throw error;
+    }
     const mergedOutput = {
       ...output,
       pr_link: pull.html_url,
@@ -1125,14 +1234,54 @@ export class LocalEngine {
     }
   }
 
+  private async dispatchMergeConflictRecovery(
+    task: ProjectTask,
+    agentBranch: string,
+    baseBranch: string,
+  ): Promise<void> {
+    const instructions = mergeConflictRecoveryPrompt({ baseBranch, agentBranch });
+    if (!task.cursor_agent_id) {
+      await this.record({
+        scope: 'task',
+        project_id: task.project_id,
+        task_id: task.task_id,
+        role: 'user',
+        content: instructions,
+        intent: 'feedback',
+      });
+      return;
+    }
+    this.markTaskDoingOnAgentChat(task);
+    const run = await this.cursor.createRun(task.cursor_agent_id, {
+      text: wrapAgentRunPrompt(instructions, { baseBranch, agentBranch }),
+      mode: 'agent',
+    });
+    task.latest_run_id = run.id;
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+    await this.record({
+      scope: 'task',
+      project_id: task.project_id,
+      task_id: task.task_id,
+      role: 'user',
+      content: instructions,
+      run_id: run.id,
+      intent: 'feedback',
+    });
+  }
+
   private async launchWithFirstMessage(task: ProjectTask, userMessage: string): Promise<ChatMessage> {
     const project = await this.requireProject(task.project_id);
-    if (!project.repo_url) throw new Error('Add a repository to the project before starting a task.');
-    const base = project.starting_ref?.trim() || 'main';
+    const agents = await this.repo.listProjectAgents(task.project_id);
+    const codeAgent = findProjectAgent(agents, resolveCodeAgentId(task, project));
+    const launch = cursorLaunchFromLibrary(codeAgent, project, this.cursorApiKey());
+    const repoUrl = launch.repoUrl;
+    if (!repoUrl) throw new Error('Add a repository to the project before starting a task.');
+    const base = launch.startingRef?.trim() || project.starting_ref?.trim() || 'main';
     const lines = [
       `You are executing a battleplan ${task.output_type} task.`,
       ...agentBranchPolicyLines({ baseBranch: base }),
-      `Repository: ${project.repo_url}.`,
+      `Repository: ${repoUrl}.`,
       'When finished, summarize the code changes you committed and name the branch you pushed.',
     ];
     if (task.output_type === 'research') {
@@ -1154,11 +1303,14 @@ export class LocalEngine {
     const created = await this.cursor.createAgent({
       prompt: joinDarSections([lines.join('\n\n'), firstChat]),
       name: task.title,
-      mode: 'agent',
-      repoUrl: project.repo_url,
+      mode: launch.mode,
+      repoUrl,
       startingRef: base,
       autoCreatePr: false,
+      envVars: launch.envVars,
+      apiKey: launch.apiKey,
     });
+    if (codeAgent) await this.bumpAgentUsage(project.project_id, codeAgent.agent_id);
     task.cursor_agent_id = created.agent.id;
     task.cursor_chat_link = created.agent.url;
     task.latest_run_id = created.run.id;
@@ -1174,6 +1326,84 @@ export class LocalEngine {
       run_id: created.run.id,
       intent: 'chat',
     });
+  }
+
+  private async seedAgentLibraryForProject(projectId: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    const agents = await this.repo.listProjectAgents(projectId);
+    const tasks = await this.repo.listTasks(projectId);
+    const migrated = migrateAgentLibrary({
+      project,
+      agents,
+      tasks,
+      now: this.now(),
+      newId: this.newId,
+    });
+    if (!migrated.changed) return;
+    await this.repo.saveProject(migrated.project);
+    await this.repo.saveProjectAgents(projectId, migrated.agents);
+    if (migrated.tasks !== tasks) {
+      await this.repo.saveTasks(migrated.tasks);
+    }
+  }
+
+  private async bumpAgentUsage(projectId: string, agentId: string, tokens?: number): Promise<void> {
+    const ledger = await this.repo.getAgentUsageLedger(projectId);
+    const next = recordAgentUsageEntry(ledger, agentId, { tokens, now: this.now() });
+    await this.repo.saveAgentUsageLedger(projectId, next);
+  }
+
+  private async launchResearchLibraryFirstMessage(
+    task: ProjectTask,
+    project: Project,
+    agent: import('../core/models').ProjectAgent,
+    userMessage: string,
+  ): Promise<ChatMessage> {
+    return this.sendResearchLibraryMessage(task, project, agent, userMessage, 'chat', { isFirstExecute: true });
+  }
+
+  private async sendResearchLibraryMessage(
+    task: ProjectTask,
+    project: Project,
+    agent: import('../core/models').ProjectAgent,
+    userMessage: string,
+    intent: ChatMessage['intent'],
+    options?: { isFirstExecute?: boolean },
+  ): Promise<ChatMessage> {
+    this.markTaskDoingOnAgentChat(task);
+    const dar = joinDarSections(await collectTaskDarSections(task, this.darLookup()));
+    const systemPrompt = joinDarSections([
+      optionString(agent.options, 'system_prompt'),
+      dar,
+    ]);
+    const prior = await this.repo.listTaskMessages(task.task_id);
+    const turns = researchTurnsFromMessages(prior);
+    const content = options?.isFirstExecute
+      ? joinDarSections([dar, userMessage])
+      : userMessage;
+    turns.push({ role: 'user', content });
+    const result = await sendResearchAgentChat(agent, turns, systemPrompt);
+    await this.bumpAgentUsage(project.project_id, agent.agent_id, result.usage.totalTokens);
+    applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+    const userRecord = await this.record({
+      scope: 'task',
+      project_id: task.project_id,
+      task_id: task.task_id,
+      role: 'user',
+      content: userMessage,
+      intent,
+    });
+    await this.record({
+      scope: 'task',
+      project_id: task.project_id,
+      task_id: task.task_id,
+      role: 'assistant',
+      content: result.assistantText,
+      intent,
+    });
+    return userRecord;
   }
 
   private darLookup() {
@@ -1310,8 +1540,9 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
     if (!prompt) throw new Error(`Task ${index + 1} prompt is required.`);
     const types = outputTypesOf(item.output_type, index + 1);
     const depends = item.depends_on ?? [];
+    const sequential = item.sequential_with ?? [];
     if (types.length === 1) {
-      normalized.push({ title, prompt, output_type: types[0], depends_on: depends });
+      normalized.push({ title, prompt, output_type: types[0], depends_on: depends, sequential_with: sequential });
       return;
     }
     normalized.push({
@@ -1319,12 +1550,14 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
       prompt,
       output_type: 'research',
       depends_on: depends,
+      sequential_with: [],
     });
     normalized.push({
       title: `${title} (code)`,
       prompt,
       output_type: 'code',
       depends_on: [...depends, `${title} (research)`],
+      sequential_with: sequential,
     });
   });
   return normalized;

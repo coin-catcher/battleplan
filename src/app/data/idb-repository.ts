@@ -1,7 +1,9 @@
 import type {
+  AgentUsageLedger,
   ChatArtifact,
   ChatMessage,
   Project,
+  ProjectAgent,
   ProjectTask,
   TaskCodeOutput,
   TaskResearchOutput,
@@ -12,6 +14,17 @@ const DB_NAME = 'battleplan';
 const DB_VERSION = 1;
 
 type ArtifactRecord = ChatArtifact & { id: string; owner: string };
+
+/** Project row in IndexedDB; optional agent fields mirror `project_config.json`. */
+type ProjectStoreRecord = Project & {
+  agents?: ProjectAgent[];
+  agent_usage_ledger?: Record<string, AgentUsageLedger>;
+};
+
+function stripProjectRecord(record: ProjectStoreRecord): Project {
+  const { agents: _agents, agent_usage_ledger: _ledger, ...project } = record;
+  return project;
+}
 
 function artifactId(artifact: ChatArtifact): string {
   const owner = artifact.scope === 'task' ? artifact.task_id ?? '' : artifact.project_id;
@@ -71,16 +84,24 @@ export class IdbRepository implements BattleplanRepository {
   }
 
   async saveProject(project: Project): Promise<void> {
-    await this.put('projects', project);
+    const existing = await this.get<ProjectStoreRecord>('projects', project.project_id);
+    const next: ProjectStoreRecord = {
+      ...(existing ?? project),
+      ...project,
+      agents: existing?.agents ?? [],
+      agent_usage_ledger: existing?.agent_usage_ledger,
+    };
+    await this.put('projects', next);
   }
 
   async getProject(projectId: string): Promise<Project | null> {
-    return (await this.get<Project>('projects', projectId)) ?? null;
+    const record = await this.get<ProjectStoreRecord>('projects', projectId);
+    return record ? stripProjectRecord(record) : null;
   }
 
   async listProjects(): Promise<Project[]> {
-    const projects = await this.getAll<Project>('projects');
-    return projects.sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+    const projects = await this.getAll<ProjectStoreRecord>('projects');
+    return projects.map(stripProjectRecord).sort((left, right) => right.updated_at.localeCompare(left.updated_at));
   }
 
   async deleteProject(projectId: string): Promise<void> {
@@ -203,6 +224,32 @@ export class IdbRepository implements BattleplanRepository {
 
   async savePendingChanges(_projectId: string, _changes: import('../core/models').PendingChange[]): Promise<void> {
     return;
+  }
+
+  async listProjectAgents(projectId: string): Promise<ProjectAgent[]> {
+    const record = await this.get<ProjectStoreRecord>('projects', projectId);
+    return record?.agents ?? [];
+  }
+
+  async saveProjectAgents(projectId: string, agents: ProjectAgent[]): Promise<void> {
+    const record = await this.requireProjectRecord(projectId);
+    await this.put('projects', { ...record, agents });
+  }
+
+  async getAgentUsageLedger(projectId: string): Promise<Record<string, AgentUsageLedger>> {
+    const record = await this.get<ProjectStoreRecord>('projects', projectId);
+    return record?.agent_usage_ledger ?? {};
+  }
+
+  async saveAgentUsageLedger(projectId: string, ledger: Record<string, AgentUsageLedger>): Promise<void> {
+    const record = await this.requireProjectRecord(projectId);
+    await this.put('projects', { ...record, agent_usage_ledger: ledger });
+  }
+
+  private async requireProjectRecord(projectId: string): Promise<ProjectStoreRecord> {
+    const record = await this.get<ProjectStoreRecord>('projects', projectId);
+    if (!record) throw new Error(`Project ${projectId} was not found.`);
+    return record;
   }
 
   private async put(store: string, value: unknown): Promise<void> {

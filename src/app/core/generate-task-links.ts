@@ -1,0 +1,78 @@
+import type { ProjectTask, Selection, TaskDraft } from './models';
+import { pickPrimaryParentId } from './dependencies';
+
+export function generateTasksSourceTaskId(selection: Selection): string | undefined {
+  if (selection.kind === 'task' || selection.kind === 'subproject' || selection.kind === 'code' || selection.kind === 'research') {
+    return selection.taskId;
+  }
+  return undefined;
+}
+
+/** Attach generated tasks with no tree parent under the task that invoked Generate Tasks. */
+export function linkCreatedTasksUnderParent(
+  existing: ProjectTask[],
+  created: ProjectTask[],
+  parentTaskId: string,
+): void {
+  const parent = [...existing, ...created].find((task) => task.task_id === parentTaskId);
+  if (!parent) return;
+  const all = [...existing, ...created];
+  for (const child of created) {
+    if (child.task_id === parentTaskId) continue;
+    if (pickPrimaryParentId(child.task_id, all)) continue;
+    if (!parent.dependencies.includes(child.task_id)) {
+      parent.dependencies = [...parent.dependencies, child.task_id];
+    }
+  }
+}
+
+export interface SequentialDraft {
+  sequential_with: string[];
+}
+
+export function bindSequentialDraftLinks(
+  existing: ProjectTask[],
+  created: ProjectTask[],
+  drafts: SequentialDraft[],
+): void {
+  const titles = new Map<string, string[]>();
+  for (const task of [...existing, ...created]) {
+    const ids = titles.get(task.title) ?? [];
+    ids.push(task.task_id);
+    titles.set(task.title, ids);
+  }
+  const pairs = new Map<string, Set<string>>();
+  const addPair = (leftId: string, rightId: string): void => {
+    if (leftId === rightId) return;
+    const set = pairs.get(leftId) ?? new Set<string>();
+    set.add(rightId);
+    pairs.set(leftId, set);
+  };
+  created.forEach((task, index) => {
+    for (const title of drafts[index]?.sequential_with ?? []) {
+      const matches = titles.get(title.trim()) ?? [];
+      if (matches.length !== 1) continue;
+      addPair(task.task_id, matches[0]);
+      addPair(matches[0], task.task_id);
+    }
+  });
+  for (const task of created) {
+    const peerIds = pairs.get(task.task_id);
+    if (!peerIds?.size) continue;
+    task.sibling_dependencies = [...new Set([...(task.sibling_dependencies ?? []), ...peerIds])];
+  }
+}
+
+/** Prefer task-id anchoring; keep title-based depends_on fill as a fallback for the agent JSON. */
+export function prepareGeneratedDrafts(
+  drafts: TaskDraft[],
+  sourceTask: ProjectTask | undefined,
+): TaskDraft[] {
+  if (!sourceTask) return drafts;
+  const parentTitle = sourceTask.title.trim();
+  if (!parentTitle) return drafts;
+  return drafts.map((draft) => ({
+    ...draft,
+    depends_on: (draft.depends_on ?? []).filter(Boolean).length > 0 ? draft.depends_on : [parentTitle],
+  }));
+}

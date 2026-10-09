@@ -5,6 +5,8 @@ import { buildApplicationMenu, rebuildApplicationMenu, setExportProjectEnabled, 
 import { readJsonFile } from './atomic-write';
 import { exportProject, importProject } from './battleplan-archive';
 import type { AppConfigDocument } from './document-types';
+import { runAgentConnectionInMain } from './agent-connection';
+import { fetchAgentStatisticsLive } from './agent-statistics';
 import { FileRepository } from './file-repository';
 import { downloadReleaseAsset, installDownloadedRelease } from './release-installer';
 import {
@@ -92,6 +94,22 @@ function registerRepositoryHandlers(): void {
       await repo().savePendingChanges(projectId as string, changes as import('../src/app/core/models').PendingChange[]);
       return { ok: true };
     },
+    'repo:listProjectAgents': (projectId) => repo().listProjectAgents(projectId as string),
+    'repo:saveProjectAgents': async (projectId, agents) => {
+      await repo().saveProjectAgents(
+        projectId as string,
+        agents as import('../src/app/core/models').ProjectAgent[],
+      );
+      return { ok: true };
+    },
+    'repo:getAgentUsageLedger': (projectId) => repo().getAgentUsageLedger(projectId as string),
+    'repo:saveAgentUsageLedger': async (projectId, ledger) => {
+      await repo().saveAgentUsageLedger(
+        projectId as string,
+        ledger as Record<string, import('../src/app/core/models').AgentUsageLedger>,
+      );
+      return { ok: true };
+    },
     'repo:listArtifacts': async (scope, ownerId) => enrichArtifacts(scope as 'project' | 'task', ownerId as string),
     'repo:saveArtifact': (artifact) => repo().saveArtifact(artifact as ChatArtifact),
     'config:read': () => repo().readAppConfig(),
@@ -132,6 +150,10 @@ function registerRepositoryHandlers(): void {
       await shell.openExternal(url as string);
       return { ok: true };
     },
+    'agent:testConnection': async (params) =>
+      runAgentConnectionInMain(params as import('../src/app/core/agent-connection').AgentConnectionInput),
+    'agent:fetchStatistics': async (params) =>
+      fetchAgentStatisticsLive(params as import('./agent-statistics').AgentStatisticsFetchInput),
     'menu:sync-state': async (state) => {
       const patch = state as { exportEnabled?: boolean; saveEnabled?: boolean };
       if (typeof patch.exportEnabled === 'boolean') {
