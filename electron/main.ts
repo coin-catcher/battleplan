@@ -6,6 +6,7 @@ import { readJsonFile } from './atomic-write';
 import { exportProject, importProject } from './battleplan-archive';
 import type { AppConfigDocument } from './document-types';
 import { runAgentConnectionInMain } from './agent-connection';
+import { fetchAgentStatisticsLive } from './agent-statistics';
 import { FileRepository } from './file-repository';
 import { downloadReleaseAsset, installDownloadedRelease } from './release-installer';
 import {
@@ -151,6 +152,8 @@ function registerRepositoryHandlers(): void {
     },
     'agent:testConnection': async (params) =>
       runAgentConnectionInMain(params as import('../src/app/core/agent-connection').AgentConnectionInput),
+    'agent:fetchStatistics': async (params) =>
+      fetchAgentStatisticsLive(params as import('./agent-statistics').AgentStatisticsFetchInput),
     'menu:sync-state': async (state) => {
       const patch = state as { exportEnabled?: boolean; saveEnabled?: boolean };
       if (typeof patch.exportEnabled === 'boolean') {

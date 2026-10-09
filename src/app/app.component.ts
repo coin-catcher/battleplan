@@ -25,7 +25,7 @@ import {
 import { applyDynamicModelsToOptions, selectChoicesForOption } from './core/agent-connection';
 import type { AgentOptionDefinition } from './core/agent-types';
 import { isAgentDraftId } from './core/agent-id';
-import { AgentStatsComponent } from './agent/agent-stats.component';
+import { AgentStatsComponent } from './components/agent-stats/agent-stats.component';
 import { AgentConnectionService } from './data/agent-connection.service';
 import { isMarkdownPath, prepareMarkdown } from './core/markdown';
 import { applyTheme, THEMES, type ThemeId } from './core/themes';
