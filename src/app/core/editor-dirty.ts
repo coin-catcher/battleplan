@@ -1,4 +1,6 @@
-import type { OutputType, Project, ProjectTask } from './models';
+import type { AgentOptionValue, OutputType, Project, ProjectAgent, ProjectTask } from './models';
+import { type AgentEditorForm } from './agent-form';
+import { defaultOptionValues } from './agent-types';
 import { taskDar, taskInitialPrompt } from './task-fields';
 
 export interface ProjectEditorForm {
@@ -52,18 +54,47 @@ export function taskEditorDirty(form: TaskEditorForm, task: ProjectTask | null):
     || siblings.some((id, index) => id !== savedSiblings[index]);
 }
 
+function optionMapsEqual(
+  a: Record<string, AgentOptionValue>,
+  b: Record<string, AgentOptionValue>,
+): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
+export function agentEditorDirty(form: AgentEditorForm, saved: ProjectAgent | null): boolean {
+  if (!saved) return true;
+  const savedOptions = { ...defaultOptionValues(saved.type), ...(saved.options ?? {}) };
+  const apiDirty = form.apiKeyTouched && form.api_key.trim() !== (saved.api_key ?? '').trim();
+  const adminDirty = form.adminApiKeyTouched && form.admin_api_key.trim() !== (saved.admin_api_key ?? '').trim();
+  return form.type !== saved.type
+    || form.name.trim() !== saved.name
+    || form.url.trim() !== saved.url
+    || apiDirty
+    || adminDirty
+    || !optionMapsEqual(form.options, savedOptions);
+}
+
 export function editorPanelDirty(
-  kind: 'project' | 'subproject' | 'task' | string,
+  kind: 'project' | 'subproject' | 'task' | 'agent' | 'agent-create' | string,
   projectForm: ProjectEditorForm,
   taskForm: TaskEditorForm,
   project: Project | null,
   task: ProjectTask | null,
+  agentForm?: AgentEditorForm | null,
+  savedAgent?: ProjectAgent | null,
 ): boolean {
   if (kind === 'project' || kind === 'subproject') {
     return projectEditorDirty(projectForm, project);
   }
   if (kind === 'task') {
     return taskEditorDirty(taskForm, task);
+  }
+  if ((kind === 'agent' || kind === 'agent-create') && agentForm) {
+    return agentEditorDirty(agentForm, savedAgent ?? null);
   }
   return false;
 }

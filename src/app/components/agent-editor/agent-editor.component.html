@@ -1,0 +1,155 @@
+@if (agentInput(); as agent) {
+  @if (form(); as f) {
+    <section class="panel agent-editor">
+      <header class="panel-head agent-head">
+        <img class="agent-logo-lg" [src]="headerLogo()" [alt]="f.type" width="48" height="48" />
+        <div>
+          <p class="eyebrow">{{ agent.kind === 'code' ? 'Code agent' : 'Research agent' }}</p>
+          <h2>{{ f.name || 'Untitled agent' }}</h2>
+        </div>
+        <div class="agent-actions">
+          <button type="button" class="ghost" (click)="testConnection()">Test Connection</button>
+          @if (testState() === 'success') {
+            <span class="test-indicator success" aria-live="polite" title="Connection OK">✓</span>
+          } @else if (testState() === 'error') {
+            <span class="test-indicator error" aria-live="assertive" [title]="testMessage()">✕</span>
+          }
+          @if (showSave(agent)) {
+            <button type="button" class="primary" [disabled]="store.busy()" (click)="save()">Save</button>
+          }
+          @if (createMode()) {
+            <button type="button" class="ghost" (click)="cancelCreate()">Cancel</button>
+          }
+          @if (showDelete(agent)) {
+            <button type="button" class="danger" [disabled]="store.busy()" (click)="deleteAgent()">Delete</button>
+          }
+        </div>
+      </header>
+      @if (testState() === 'error' && testMessage()) {
+        <p class="banner error test-message" role="alert">{{ testMessage() }}</p>
+      }
+
+      <label class="field">
+        <span>Type</span>
+        <select [ngModel]="f.type" (ngModelChange)="onTypeChange($event)" name="agentType">
+          @for (choice of typeChoices(); track choice) {
+            <option [ngValue]="choice">{{ choice }}</option>
+          }
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Name</span>
+        <input [ngModel]="f.name" (ngModelChange)="onNameInput($event)" name="agentName" />
+      </label>
+
+      <label class="field">
+        <span>URL</span>
+        <input [ngModel]="f.url" (ngModelChange)="onUrlInput($event)" name="agentUrl" />
+      </label>
+
+      <label class="field">
+        <span>API key</span>
+        <input
+          type="password"
+          autocomplete="off"
+          [ngModel]="apiKeyDisplay(agent, f)"
+          (ngModelChange)="onApiKeyInput($event)"
+          (focus)="apiKeyFocused.set(true)"
+          (blur)="apiKeyFocused.set(false)"
+          name="agentApiKey"
+          placeholder="sk-…"
+        />
+      </label>
+
+      @if (f.type === 'OpenAI') {
+        <label class="field">
+          <span>Organization Admin API key (optional)</span>
+          <input
+            type="password"
+            autocomplete="off"
+            [ngModel]="adminApiKeyDisplay(agent, f)"
+            (ngModelChange)="onAdminApiKeyInput($event)"
+            (focus)="adminApiKeyFocused.set(true)"
+            (blur)="adminApiKeyFocused.set(false)"
+            name="agentAdminApiKey"
+            placeholder="For usage statistics only — not used for chat"
+          />
+          <p class="field-hint">Separate from the project sk- key above. Required for live OpenAI usage and cost metrics; tokens remaining are not available via standard API keys.</p>
+        </label>
+      }
+
+      <table class="agent-options-table">
+        <thead>
+          <tr>
+            <th scope="col">Option Name</th>
+            <th scope="col">Option Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of visibleOptions(); track row.key) {
+            <tr>
+              <td>
+                {{ row.label }}
+                @if (row.help) {
+                  <span class="option-help" [title]="row.help">?</span>
+                }
+              </td>
+              <td>
+                @switch (row.control) {
+                  @case ('textarea') {
+                    <textarea
+                      rows="3"
+                      [ngModel]="f.options[row.key]"
+                      (ngModelChange)="onOptionChange(row.key, $event)"
+                      [name]="'opt-' + row.key"
+                    ></textarea>
+                  }
+                  @case ('number') {
+                    <input
+                      type="number"
+                      [attr.min]="row.min"
+                      [attr.max]="row.max"
+                      [ngModel]="f.options[row.key]"
+                      (ngModelChange)="onOptionChange(row.key, +$event)"
+                      [name]="'opt-' + row.key"
+                    />
+                  }
+                  @case ('checkbox') {
+                    <input
+                      type="checkbox"
+                      [ngModel]="f.options[row.key]"
+                      (ngModelChange)="onOptionChange(row.key, $event)"
+                      [name]="'opt-' + row.key"
+                    />
+                  }
+                  @case ('select') {
+                    <select
+                      [ngModel]="f.options[row.key]"
+                      (ngModelChange)="onOptionChange(row.key, $event)"
+                      [name]="'opt-' + row.key"
+                    >
+                      @for (choice of row.choices ?? []; track choice) {
+                        <option [ngValue]="choice">{{ choice }}</option>
+                      }
+                    </select>
+                  }
+                  @default {
+                    <input
+                      type="text"
+                      [ngModel]="f.options[row.key]"
+                      (ngModelChange)="onOptionChange(row.key, $event)"
+                      [name]="'opt-' + row.key"
+                    />
+                  }
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+
+      <app-agent-stats [agent]="agentInput()" />
+    </section>
+  }
+}

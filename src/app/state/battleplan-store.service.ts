@@ -2,18 +2,21 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { BattleplanApi } from '../api/battleplan-api.service';
 import { AppPreferences } from '../data/app-preferences.service';
 import type {
+  AgentKind,
   ChatArtifact,
   ChatMessage,
   ConversationPage,
   OutputType,
   PendingChange,
   Project,
+  ProjectAgent,
   ProjectTask,
   Selection,
   TaskCodeOutput,
   TaskResearchOutput,
   TaskStatus,
 } from '../core/models';
+import { createAgentDraft, isAgentDraftId, projectAgentFromForm, type AgentEditorForm } from '../core/agent-form';
 import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
 import { anchorDraftsUnderParentTask } from '../core/generate-tasks';
 import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
@@ -31,6 +34,8 @@ export interface ProjectTabSnapshot {
   codeOutputs: Record<string, TaskCodeOutput | null>;
   researchOutputs: Record<string, TaskResearchOutput | null>;
   pendingChanges: PendingChange[];
+  agents: ProjectAgent[];
+  agentDrafts: Record<string, ProjectAgent>;
   paneWidth: number;
 }
 
@@ -54,6 +59,8 @@ export class BattleplanStore {
   readonly editorLoading = signal(false);
   readonly chatActionPending = signal<'send' | 'execute' | 'merge' | null>(null);
   readonly pendingChanges = signal<PendingChange[]>([]);
+  readonly agents = signal<ProjectAgent[]>([]);
+  readonly agentDrafts = signal<Record<string, ProjectAgent>>({});
   readonly openTabs = signal<string[]>([]);
 
   readonly project = computed(() => this.projects().find((item) => item.project_id === this.projectId()) ?? null);
@@ -76,6 +83,19 @@ export class BattleplanStore {
     }
     return this.tasks().find((task) => task.task_id === selection.taskId) ?? null;
   });
+  readonly selectedAgent = computed(() => {
+    const selection = this.selection();
+    if (selection.kind === 'agent') {
+      return this.agents().find((agent) => agent.agent_id === selection.agentId) ?? null;
+    }
+    if (selection.kind === 'agent-create') {
+      return this.agentDrafts()[selection.draftId] ?? null;
+    }
+    return null;
+  });
+  readonly sortedAgents = computed(() =>
+    [...this.agents()].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name)),
+  );
 
   private foregroundWatchGeneration = 0;
   private editorLoadGeneration = 0;
@@ -110,6 +130,8 @@ export class BattleplanStore {
       codeOutputs: this.codeOutputs(),
       researchOutputs: this.researchOutputs(),
       pendingChanges: this.pendingChanges(),
+      agents: this.agents(),
+      agentDrafts: this.agentDrafts(),
       paneWidth,
     };
   }
@@ -122,6 +144,8 @@ export class BattleplanStore {
     this.codeOutputs.set(snapshot.codeOutputs);
     this.researchOutputs.set(snapshot.researchOutputs);
     this.pendingChanges.set(snapshot.pendingChanges);
+    this.agents.set(snapshot.agents ?? []);
+    this.agentDrafts.set(snapshot.agentDrafts ?? {});
   }
 
   async openProjectTab(projectId: string, paneWidth: number): Promise<number> {
@@ -160,10 +184,98 @@ export class BattleplanStore {
         await this.reloadTasks();
         this.applyConversation(await this.api.listProjectMessages(projectId));
         await this.refreshPendingChanges();
+        this.agents.set(await this.api.listProjectAgents(projectId));
+        this.agentDrafts.set({});
       });
       this.openTabs.update((tabs) => tabs.includes(projectId) ? tabs : [...tabs, projectId]);
       this.continueProjectWatch(projectId);
     });
+  }
+
+  async reloadAgents(): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) {
+      this.agents.set([]);
+      return;
+    }
+    this.agents.set(await this.api.listProjectAgents(projectId));
+  }
+
+  beginAgentCreate(role: AgentKind): string {
+    const draftId = `draft-${crypto.randomUUID()}`;
+    const draft = createAgentDraft(role, draftId);
+    this.agentDrafts.update((drafts) => ({ ...drafts, [draftId]: draft }));
+    this.selection.set({ kind: 'agent-create', role, draftId });
+    return draftId;
+  }
+
+  selectAgent(agentId: string): void {
+    this.selection.set({ kind: 'agent', agentId });
+  }
+
+  updateAgentDraft(draftId: string, agent: ProjectAgent): void {
+    this.agentDrafts.update((drafts) => ({ ...drafts, [draftId]: agent }));
+  }
+
+  async saveAgentFromForm(form: AgentEditorForm, saved: ProjectAgent): Promise<ProjectAgent | null> {
+    const projectId = this.projectId();
+    if (!projectId) return null;
+    let persisted: ProjectAgent | null = null;
+    await this.run(async () => {
+      const next = projectAgentFromForm(form, saved);
+      const agents = [...this.agents()];
+      if (isAgentDraftId(saved.agent_id)) {
+        const agent_id = crypto.randomUUID();
+        const created: ProjectAgent = { ...next, agent_id, created_at: next.updated_at };
+        agents.push(created);
+        persisted = created;
+        this.agentDrafts.update((drafts) => {
+          const copy = { ...drafts };
+          delete copy[saved.agent_id];
+          return copy;
+        });
+        this.selection.set({ kind: 'agent', agentId: agent_id });
+      } else {
+        const index = agents.findIndex((item) => item.agent_id === saved.agent_id);
+        if (index >= 0) agents[index] = { ...next, agent_id: saved.agent_id, created_at: saved.created_at };
+        persisted = agents[index] ?? null;
+      }
+      await this.api.saveProjectAgents(projectId, agents);
+      this.agents.set(agents);
+      this.notice.set('Agent saved.');
+    });
+    return persisted;
+  }
+
+  async persistAgentRecord(agent: ProjectAgent): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    await this.run(async () => {
+      const agents = this.agents().map((item) => item.agent_id === agent.agent_id ? agent : item);
+      await this.api.saveProjectAgents(projectId, agents);
+      this.agents.set(agents);
+    });
+  }
+
+  async deleteAgent(agentId: string): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    await this.run(async () => {
+      const agents = this.agents().filter((item) => item.agent_id !== agentId);
+      await this.api.saveProjectAgents(projectId, agents);
+      this.agents.set(agents);
+      this.selection.set({ kind: 'project' });
+      this.notice.set('Agent deleted.');
+    });
+  }
+
+  discardAgentDraft(draftId: string): void {
+    this.agentDrafts.update((drafts) => {
+      const copy = { ...drafts };
+      delete copy[draftId];
+      return copy;
+    });
+    this.selection.set({ kind: 'project' });
   }
 
   async refreshPendingChanges(): Promise<void> {
@@ -211,6 +323,8 @@ export class BattleplanStore {
       this.codeOutputs.set({});
       this.researchOutputs.set({});
       this.artifacts.set([]);
+      this.agents.set([]);
+      this.agentDrafts.set({});
       this.selection.set({ kind: 'project' });
       this.applyConversation(await this.api.listProjectMessages(project.project_id));
       await this.refreshPendingChanges();

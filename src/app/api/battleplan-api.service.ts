@@ -5,6 +5,7 @@ import type {
   OutputType,
   PendingChange,
   Project,
+  ProjectAgent,
   ProjectTask,
   TaskCodeOutput,
   TaskDraft,
@@ -121,6 +122,14 @@ export class BattleplanApi {
 
   listPendingChanges(projectId: string): Promise<PendingChange[]> {
     return this.engine.listPendingChanges(projectId);
+  }
+
+  listProjectAgents(projectId: string): Promise<ProjectAgent[]> {
+    return this.engine.listProjectAgents(projectId);
+  }
+
+  saveProjectAgents(projectId: string, agents: ProjectAgent[]): Promise<void> {
+    return this.engine.saveProjectAgents(projectId, agents);
   }
 
   savePendingChanges(projectId: string, changes: PendingChange[]): Promise<void> {

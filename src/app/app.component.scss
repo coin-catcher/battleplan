@@ -8,6 +8,68 @@
   gap: 6px;
 }
 
+.agent-toolbox {
+  position: absolute;
+  top: 90px;
+  right: 10px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-height: calc(100% - 100px);
+  overflow-y: auto;
+}
+
+.agent-toolbox-item,
+.agent-toolbox-add {
+  width: 100px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+}
+
+.agent-toolbox-item img {
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  background: var(--panel-muted, #1a2330);
+  object-fit: contain;
+}
+
+.agent-toolbox-item span,
+.agent-toolbox-add span:last-child {
+  max-width: 100px;
+  font-size: 0.75rem;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-toolbox-item.active img {
+  outline: 2px solid var(--accent, #5b9fd4);
+}
+
+.agent-toolbox-add .add-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1f6b3a;
+  color: #fff;
+  font-size: 2rem;
+  line-height: 1;
+}
+
 .zoom-controls button {
   width: 32px;
   height: 32px;

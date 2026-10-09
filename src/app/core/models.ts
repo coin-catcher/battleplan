@@ -126,7 +126,9 @@ export type Selection =
   | { kind: 'task'; taskId: string }
   | { kind: 'subproject'; taskId: string }
   | { kind: 'code'; taskId: string }
-  | { kind: 'research'; taskId: string };
+  | { kind: 'research'; taskId: string }
+  | { kind: 'agent'; agentId: string }
+  | { kind: 'agent-create'; role: AgentKind; draftId: string };
 
 export const AGENT_KINDS = ['research', 'code'] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];
@@ -143,6 +145,8 @@ export interface ProjectAgent {
   name: string;
   url: string;
   api_key?: string;
+  /** Optional org Admin API key for provider usage/cost statistics (separate from chat api_key). */
+  admin_api_key?: string;
   options?: Record<string, AgentOptionValue>;
   icon_asset?: string;
   cursor_agent_id?: string;

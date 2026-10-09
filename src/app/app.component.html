@@ -58,6 +58,27 @@
           <button type="button" (click)="zoomBy(1.15)" aria-label="Zoom in">+</button>
           <button type="button" (click)="zoomBy(1 / 1.15)" aria-label="Zoom out">−</button>
         </div>
+        <div class="agent-toolbox" aria-label="Agent library">
+          @for (agent of store.sortedAgents(); track agent.agent_id) {
+            <button
+              type="button"
+              class="agent-toolbox-item"
+              [class.active]="isAgentSelected(agent.agent_id)"
+              (click)="selectLibraryAgent(agent.agent_id)"
+            >
+              <img [src]="agentLogoPath(agent.type)" [alt]="agent.name" width="48" height="48" />
+              <span>{{ agent.name }}</span>
+            </button>
+          }
+          <button type="button" class="agent-toolbox-add" (click)="beginAgentCreate('code')">
+            <span class="add-icon" aria-hidden="true">+</span>
+            <span>Code Agent</span>
+          </button>
+          <button type="button" class="agent-toolbox-add" (click)="beginAgentCreate('research')">
+            <span class="add-icon" aria-hidden="true">+</span>
+            <span>Research Agent</span>
+          </button>
+        </div>
         <div #mapStage class="map-stage" aria-label="Project mindmap" (pointerdown)="onStagePointerDown($event)">
           <div class="map-scaler" [style.width.px]="map().width * zoom()" [style.height.px]="map().height * zoom()">
             <div class="map-canvas" [style.width.px]="map().width" [style.height.px]="map().height" [style.transform]="'scale(' + zoom() + ')'">
@@ -654,6 +675,16 @@
               (click)="store.saveResearchOutput({ repo: researchRepo, branch: researchBranch, pr_message: researchMessage, pr_link: researchLink, path: researchPath })"
             >Save research output</button>
           </section>
+        }
+      }
+      @case ('agent') {
+        @if (store.selectedAgent(); as agent) {
+          <app-agent-editor #agentEditor [agent]="agent" mode="edit" />
+        }
+      }
+      @case ('agent-create') {
+        @if (store.selectedAgent(); as agent) {
+          <app-agent-editor #agentEditor [agent]="agent" mode="create" />
         }
       }
       @default {

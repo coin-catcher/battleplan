@@ -18,6 +18,9 @@ import {
   type MindmapNode,
 } from './core/mindmap';
 import { MarkdownComponent } from 'ngx-markdown';
+import { AgentEditorComponent } from './components/agent-editor/agent-editor.component';
+import { agentLogoPublicPath } from './core/agent-types';
+import type { AgentKind, AgentType } from './core/models';
 import { editorPanelDirty } from './core/editor-dirty';
 import { taskDar, taskInitialPrompt } from './core/task-fields';
 import { normalChildIds } from './core/dependencies';
@@ -25,7 +28,7 @@ import { BattleplanStore } from './state/battleplan-store.service';
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, MarkdownComponent],
+  imports: [FormsModule, MarkdownComponent, AgentEditorComponent],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss',
 })
@@ -51,6 +54,7 @@ export class AppComponent implements OnInit {
   readonly mapDraggingNodeId = signal<string | null>(null);
   readonly mapStage = viewChild<ElementRef<HTMLElement>>('mapStage');
   readonly chatTranscript = viewChild<ElementRef<HTMLElement>>('chatTranscript');
+  readonly agentEditor = viewChild(AgentEditorComponent);
   private edgeHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private convertHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private edgeLongPressFired = false;
@@ -332,6 +336,9 @@ export class AppComponent implements OnInit {
   editorIsDirty(): boolean {
     const selection = this.store.selection();
     const project = selection.kind === 'subproject' ? this.store.editorProject() : this.store.project();
+    if (selection.kind === 'agent' || selection.kind === 'agent-create') {
+      return this.agentEditor()?.isDirty() ?? false;
+    }
     return editorPanelDirty(
       selection.kind,
       {
@@ -392,6 +399,8 @@ export class AppComponent implements OnInit {
         dependencies: this.dependencies,
         sibling_dependencies: this.siblingDependencies,
       });
+    } else if (selection.kind === 'agent' || selection.kind === 'agent-create') {
+      await this.agentEditor()?.save();
     } else {
       return true;
     }
@@ -878,6 +887,28 @@ export class AppComponent implements OnInit {
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+  }
+
+  agentLogoPath(type: AgentType): string {
+    return agentLogoPublicPath(type);
+  }
+
+  isAgentSelected(agentId: string): boolean {
+    const selection = this.store.selection();
+    return selection.kind === 'agent' && selection.agentId === agentId;
+  }
+
+  beginAgentCreate(role: AgentKind): void {
+    void this.guardUnsavedChanges(async () => {
+      this.store.beginAgentCreate(role);
+    });
+  }
+
+  selectLibraryAgent(agentId: string): void {
+    if (this.isAgentSelected(agentId)) return;
+    void this.guardUnsavedChanges(async () => {
+      this.store.selectAgent(agentId);
+    });
   }
 
   selectMapNode(node: MindmapNode): void {
