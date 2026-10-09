@@ -57,7 +57,7 @@ describe('parse generated tasks', () => {
   it('reads a fenced JSON task list', () => {
     const drafts = parseGeneratedTaskList(`Sure.\n\`\`\`json\n[{"title":"Notes","prompt":"Write notes","output_type":"research","depends_on":[]}]\n\`\`\``);
     expect(drafts).toEqual([
-      { title: 'Notes', prompt: 'Write notes', output_type: 'research', depends_on: [] },
+      { title: 'Notes', prompt: 'Write notes', output_type: 'research', depends_on: [], sequential_with: [] },
     ]);
   });
 

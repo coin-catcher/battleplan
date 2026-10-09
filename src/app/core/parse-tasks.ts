@@ -51,11 +51,19 @@ export function parseGeneratedTaskList(text: string): TaskDraft[] {
     if (!Array.isArray(depends) || depends.some((entry) => typeof entry !== 'string')) {
       throw new Error(`Task ${index + 1} depends_on must be an array of task titles.`);
     }
+    const sequentialRaw = record['sequential_with']
+      ?? record['sibling_dependencies']
+      ?? record['conflicts_with']
+      ?? [];
+    if (!Array.isArray(sequentialRaw) || sequentialRaw.some((entry) => typeof entry !== 'string')) {
+      throw new Error(`Task ${index + 1} sequential_with must be an array of task titles.`);
+    }
     return {
       title,
       prompt,
       output_type: output.trim(),
       depends_on: depends.map((entry) => entry.trim()).filter(Boolean),
+      sequential_with: sequentialRaw.map((entry) => entry.trim()).filter(Boolean),
     };
   });
 }

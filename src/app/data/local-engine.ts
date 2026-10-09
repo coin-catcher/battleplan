@@ -52,6 +52,7 @@ import {
   siblingDependencyIds,
 } from '../core/dependencies';
 import { availableDescendants, independentBatch } from '../core/execute-children';
+import { bindSequentialDraftLinks, linkCreatedTasksUnderParent } from '../core/generate-task-links';
 import {
   buildGenerateTaskTasksUserMessage,
   generateTasksInstructionForProject,
@@ -87,6 +88,7 @@ interface NormalizedDraft {
   prompt: string;
   output_type: OutputType;
   depends_on: string[];
+  sequential_with: string[];
 }
 
 export class LocalEngine {
@@ -361,7 +363,7 @@ export class LocalEngine {
     return task;
   }
 
-  async createTasks(projectId: string, drafts: TaskDraft[]): Promise<ProjectTask[]> {
+  async createTasks(projectId: string, drafts: TaskDraft[], parentTaskId?: string): Promise<ProjectTask[]> {
     await this.requireProject(projectId);
     const normalized = normalizeDrafts(drafts);
     const existing = await this.repo.listTasks(projectId);
@@ -388,6 +390,10 @@ export class LocalEngine {
     };
     });
     bindDependencies(existing, created, normalized);
+    bindSequentialDraftLinks(existing, created, normalized);
+    if (parentTaskId) {
+      linkCreatedTasksUnderParent(existing, created, parentTaskId);
+    }
     assertAcyclicNormalLinks([...existing, ...created]);
     await this.repo.saveTasks([...existing, ...created]);
     return created;
@@ -1509,8 +1515,9 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
     if (!prompt) throw new Error(`Task ${index + 1} prompt is required.`);
     const types = outputTypesOf(item.output_type, index + 1);
     const depends = item.depends_on ?? [];
+    const sequential = item.sequential_with ?? [];
     if (types.length === 1) {
-      normalized.push({ title, prompt, output_type: types[0], depends_on: depends });
+      normalized.push({ title, prompt, output_type: types[0], depends_on: depends, sequential_with: sequential });
       return;
     }
     normalized.push({
@@ -1518,12 +1525,14 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
       prompt,
       output_type: 'research',
       depends_on: depends,
+      sequential_with: [],
     });
     normalized.push({
       title: `${title} (code)`,
       prompt,
       output_type: 'code',
       depends_on: [...depends, `${title} (research)`],
+      sequential_with: sequential,
     });
   });
   return normalized;

@@ -127,6 +127,8 @@ export interface TaskDraft {
   prompt: string;
   output_type: string;
   depends_on: string[];
+  /** Titles of other tasks in this batch that must run sequentially (conflicting / high-overlap code). */
+  sequential_with?: string[];
 }
 
 export type Selection =

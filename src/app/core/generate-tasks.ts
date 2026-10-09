@@ -6,13 +6,16 @@ const JSON_TASK_LIST_RULES = [
   '- "title": string, a short task name',
   '- "prompt": string, the instruction the executing agent should follow (stored as the task initial prompt)',
   '- "output_type": "code" or "research"',
-  '- "depends_on": array of task titles listed in this same JSON array',
+  '- "depends_on": array of task titles listed in this same JSON array (tree parent links)',
+  '- "sequential_with": optional array of task titles in this batch that touch the same code and must not run in parallel',
   'A task must declare exactly one output type. If work needs both research and code, emit two tasks (research first, then code).',
   'Order the array so prerequisite tasks appear before tasks that depend on them.',
   '',
   'Mindmap linking (important): Battleplan interprets depends_on as parent titles in the tree.',
   'If task B lists "Setup" in depends_on, "Setup" becomes the parent node and B is drawn as its child.',
-  'An empty depends_on array means the task attaches directly to the project unless Battleplan anchors it under the task that invoked Generate Tasks.',
+  'When Generate Tasks is run from a task, leave depends_on empty on sibling code tasks; Battleplan attaches them under that task.',
+  '',
+  'Sequential execution: if two or more code tasks would edit the same files, modules, or tightly coupled behavior and could merge-conflict, list each other in sequential_with (both directions when mutual). They stay sibling nodes but Execute Children will not run them in parallel.',
 ].join('\n');
 
 export function generateTasksInstructionForProject(): string {
@@ -34,7 +37,8 @@ export function generateTasksInstructionForResearchTask(researchTitle: string): 
     '- Emit a simple one-dimensional list of code tasks only (sibling nodes under this research task).',
     '- Set output_type to "code" for every item in that list.',
     '- Set depends_on to [] on every code task. Battleplan will attach them as children of this research task.',
-    '- Do not link generated code tasks to each other with depends_on unless one must finish before another can start.',
+    '- Do not link generated code tasks with depends_on unless one is a true prerequisite (foundation/data task).',
+    '- For code tasks that would conflict if run in parallel, use sequential_with with the other task titles instead of depends_on.',
     '',
     'When prerequisites are genuinely needed, add only the extra tasks the plan requires:',
     '- Child research task: for open-ended data gathering. It may own a small child code task that systematizes data retrieval.',
@@ -67,12 +71,4 @@ export function buildGenerateTaskTasksUserMessage(task: ProjectTask): string {
   ].filter(Boolean).join('\n\n');
 }
 
-/** Empty depends_on → attach under the task that invoked Generate Tasks. */
-export function anchorDraftsUnderParentTask(drafts: TaskDraft[], parentTitle: string): TaskDraft[] {
-  const parent = parentTitle.trim();
-  if (!parent) return drafts;
-  return drafts.map((draft) => ({
-    ...draft,
-    depends_on: (draft.depends_on ?? []).filter(Boolean).length > 0 ? draft.depends_on : [parent],
-  }));
-}
+export { prepareGeneratedDrafts as anchorDraftsUnderParentTask } from './generate-task-links';
