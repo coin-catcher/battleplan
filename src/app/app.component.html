@@ -154,6 +154,16 @@
               }
             }
           }
+          @if (mapMarquee(); as marquee) {
+            <div
+              class="map-marquee"
+              [style.left]="mapMarqueeStyle(marquee).left"
+              [style.top]="mapMarqueeStyle(marquee).top"
+              [style.width]="mapMarqueeStyle(marquee).width"
+              [style.height]="mapMarqueeStyle(marquee).height"
+              aria-hidden="true"
+            ></div>
+          }
           @for (node of map().nodes; track node.id) {
             @if (visibleConnectDirection(node.id); as direction) {
               <button
@@ -192,6 +202,7 @@
               [class.cloud]="node.shape === 'research'"
               [class.code]="node.shape === 'code'"
               [class.active]="isMapSelected(node)"
+              [class.group-selected]="isMapGroupSelected(node)"
               [class.editing]="editingNodeId() === node.id"
               [attr.data-status]="node.status ?? null"
               [style.left.px]="node.x"

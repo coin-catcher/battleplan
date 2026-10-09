@@ -332,6 +332,14 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .map-node[data-status="BLOCKED"] { background: var(--status-blocked); color: #fff; border-color: #a32626; }
 .map-node[data-status="ABANDONED"] { background: var(--status-abandoned); color: #f4efe6; border-color: #111; }
 .map-node.active { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.72); }
+.map-node.group-selected { box-shadow: 0 0 0 3px rgba(120, 196, 255, 0.92); }
+.map-marquee {
+  position: absolute;
+  border: 1.5px dashed rgba(120, 196, 255, 0.95);
+  background: rgba(120, 196, 255, 0.12);
+  pointer-events: none;
+  z-index: 4;
+}
 .map-label {
   font-size: 0.86rem;
   line-height: 1.2;
@@ -369,13 +377,18 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .project-tabs {
   display: flex;
+  flex: none;
+  flex-shrink: 0;
+  align-items: flex-end;
   gap: 4px;
   padding: 8px 12px 0;
   background: var(--sidebar);
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
+  overflow-y: hidden;
 }
 .project-tab {
+  flex: none;
   border: 1px solid var(--line);
   border-bottom: 0;
   border-radius: 8px 8px 0 0;
@@ -384,6 +397,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   padding: 8px 14px;
   cursor: pointer;
   white-space: nowrap;
+  line-height: 1.25;
 }
 .project-tab.active {
   background: var(--sidebar);
