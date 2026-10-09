@@ -1,8 +1,10 @@
 import type {
+  AgentUsageLedger,
   ChatArtifact,
   ChatMessage,
   PendingChange,
   Project,
+  ProjectAgent,
   ProjectTask,
   TaskCodeOutput,
   TaskResearchOutput,
@@ -34,4 +36,9 @@ export interface BattleplanRepository {
 
   listPendingChanges(projectId: string): Promise<PendingChange[]>;
   savePendingChanges(projectId: string, changes: PendingChange[]): Promise<void>;
+
+  listProjectAgents(projectId: string): Promise<ProjectAgent[]>;
+  saveProjectAgents(projectId: string, agents: ProjectAgent[]): Promise<void>;
+  getAgentUsageLedger(projectId: string): Promise<Record<string, AgentUsageLedger>>;
+  saveAgentUsageLedger(projectId: string, ledger: Record<string, AgentUsageLedger>): Promise<void>;
 }

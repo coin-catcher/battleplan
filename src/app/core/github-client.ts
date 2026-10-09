@@ -41,7 +41,11 @@ async function githubJson<T>(token: string, url: string, init?: RequestInit): Pr
   if (!response.ok) {
     const record = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
     const message = typeof record['message'] === 'string' ? record['message'] : text || response.statusText;
-    throw new Error(`GitHub API ${response.status}: ${message}`);
+    const error = new Error(`GitHub API ${response.status}: ${message}`);
+    if (isGithubMergeConflictMessage(response.status, message)) {
+      error.name = 'GithubMergeConflictError';
+    }
+    throw error;
   }
   return parsed as T;
 }
@@ -143,6 +147,23 @@ export async function createPullRequest(input: {
   );
   return { number: data.number, html_url: data.html_url };
 }
+
+export function isGithubMergeConflictError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === 'GithubMergeConflictError') return true;
+  return isGithubMergeConflictMessage(undefined, error.message);
+}
+
+function isGithubMergeConflictMessage(status: number | undefined, message: string): boolean {
+  const normalized = message.toLowerCase();
+  if (!normalized.includes('merge conflict')) return false;
+  if (status === 405 || status === 409 || status === 422) return true;
+  return normalized.includes('github api 405')
+    || normalized.includes('github api 409')
+    || normalized.includes('github api 422');
+}
+
+export const MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL = 'sent the Cursor agent instructions to merge the base branch';
 
 export async function mergePullRequest(
   owner: string,

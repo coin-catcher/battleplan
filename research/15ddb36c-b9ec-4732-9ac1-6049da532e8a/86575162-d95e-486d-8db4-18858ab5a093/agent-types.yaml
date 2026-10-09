@@ -1,0 +1,378 @@
+# BattlePlan Agent Library — type registry (v1)
+# Implementers: load this file or generate TS from it in a build step.
+
+defaults:
+  common_options:
+    - key: system_prompt
+      label: System Prompt
+      control: textarea
+      applies_to: all
+    - key: use_reasoning
+      label: Use Reasoning
+      control: checkbox
+      applies_to: all
+      help: Enable provider-specific reasoning/thinking when supported.
+    - key: use_tool_calls
+      label: Use Tool Calls
+      control: checkbox
+      applies_to: all
+      help: Allow models to invoke tools/functions when supported.
+
+types:
+  OpenAI:
+    kind: research
+    default_name: OpenAI Research
+    default_url: https://api.openai.com/v1
+    logo:
+      asset: openai.svg
+      simple_icons_slug: openai
+      alt: OpenAI
+    test_connection:
+      method: GET
+      path: /models
+      auth: bearer
+      success_http: [200]
+      user_error_map:
+        401: Invalid API key or unauthorized for this organization.
+        403: API key lacks permission to list models.
+    statistics:
+      adapter: openai_org_admin
+      requires_separate_admin_key: true
+      admin_key_hint: Organization Admin API key (not the same as project sk- key).
+    specific_options:
+      - key: model
+        label: Model
+        control: select
+        default: gpt-4.1-mini
+        choices: [gpt-4.1, gpt-4.1-mini, gpt-4o, gpt-4o-mini, o3, o4-mini]
+      - key: reasoning_effort
+        label: Reasoning effort
+        control: select
+        default: medium
+        choices: [low, medium, high]
+        visible_when: { use_reasoning: true }
+        maps_to_api: reasoning.effort on Responses API / o-series models
+      - key: temperature
+        label: Temperature
+        control: number
+        default: 0.7
+        min: 0
+        max: 2
+      - key: max_output_tokens
+        label: Max output tokens
+        control: number
+        default: 4096
+      - key: parallel_tool_calls
+        label: Parallel tool calls
+        control: checkbox
+        default: true
+        visible_when: { use_tool_calls: true }
+      - key: tool_choice
+        label: Tool choice
+        control: select
+        default: auto
+        choices: [auto, none, required]
+        visible_when: { use_tool_calls: true }
+      - key: store
+        label: Store conversation (OpenAI)
+        control: checkbox
+        default: false
+        help: When true, uses stored responses features where enabled for the account.
+
+  Anthropic:
+    kind: research
+    default_name: Anthropic Research
+    default_url: https://api.anthropic.com
+    logo:
+      asset: anthropic.svg
+      simple_icons_slug: anthropic
+    test_connection:
+      method: POST
+      path: /v1/messages
+      auth: x-api-key
+      headers:
+        anthropic-version: "2023-06-01"
+      body:
+        model: claude-sonnet-4-20250514
+        max_tokens: 1
+        messages: [{ role: user, content: ping }]
+      success_http: [200]
+      user_error_map:
+        401: Invalid Anthropic API key.
+        403: Key valid but model access denied.
+    statistics:
+      adapter: anthropic_admin
+      requires_separate_admin_key: true
+      admin_key_hint: Messages API key (sk-ant-api...) is not the same as Admin API key (sk-ant-admin...) for usage and cost reports.
+    specific_options:
+      - key: model
+        label: Model
+        control: select
+        default: claude-sonnet-4-20250514
+        choices:
+          - claude-opus-4-20250514
+          - claude-sonnet-4-20250514
+          - claude-3-5-haiku-20241022
+      - key: max_tokens
+        label: Max tokens
+        control: number
+        default: 8192
+      - key: thinking_budget_tokens
+        label: Thinking budget (tokens)
+        control: number
+        default: 10000
+        visible_when: { use_reasoning: true }
+        maps_to_api: thinking.type enabled with budget_tokens
+      - key: thinking_type
+        label: Thinking mode
+        control: select
+        default: enabled
+        choices: [enabled, disabled]
+        visible_when: { use_reasoning: true }
+      - key: tool_choice
+        label: Tool choice
+        control: select
+        default: auto
+        choices: [auto, any, none]
+        visible_when: { use_tool_calls: true }
+      - key: disable_parallel_tool_use
+        label: Disable parallel tool use
+        control: checkbox
+        default: false
+        visible_when: { use_tool_calls: true }
+      - key: server_tools_web_search
+        label: Anthropic web search tool
+        control: checkbox
+        default: false
+        visible_when: { use_tool_calls: true }
+      - key: server_tools_code_execution
+        label: Anthropic code execution tool
+        control: checkbox
+        default: false
+        visible_when: { use_tool_calls: true }
+
+  Gemini:
+    kind: research
+    default_name: Gemini Research
+    default_url: https://generativelanguage.googleapis.com/v1beta
+    logo:
+      asset: googlegemini.svg
+      simple_icons_slug: googlegemini
+    test_connection:
+      method: GET
+      path: /models
+      auth: query_key
+      query_param: key
+      success_http: [200]
+    statistics:
+      adapter: gemini_hybrid
+      primary: local_ledger_from_usage_metadata
+      secondary: cloud_billing_export_optional
+    specific_options:
+      - key: model
+        label: Model
+        control: select
+        default: gemini-2.5-flash
+        choices: [gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash]
+      - key: thinking_budget
+        label: Thinking budget
+        control: select
+        default: auto
+        choices: [auto, off, low, medium, high]
+        visible_when: { use_reasoning: true }
+        maps_to_api: thinkingConfig / thinkingBudget per model docs
+      - key: temperature
+        label: Temperature
+        control: number
+        default: 1.0
+        min: 0
+        max: 2
+      - key: top_p
+        label: Top P
+        control: number
+        default: 0.95
+      - key: function_calling_mode
+        label: Function calling mode
+        control: select
+        default: AUTO
+        choices: [AUTO, ANY, NONE]
+        visible_when: { use_tool_calls: true }
+      - key: google_search_grounding
+        label: Google Search grounding
+        control: checkbox
+        default: false
+        visible_when: { use_tool_calls: true }
+      - key: code_execution
+        label: Code execution tool
+        control: checkbox
+        default: false
+        visible_when: { use_tool_calls: true }
+
+  Grok:
+    kind: research
+    default_name: Grok Research
+    default_url: https://api.x.ai/v1
+    logo:
+      asset: xai.svg
+      simple_icons_slug: x
+      note: Use xAI brand asset; Simple Icons slug may be x or custom SVG in repo.
+    test_connection:
+      method: GET
+      path: /models
+      auth: bearer
+      success_http: [200]
+      user_error_map:
+        401: Invalid xAI API key.
+        403: API key cannot list models; connection may still work via Responses API.
+      fallback_method: POST
+      fallback_path: /responses
+      fallback_body:
+        model: grok-4-1-fast-non-reasoning
+        input:
+          - role: user
+            content: ping
+        max_output_tokens: 1
+        store: false
+      note: Grok research uses POST /v1/responses; fall back when GET /models is unavailable for the key tier.
+    statistics:
+      adapter: local_ledger
+      price_hint_usd_per_mtok:
+        input: 2.0
+        output: 6.0
+        model: grok-4.7
+    specific_options:
+      - key: model
+        label: Model
+        control: select
+        default: grok-4.7
+        choices: [grok-4.7, grok-4-1-fast-reasoning, grok-4-1-fast-non-reasoning]
+      - key: reasoning_effort
+        label: Reasoning effort
+        control: select
+        default: high
+        choices: [low, medium, high, xhigh]
+        visible_when: { use_reasoning: true }
+        maps_to_api: reasoning.effort on POST /v1/responses
+      - key: prompt_cache_key
+        label: Prompt cache key
+        control: text
+        default: ""
+        help: Improves multi-turn cache hits on Responses API.
+      - key: builtin_web_search
+        label: Web search tool
+        control: checkbox
+        default: false
+        visible_when: { use_tool_calls: true }
+      - key: builtin_x_search
+        label: X search tool
+        control: checkbox
+        default: false
+        visible_when: { use_tool_calls: true }
+      - key: builtin_code_interpreter
+        label: Code interpreter tool
+        control: checkbox
+        default: false
+        visible_when: { use_tool_calls: true }
+      - key: custom_functions_json
+        label: Custom function schemas (JSON array)
+        control: textarea
+        default: "[]"
+        visible_when: { use_tool_calls: true }
+
+  "Cursor Agent":
+    kind: code
+    default_name: Cursor Code Agent
+    default_url: https://api.cursor.com/v1
+    logo:
+      asset: cursor.svg
+      simple_icons_slug: cursor
+    test_connection:
+      method: GET
+      path: /v1/me
+      auth: basic
+      basic_password_empty: true
+      success_http: [200]
+      fallback_path: /v1/agents
+      note: Match CursorKey auth used in cursor-browser.ts (API key as Basic username).
+    statistics:
+      adapter: cursor_admin_api
+      requires_enterprise_admin_key: true
+      poll_interval_minutes: 60
+    specific_options:
+      - key: default_mode
+        label: Default run mode
+        control: select
+        default: agent
+        choices: [agent, plan]
+      - key: default_repo_url
+        label: Default repository URL
+        control: text
+        default: ""
+        inherit_from: project.repo_url
+      - key: default_starting_ref
+        label: Default starting ref
+        control: text
+        default: develop
+        inherit_from: project.starting_ref
+      - key: auto_create_pr
+        label: Auto-create PR (platform)
+        control: checkbox
+        default: false
+        help: Battleplan policy disables PR creation in agents; keep false unless product changes.
+      - key: model
+        label: Model preference
+        control: text
+        default: ""
+        help: Optional; when Cursor exposes explicit model pickers document mapping here.
+      - key: env_vars_json
+        label: Environment variables (JSON object)
+        control: textarea
+        default: "{}"
+
+  LocalLLM:
+    kind: research
+    default_name: Local vLLM
+    default_url: http://127.0.0.1:8000/v1
+    logo:
+      asset: vllm.svg
+      note: Bundle neutral GPU/LLM icon if vLLM logo unavailable.
+    test_connection:
+      method: GET
+      path: /health
+      auth: none
+      alt_path: /v1/models
+      success_http: [200]
+    statistics:
+      adapter: vllm_metrics_plus_ledger
+      metrics_path: /metrics
+    specific_options:
+      - key: model
+        label: Model
+        control: select
+        default: ""
+        dynamic: true
+        populate_from: GET /v1/models
+      - key: temperature
+        label: Temperature
+        control: number
+        default: 0.7
+      - key: max_tokens
+        label: Max tokens
+        control: number
+        default: 2048
+      - key: top_p
+        label: Top P
+        control: number
+        default: 0.9
+      - key: enable_auto_tool_choice
+        label: Enable tool use (OpenAI-compatible tools)
+        control: checkbox
+        default: false
+        visible_when: { use_tool_calls: true }
+        help: Requires vLLM served with tool-call parser for the model.
+      - key: reasoning_parser
+        label: Reasoning parser
+        control: text
+        default: ""
+        visible_when: { use_reasoning: true }
+        help: vLLM --reasoning-parser flag alignment for thinking models.
