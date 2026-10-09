@@ -22,6 +22,7 @@ import type { GithubCompareCommit } from '../core/github-client';
 import {
   agentBranchPolicyLines,
   branchNamesFromRun,
+  mergeConflictRecoveryPrompt,
   pickBranchInfoFromRun,
   pickTaskAgentBranch,
   wrapAgentRunPrompt,
@@ -29,6 +30,11 @@ import {
 import {
   compareBranches,
   createAndMergePullRequest,
+  createPullRequest,
+  isGithubMergeConflictError,
+  listPullCommits,
+  MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL,
+  mergePullRequest,
   requireProjectGithubPat,
   repoSlugFromProject,
 } from '../core/github-client';
@@ -696,7 +702,7 @@ export class LocalEngine {
     const { owner, repo } = repoSlugFromProject(project);
     const base = project.starting_ref?.trim() || DEFAULT_MAIN_BRANCH;
     const head = await this.resolveTaskMergeBranch(task, output?.branch, base, token, owner, repo);
-    const { pull, commits } = await createAndMergePullRequest({
+    const pull = await createPullRequest({
       owner,
       repo,
       head,
@@ -705,6 +711,20 @@ export class LocalEngine {
       body: output.pr_message || task.title,
       token,
     });
+    let commits: GithubCompareCommit[];
+    try {
+      await mergePullRequest(owner, repo, pull.number, token);
+      commits = await listPullCommits(owner, repo, pull.number, token);
+    } catch (error) {
+      if (isGithubMergeConflictError(error)) {
+        await this.dispatchMergeConflictRecovery(task, head, base);
+        throw new Error(
+          `Pull request has merge conflicts. Battleplan ${MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL} and resolve conflicts. `
+          + 'Try Approve and merge again after the agent finishes.',
+        );
+      }
+      throw error;
+    }
     const mergedOutput = {
       ...output,
       pr_link: pull.html_url,
@@ -1098,6 +1118,42 @@ export class LocalEngine {
         throw new Error('Sibling dependencies must be DONE before this task can start.');
       }
     }
+  }
+
+  private async dispatchMergeConflictRecovery(
+    task: ProjectTask,
+    agentBranch: string,
+    baseBranch: string,
+  ): Promise<void> {
+    const instructions = mergeConflictRecoveryPrompt({ baseBranch, agentBranch });
+    if (!task.cursor_agent_id) {
+      await this.record({
+        scope: 'task',
+        project_id: task.project_id,
+        task_id: task.task_id,
+        role: 'user',
+        content: instructions,
+        intent: 'feedback',
+      });
+      return;
+    }
+    this.markTaskDoingOnAgentChat(task);
+    const run = await this.cursor.createRun(task.cursor_agent_id, {
+      text: wrapAgentRunPrompt(instructions, { baseBranch, agentBranch }),
+      mode: 'agent',
+    });
+    task.latest_run_id = run.id;
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+    await this.record({
+      scope: 'task',
+      project_id: task.project_id,
+      task_id: task.task_id,
+      role: 'user',
+      content: instructions,
+      run_id: run.id,
+      intent: 'feedback',
+    });
   }
 
   private async launchWithFirstMessage(task: ProjectTask, userMessage: string): Promise<ChatMessage> {

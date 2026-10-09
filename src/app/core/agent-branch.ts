@@ -74,6 +74,21 @@ export function agentBranchPolicyLines(input: {
   return lines;
 }
 
+export function mergeConflictRecoveryPrompt(input: {
+  baseBranch: string;
+  agentBranch: string;
+}): string {
+  const base = input.baseBranch.trim() || 'develop';
+  const branch = input.agentBranch.trim();
+  return [
+    `Battleplan could not merge your pull request into \`${base}\` because GitHub reported merge conflicts (the base branch may have moved forward).`,
+    `Merge the latest \`${base}\` branch into your working branch${branch ? ` (\`${branch}\`)` : ''}.`,
+    'Resolve all merge conflicts, commit the merge, and push to your working branch.',
+    'In your reply, summarize which files conflicted and how you resolved them.',
+    'Do not open or merge pull requests; Battleplan will run Approve and merge again after your push.',
+  ].join('\n\n');
+}
+
 export function wrapAgentRunPrompt(
   body: string,
   policy: { baseBranch: string; agentBranch?: string },

@@ -25,6 +25,7 @@ import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '..
 import { anchorDraftsUnderParentTask } from '../core/generate-tasks';
 import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
+import { MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL } from '../core/github-client';
 import { doingBackgroundWatchTaskIds, taskNeedsDoingBackgroundPoll } from './doing-background-watch';
 
 const POLL_INTERVAL_MS = 3000;
@@ -778,14 +779,27 @@ export class BattleplanStore {
   async approve(): Promise<void> {
     const task = this.selectedTask();
     if (!task) return;
+    const taskId = task.task_id;
     await this.run(async () => {
-      const merged = await this.api.approve(task.task_id);
-      this.replaceTask(merged);
-      const refreshed = await this.api.listTaskMessages(task.task_id);
-      this.applyTaskConversation(refreshed);
-      await this.refreshPendingChanges();
-      this.notice.set('Pull request merged. Task is DONE.');
+      try {
+        const merged = await this.api.approve(taskId);
+        this.replaceTask(merged);
+        const refreshed = await this.api.listTaskMessages(taskId);
+        this.applyTaskConversation(refreshed);
+        await this.refreshPendingChanges();
+        this.notice.set('Pull request merged. Task is DONE.');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        if (message.includes(MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL)) {
+          const refreshed = await this.api.listTaskMessages(taskId);
+          this.applyTaskConversation(refreshed);
+        }
+        throw error;
+      }
     });
+    if (this.error()?.includes(MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL)) {
+      this.continueTaskWatch(taskId);
+    }
   }
 
   async move(taskId: string, direction: -1 | 1): Promise<void> {
