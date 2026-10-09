@@ -22,7 +22,7 @@ import { defaultOptionValues, getAgentTypeDefinition } from '../core/agent-types
 import { isAgentDraftId, newDraftAgentId } from '../core/agent-id';
 import type { AgentEditorSaveInput } from '../api/battleplan-api.service';
 import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
-import { anchorDraftsUnderParentTask } from '../core/generate-tasks';
+import { generateTasksSourceTaskId, linkCreatedTasksUnderParent, prepareGeneratedDrafts } from '../core/generate-task-links';
 import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
 import { doingBackgroundWatchTaskIds, taskNeedsDoingBackgroundPoll } from './doing-background-watch';
@@ -498,7 +498,7 @@ export class BattleplanStore {
     const projectId = this.projectId();
     if (!projectId) return;
     const selection = this.selection();
-    const taskId = selection.kind === 'task' ? selection.taskId : undefined;
+    const taskId = generateTasksSourceTaskId(selection);
     let runId: string | undefined;
     await this.run(async () => {
       const sent = taskId
@@ -526,10 +526,8 @@ export class BattleplanStore {
     await this.run(async () => {
       let drafts = parseGeneratedTaskListFromSources(reply.content, this.artifacts());
       const sourceTask = taskId ? this.tasks().find((item) => item.task_id === taskId) : undefined;
-      if (sourceTask) {
-        drafts = anchorDraftsUnderParentTask(drafts, sourceTask.title);
-      }
-      await this.api.createTasks(projectId, drafts);
+      drafts = prepareGeneratedDrafts(drafts, sourceTask);
+      await this.api.createTasks(projectId, drafts, taskId);
       await this.reloadTasks();
       const note = `Created ${drafts.length} task${drafts.length === 1 ? '' : 's'} from this conversation.`;
       const saved = taskId ? await this.api.noteTask(taskId, note) : await this.api.noteProject(projectId, note);
