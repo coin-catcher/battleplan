@@ -79,6 +79,13 @@ export class AgentEditorComponent {
       this.dynamicModelChoices.set([]);
       this.apiKeyFocused.set(false);
       this.adminApiKeyFocused.set(false);
+      if (agent.last_test_status === 'error') {
+        this.testState.set('error');
+        this.testMessage.set(agent.last_test_message ?? '');
+      } else {
+        this.testState.set('idle');
+        this.testMessage.set('');
+      }
     });
   }
 
@@ -225,14 +232,14 @@ export class AgentEditorComponent {
       this.testMessage.set(result.message);
     }
     if (!isAgentDraftId(agent.agent_id)) {
-      const updated: ProjectAgent = {
-        ...projectAgentFromForm(form, agent),
-        last_test_at: new Date().toISOString(),
-        last_test_status: result.ok ? 'success' : 'error',
+      const testedAt = new Date().toISOString();
+      const patch = {
+        last_test_at: testedAt,
+        last_test_status: result.ok ? ('success' as const) : ('error' as const),
         last_test_message: result.message,
       };
-      await this.store.persistAgentRecord(updated);
-      this.agentInput.set(updated);
+      await this.store.persistAgentTestResult(agent.agent_id, patch);
+      this.agentInput.set({ ...agent, ...patch });
     }
   }
 

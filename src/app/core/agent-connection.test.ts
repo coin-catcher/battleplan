@@ -182,3 +182,43 @@ describe('parseOpenAiModelIds', () => {
     ).toEqual(['a', 'b']);
   });
 });
+
+describe('runAgentConnectionTest (OpenAI)', () => {
+  it('passes GET /v1/models with Bearer token when the key is valid', async () => {
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('https://api.openai.com/v1/models');
+      const headers = init?.headers as Record<string, string> | undefined;
+      expect(headers?.['Authorization']).toBe('Bearer sk-valid');
+      expect(init?.method).toBe('GET');
+      return new Response(JSON.stringify({ data: [{ id: 'gpt-4o' }] }), { status: 200 });
+    });
+
+    const result = await runAgentConnectionTest(
+      { type: 'OpenAI', url: 'https://api.openai.com/v1', apiKey: 'sk-valid' },
+      fetchFn,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.message).toMatch(/successful/i);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a stable mapped error for invalid keys until a later success', async () => {
+    const fetchFn = vi.fn(async () => new Response('{"error":"invalid_api_key"}', { status: 401 }));
+
+    const invalid = await runAgentConnectionTest(
+      { type: 'OpenAI', url: 'https://api.openai.com/v1', apiKey: 'sk-bad' },
+      fetchFn,
+    );
+    expect(invalid.ok).toBe(false);
+    expect(invalid.message).toMatch(/Invalid API key/i);
+    expect(invalid.message).not.toMatch(/sk-/);
+
+    fetchFn.mockImplementationOnce(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    const valid = await runAgentConnectionTest(
+      { type: 'OpenAI', url: 'https://api.openai.com/v1', apiKey: 'sk-good' },
+      fetchFn,
+    );
+    expect(valid.ok).toBe(true);
+  });
+});
