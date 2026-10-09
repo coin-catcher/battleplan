@@ -150,7 +150,12 @@ export const AGENT_TYPE_REGISTRY: Record<AgentType, AgentTypeDefinition> = {
       successHttp: [200],
       userErrorMap: { 401: 'Invalid Anthropic API key.', 403: 'Key valid but model access denied.' },
     },
-    statistics: { adapter: 'anthropic_admin', requiresSeparateAdminKey: true },
+    statistics: {
+      adapter: 'anthropic_admin',
+      requiresSeparateAdminKey: true,
+      adminKeyHint:
+        'Messages API key (sk-ant-api...) is not the same as Admin API key (sk-ant-admin...) for usage and cost reports.',
+    },
     specificOptions: [
       {
         key: 'model',
@@ -303,52 +308,47 @@ export function mergeAgentOptions(type: AgentType, saved: Record<string, AgentOp
   return { ...defaultOptionValues(type), ...(saved ?? {}) };
 }
 
-const COMMON_AGENT_OPTION_KEYS = new Set(AGENT_COMMON_OPTIONS.map((row) => row.key));
+const AGENT_COMMON_OPTION_KEYS = new Set(AGENT_COMMON_OPTIONS.map((row) => row.key));
 
-export interface AgentTypeChangeTouches {
-  nameTouched: boolean;
-  urlTouched: boolean;
+export interface AgentTypeChangeInput {
+  previousType: AgentType;
+  nextType: AgentType;
+  name: string;
+  url: string;
+  options: Record<string, AgentOptionValue>;
+  /** When false, Name resets to the new type default. */
+  nameTouched?: boolean;
+  /** When false, URL resets to the new type default. */
+  urlTouched?: boolean;
 }
 
-export interface AgentEditorTypeFields {
+export interface AgentTypeChangeResult {
   type: AgentType;
   name: string;
   url: string;
   options: Record<string, AgentOptionValue>;
+  logoPath: string;
 }
 
-/** Rebuild option defaults on type change; preserve shared research toggles when staying in research. */
-export function optionsAfterAgentTypeChange(
-  previousType: AgentType,
-  nextType: AgentType,
-  previousOptions: Record<string, AgentOptionValue>,
-): Record<string, AgentOptionValue> {
-  const nextDefaults = defaultOptionValues(nextType);
-  const previousKind = AGENT_TYPE_REGISTRY[previousType].kind;
-  const nextKind = AGENT_TYPE_REGISTRY[nextType].kind;
-  if (previousKind !== 'research' || nextKind !== 'research') {
-    return nextDefaults;
-  }
+/** Apply registry defaults when the user picks a different agent Type in the editor. */
+export function applyAgentTypeChange(input: AgentTypeChangeInput): AgentTypeChangeResult {
+  const def = getAgentTypeDefinition(input.nextType);
+  const nextDefaults = defaultOptionValues(input.nextType);
+  const nextKeys = new Set(agentOptionRows(input.nextType).map((row) => row.key));
+
   const preserved: Record<string, AgentOptionValue> = {};
-  for (const key of COMMON_AGENT_OPTION_KEYS) {
-    if (key in previousOptions) preserved[key] = previousOptions[key];
+  for (const [key, value] of Object.entries(input.options)) {
+    if (AGENT_COMMON_OPTION_KEYS.has(key) && nextKeys.has(key)) {
+      preserved[key] = value;
+    }
   }
-  return { ...nextDefaults, ...preserved };
-}
 
-/** Apply registry defaults when the user picks a new agent type in the editor. */
-export function applyAgentTypeChange(
-  current: AgentEditorTypeFields,
-  nextType: AgentType,
-  touches: AgentTypeChangeTouches,
-): AgentEditorTypeFields {
-  if (current.type === nextType) return current;
-  const definition = getAgentTypeDefinition(nextType);
   return {
-    type: nextType,
-    name: touches.nameTouched ? current.name : definition.defaultName,
-    url: touches.urlTouched ? current.url : definition.defaultUrl,
-    options: optionsAfterAgentTypeChange(current.type, nextType, current.options),
+    type: input.nextType,
+    name: input.nameTouched ? input.name : def.defaultName,
+    url: input.urlTouched ? input.url : def.defaultUrl,
+    options: { ...nextDefaults, ...preserved },
+    logoPath: agentLogoPublicPath(input.nextType),
   };
 }
 

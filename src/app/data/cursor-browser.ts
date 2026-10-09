@@ -52,12 +52,14 @@ export interface CreateAgentInput {
   /** Ignored — PR-scoped agent creates are not allowed. */
   prUrl?: string;
   envVars?: Record<string, string>;
+  /** Optional override for library Cursor agents (falls back to global Cursor key). */
+  apiKey?: string;
 }
 
 export interface CursorClient {
   createAgent(input: CreateAgentInput): Promise<{ agent: CursorAgent; run: CursorRun }>;
   archiveAgent(agentId: string): Promise<void>;
-  createRun(agentId: string, input: { text: string; mode?: 'agent' | 'plan' }): Promise<CursorRun>;
+  createRun(agentId: string, input: { text: string; mode?: 'agent' | 'plan'; apiKey?: string }): Promise<CursorRun>;
   listRuns(agentId: string): Promise<CursorRun[]>;
   getRun(agentId: string, runId: string): Promise<CursorRun>;
   streamRunText(agentId: string, runId: string): Promise<string | undefined>;
@@ -121,7 +123,7 @@ export class BrowserCursor implements CursorClient {
       if (input.startingRef) repo['startingRef'] = input.startingRef;
       body['repos'] = [repo];
     }
-    const payload = await this.request<Record<string, unknown>>('POST', '/v1/agents', body);
+    const payload = await this.request<Record<string, unknown>>('POST', '/v1/agents', body, input.apiKey);
     return { agent: mapAgent(payload['agent']), run: mapRun(payload['run']) };
   }
 
@@ -129,13 +131,14 @@ export class BrowserCursor implements CursorClient {
     await this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/archive`);
   }
 
-  async createRun(agentId: string, input: { text: string; mode?: 'agent' | 'plan' }): Promise<CursorRun> {
+  async createRun(agentId: string, input: { text: string; mode?: 'agent' | 'plan'; apiKey?: string }): Promise<CursorRun> {
     const body: Record<string, unknown> = { prompt: { text: input.text } };
     if (input.mode) body['mode'] = input.mode;
     const payload = await this.request<Record<string, unknown>>(
       'POST',
       `/v1/agents/${encodeURIComponent(agentId)}/runs`,
       body,
+      input.apiKey,
     );
     return mapRun(payload['run'] ?? payload);
   }
@@ -223,8 +226,8 @@ export class BrowserCursor implements CursorClient {
     };
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const apiKey = this.apiKey().trim();
+  private async request<T>(method: string, path: string, body?: unknown, apiKeyOverride?: string): Promise<T> {
+    const apiKey = (apiKeyOverride ?? this.apiKey()).trim();
     if (!apiKey) throw new Error('Save a Cursor API key in this browser before talking to Cursor.');
     let response: Response;
     try {
