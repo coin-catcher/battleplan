@@ -29,6 +29,9 @@ export interface Project {
   map_y?: number;
   /** Mindmap status for the root project node (nested subprojects use their task node). */
   status?: TaskStatus;
+  /** Version-bump branch created by the project agent after Release Changes. */
+  release_version_branch?: string;
+  pending_action?: 'merge';
   /** When set, this project is nested under another project or task. */
   parent_project_id?: string;
   parent_task_id?: string;
@@ -99,7 +102,7 @@ export interface ChatMessage {
   content: string;
   created_at: string;
   run_id?: string;
-  intent?: 'chat' | 'generate_tasks' | 'feedback' | 'approve';
+  intent?: 'chat' | 'generate_tasks' | 'feedback' | 'approve' | 'release_version_bump';
   cursor_agent_id?: string;
 }
 
@@ -120,6 +123,7 @@ export interface ChatArtifact {
 export interface ConversationPage {
   messages: ChatMessage[];
   artifacts: ChatArtifact[];
+  project?: Project;
 }
 
 export interface TaskDraft {
@@ -127,6 +131,8 @@ export interface TaskDraft {
   prompt: string;
   output_type: string;
   depends_on: string[];
+  /** Titles of other tasks in this batch that must run sequentially (conflicting / high-overlap code). */
+  sequential_with?: string[];
 }
 
 export type Selection =

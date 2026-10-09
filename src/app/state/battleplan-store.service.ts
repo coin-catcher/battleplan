@@ -22,7 +22,7 @@ import { defaultOptionValues, getAgentTypeDefinition } from '../core/agent-types
 import { isAgentDraftId, newDraftAgentId } from '../core/agent-id';
 import type { AgentEditorSaveInput } from '../api/battleplan-api.service';
 import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
-import { anchorDraftsUnderParentTask } from '../core/generate-tasks';
+import { generateTasksSourceTaskId, linkCreatedTasksUnderParent, prepareGeneratedDrafts } from '../core/generate-task-links';
 import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
 import { MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL } from '../core/github-client';
@@ -346,13 +346,40 @@ export class BattleplanStore {
       const message = await this.api.releaseProjectChanges(projectId);
       runId = message.run_id ?? undefined;
       this.pendingChanges.set([]);
-      this.applyConversation(await this.api.listProjectMessages(projectId));
-      this.notice.set('Released pending changes to main.');
+      const page = await this.api.listProjectMessages(projectId);
+      this.applyConversation(page);
+      this.notice.set('Released to main. Version bump agent started.');
     });
     if (runId && !this.error()) {
       await this.syncProjectUserRun(projectId, runId);
       void this.watchProject(projectId, runId);
     }
+  }
+
+  async transitionProject(status: TaskStatus, manual: boolean): Promise<void> {
+    const project = this.project();
+    if (!project) return;
+    await this.run(async () => {
+      const updated = await this.api.transitionProject(project.project_id, status, manual);
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === updated.project_id ? updated : item
+      )));
+      this.applyConversation(await this.api.listProjectMessages(project.project_id));
+    });
+  }
+
+  async approveProjectRelease(): Promise<void> {
+    const project = this.project();
+    if (!project) return;
+    const projectId = project.project_id;
+    await this.run(async () => {
+      const updated = await this.api.approveProjectRelease(projectId);
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === updated.project_id ? updated : item
+      )));
+      this.applyConversation(await this.api.listProjectMessages(projectId));
+      this.notice.set('Version branch merged into develop.');
+    });
   }
 
   showCreate(): void {
@@ -505,7 +532,7 @@ export class BattleplanStore {
     const projectId = this.projectId();
     if (!projectId) return;
     const selection = this.selection();
-    const taskId = selection.kind === 'task' ? selection.taskId : undefined;
+    const taskId = generateTasksSourceTaskId(selection);
     let runId: string | undefined;
     await this.run(async () => {
       const sent = taskId
@@ -533,10 +560,8 @@ export class BattleplanStore {
     await this.run(async () => {
       let drafts = parseGeneratedTaskListFromSources(reply.content, this.artifacts());
       const sourceTask = taskId ? this.tasks().find((item) => item.task_id === taskId) : undefined;
-      if (sourceTask) {
-        drafts = anchorDraftsUnderParentTask(drafts, sourceTask.title);
-      }
-      await this.api.createTasks(projectId, drafts);
+      drafts = prepareGeneratedDrafts(drafts, sourceTask);
+      await this.api.createTasks(projectId, drafts, taskId);
       await this.reloadTasks();
       const note = `Created ${drafts.length} task${drafts.length === 1 ? '' : 's'} from this conversation.`;
       const saved = taskId ? await this.api.noteTask(taskId, note) : await this.api.noteProject(projectId, note);
@@ -737,6 +762,20 @@ export class BattleplanStore {
       void this.watchTask(task.task_id, runId);
       this.ensureDoingBackgroundWatch(task.task_id);
     }
+  }
+
+  async relocateMindmapLink(
+    link: { kind: 'child' | 'sibling' | 'project-root'; from: string; to: string },
+    end: 'from' | 'to',
+    dropNodeId: string,
+  ): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    await this.run(async () => {
+      await this.api.relocateMindmapLink(projectId, link, end, dropNodeId);
+      await this.reloadTasks();
+      this.notice.set('Link updated.');
+    });
   }
 
   async executeChildren(parentTaskId: string): Promise<void> {
@@ -1162,6 +1201,11 @@ export class BattleplanStore {
   private applyConversation(page: ConversationPage): void {
     this.messages.set(page.messages);
     this.artifacts.set(page.artifacts ?? []);
+    if (page.project) {
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === page.project!.project_id ? page.project! : item
+      )));
+    }
   }
 
   private applyTaskConversation(result: { messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }): void {

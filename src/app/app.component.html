@@ -108,17 +108,52 @@
                 <path d="M0,0 L10,4 L0,8 Z" />
               </marker>
             </defs>
-            @for (edge of map().edges; track edge.from + '>' + edge.to) {
+            @for (edge of displayMindmapEdges(); track mindmapLinkKey(edge)) {
               <line
+                class="map-link-hit"
                 [attr.x1]="edge.x1"
                 [attr.y1]="edge.y1"
                 [attr.x2]="edge.x2"
                 [attr.y2]="edge.y2"
+                (pointerdown)="onMindmapLinkPointerDown(edge, $event)"
+              />
+              <line
+                class="map-link-visible"
                 [class.dashed]="edge.dashed"
+                [class.selected]="isMindmapLinkSelected(edge)"
+                [attr.x1]="edge.x1"
+                [attr.y1]="edge.y1"
+                [attr.x2]="edge.x2"
+                [attr.y2]="edge.y2"
                 [attr.marker-end]="edge.dashed ? 'url(#arrow-dashed)' : 'url(#arrow-solid)'"
+                pointer-events="none"
               />
             }
           </svg>
+          @for (edge of displayMindmapEdges(); track 'handle-' + mindmapLinkKey(edge)) {
+            @if (isMindmapLinkSelected(edge)) {
+              @if (mindmapLinkHandleVisible(edge, 'from')) {
+                <button
+                  type="button"
+                  class="map-link-handle"
+                  [style.left.px]="mindmapLinkHandlePoint(edge, 'from').x"
+                  [style.top.px]="mindmapLinkHandlePoint(edge, 'from').y"
+                  aria-label="Move link start"
+                  (pointerdown)="onMindmapLinkHandlePointerDown(edge, 'from', $event)"
+                ></button>
+              }
+              @if (mindmapLinkHandleVisible(edge, 'to')) {
+                <button
+                  type="button"
+                  class="map-link-handle"
+                  [style.left.px]="mindmapLinkHandlePoint(edge, 'to').x"
+                  [style.top.px]="mindmapLinkHandlePoint(edge, 'to').y"
+                  aria-label="Move link end"
+                  (pointerdown)="onMindmapLinkHandlePointerDown(edge, 'to', $event)"
+                ></button>
+              }
+            }
+          }
           @for (node of map().nodes; track node.id) {
             @if (visibleConnectDirection(node.id); as direction) {
               <button
@@ -336,11 +371,18 @@
               <div class="toolbar">
                 <button type="button" class="danger" [disabled]="store.busy()" (click)="deleteProject()">Delete</button>
                 <button type="button" class="accent" [disabled]="store.busy()" (click)="store.generateTasks()">Generate Tasks</button>
+                @if (projectRootStatus(project) === 'REVIEW') {
+                  @if (store.chatActionPending() === 'merge') {
+                    <span class="inline-spinner" aria-label="Merging pull request"></span>
+                  } @else {
+                    <button type="button" class="accent" [disabled]="chatActionsLocked()" (click)="approveProjectRelease()">Approve and merge</button>
+                  }
+                }
                 <a class="text-link" [href]="project.cursor_chat_link" target="_blank" rel="noopener">Open in Cursor</a>
               </div>
               <header class="panel-head">
                 <div>
-                  <p class="eyebrow">Project chat</p>
+                  <p class="eyebrow">Project chat · {{ projectRootStatus(project) }}</p>
                   <h2>{{ project.title }}</h2>
                 </div>
               </header>
@@ -348,6 +390,14 @@
                 <label class="field">
                   <span>Title</span>
                   <input [(ngModel)]="title" name="title" (blur)="onEditorFieldBlur()" />
+                </label>
+                <label class="field">
+                  <span>Status</span>
+                  <select [value]="projectRootStatus(project)" (change)="onProjectStatusChange($event)">
+                    @for (status of statuses; track status) {
+                      <option [value]="status">{{ status }}</option>
+                    }
+                  </select>
                 </label>
                 <label class="field">
                   <span>Repository</span>
@@ -380,7 +430,10 @@
                   </select>
                 </label>
               </div>
-              <p class="pending">Task agents branch from this base. Approve and merge creates and merges PRs into it using the token above.</p>
+              <p class="pending">Task agents branch from this base. After Release Changes, Approve and merge merges the version bump branch into develop using the token above.</p>
+              @if (project.release_version_branch) {
+                <p class="pending">Version branch: <code>{{ project.release_version_branch }}</code></p>
+              }
               <details class="editor-disclosure">
                 <summary>Data and Rules</summary>
                 <label class="field">

@@ -54,8 +54,14 @@ export class BattleplanApi {
     map_y?: number;
     default_research_agent_id?: string;
     default_code_agent_id?: string;
+    status?: TaskStatus;
+    manual?: boolean;
   }): Promise<Project> {
     return this.engine.updateProject(projectId, patch);
+  }
+
+  transitionProject(projectId: string, status: TaskStatus, manual: boolean): Promise<Project> {
+    return this.engine.transitionProject(projectId, status, manual);
   }
 
   ensureAgentLibrary(projectId: string): Promise<Project> {
@@ -70,8 +76,8 @@ export class BattleplanApi {
     return this.engine.listTasks(projectId);
   }
 
-  createTasks(projectId: string, tasks: TaskDraft[]): Promise<ProjectTask[]> {
-    return this.engine.createTasks(projectId, tasks);
+  createTasks(projectId: string, tasks: TaskDraft[], parentTaskId?: string): Promise<ProjectTask[]> {
+    return this.engine.createTasks(projectId, tasks, parentTaskId);
   }
 
   createTask(projectId: string, input: {
@@ -198,6 +204,15 @@ export class BattleplanApi {
     return this.engine.executeChildren(projectId, parentTaskId);
   }
 
+  relocateMindmapLink(
+    projectId: string,
+    link: { kind: 'child' | 'sibling' | 'project-root'; from: string; to: string },
+    end: 'from' | 'to',
+    dropNodeId: string,
+  ): Promise<ProjectTask[]> {
+    return this.engine.relocateMindmapLink(projectId, link, end, dropNodeId);
+  }
+
   executeProjectChat(projectId: string): Promise<{ message: ChatMessage; project: Project }> {
     return this.engine.executeProjectChat(projectId);
   }
@@ -212,6 +227,10 @@ export class BattleplanApi {
 
   releaseProjectChanges(projectId: string): Promise<ChatMessage> {
     return this.engine.releaseProjectChanges(projectId);
+  }
+
+  approveProjectRelease(projectId: string): Promise<Project> {
+    return this.engine.approveProjectRelease(projectId);
   }
 
   getAgentUsageLedger(projectId: string): Promise<Record<string, import('../core/models').AgentUsageLedger>> {

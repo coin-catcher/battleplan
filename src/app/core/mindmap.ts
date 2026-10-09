@@ -1,3 +1,4 @@
+import type { MindmapLinkKind } from './link-relocation';
 import type { ProjectTask, TaskStatus } from './models';
 import {
   depthByNormalLinks,
@@ -21,6 +22,7 @@ export interface MindmapNode {
 }
 
 export interface MindmapEdge {
+  kind: MindmapLinkKind;
   from: string;
   to: string;
   dashed: boolean;
@@ -104,6 +106,16 @@ export function positionConnectedNode(
 }
 
 /** Convert a pointer position inside map-stage to layout world coordinates. */
+export function mindmapNodeAtPoint(nodes: MindmapNode[], x: number, y: number): MindmapNode | null {
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    const node = nodes[index];
+    if (Math.abs(x - node.x) <= node.width / 2 && Math.abs(y - node.y) <= node.height / 2) {
+      return node;
+    }
+  }
+  return null;
+}
+
 export function pointerToWorld(
   clientX: number,
   clientY: number,
@@ -223,7 +235,7 @@ export function layoutMindmap(
   if (project) {
     for (const task of direct) {
       const target = nodeById.get(task.task_id);
-      if (target) edges.push(drawEdge(project, target, false));
+      if (target) edges.push(drawEdge('project-root', project, target, false));
     }
   }
   for (const task of tasks) {
@@ -232,12 +244,12 @@ export function layoutMindmap(
     for (const childId of normalChildIds(task, byId)) {
       const child = nodeById.get(childId);
       if (!child || child.id === parent.id) continue;
-      edges.push(drawEdge(parent, child, false));
+      edges.push(drawEdge('child', parent, child, false));
     }
     for (const siblingId of siblingDependencyIds(task)) {
       const sibling = nodeById.get(siblingId);
       if (!sibling || sibling.id === parent.id) continue;
-      edges.push(drawEdge(parent, sibling, true));
+      edges.push(drawEdge('sibling', parent, sibling, true));
     }
   }
   return {
@@ -268,7 +280,7 @@ function separateUnpinned(nodes: MindmapNode[], tasks: ProjectTask[]): void {
   }
 }
 
-function drawEdge(from: MindmapNode, to: MindmapNode, dashed: boolean): MindmapEdge {
+function drawEdge(kind: MindmapLinkKind, from: MindmapNode, to: MindmapNode, dashed: boolean): MindmapEdge {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const length = Math.hypot(dx, dy) || 1;
@@ -277,6 +289,7 @@ function drawEdge(from: MindmapNode, to: MindmapNode, dashed: boolean): MindmapE
   const start = borderPoint(from, ux, uy);
   const end = borderPoint(to, -ux, -uy);
   return {
+    kind,
     from: from.id,
     to: to.id,
     dashed,

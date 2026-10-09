@@ -10,8 +10,8 @@
    - **Task chat**: sends a task-specific message to that task’s agent (or the project agent if the task has not started its own) via `LocalEngine.generateTaskTasks`.
 3. **Cursor** runs with `intent: 'generate_tasks'`. The app waits for the run to finish and reloads messages/artifacts.
 4. **Parse** — `parseGeneratedTaskListFromSources()` reads a JSON array from the assistant reply or a `.json` artifact (`parse-tasks.ts`).
-5. **Anchor (task scope only)** — if Generate Tasks was invoked from a task, any draft with `depends_on: []` is rewritten to list that task’s title so new nodes become **children of that task** (`anchorDraftsUnderParentTask()` in `generate-tasks.ts`).
-6. **Create** — `LocalEngine.createTasks()` normalizes drafts, creates `ProjectTask` rows, and wires the mindmap graph (`bindDependencies()`).
+5. **Anchor (task scope only)** — when Generate Tasks is invoked from a task panel, Battleplan passes that task’s id into `createTasks()`. Drafts with empty `depends_on` get the source task title as a fallback; any generated task still without a tree parent is linked under the **source task id** (`linkCreatedTasksUnderParent()` in `generate-task-links.ts`).
+6. **Create** — `LocalEngine.createTasks()` normalizes drafts, creates `ProjectTask` rows, wires the mindmap graph (`bindDependencies()`), and applies **`sequential_with`** as mutual `sibling_dependencies` so conflicting code tasks do not execute in parallel (`bindSequentialDraftLinks()`).
 7. **UI** — tasks reload; new nodes appear on the left-hand mindmap.
 
 ## JSON shape the agent must return
@@ -24,6 +24,7 @@ Each element of the array:
 | `prompt` | Becomes the task **initial prompt** (what Execute sends to the agent) |
 | `output_type` | `"code"` or `"research"` (or `both`-style values split into research + code tasks) |
 | `depends_on` | Titles of **parent** tasks in this same array (see linking below) |
+| `sequential_with` | Optional titles of other tasks in the batch that touch the same code and must run **sequentially** (sibling dependencies, not tree depth) |
 
 ## How the mindmap graph is built
 
