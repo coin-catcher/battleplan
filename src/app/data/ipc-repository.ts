@@ -114,4 +114,15 @@ export class IpcRepository implements BattleplanRepository {
   ): Promise<void> {
     return bridge().invoke('repo:saveAgentUsageLedger', projectId, ledger);
   }
+
+  getProjectUiState(projectId: string): Promise<import('../core/project-ui-state').ProjectWorkspaceUiState | null> {
+    return bridge().invoke('repo:getProjectUiState', projectId);
+  }
+
+  saveProjectUiState(
+    projectId: string,
+    state: import('../core/project-ui-state').ProjectWorkspaceUiState,
+  ): Promise<void> {
+    return bridge().invoke('repo:saveProjectUiState', projectId, state);
+  }
 }

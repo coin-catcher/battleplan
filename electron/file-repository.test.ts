@@ -81,6 +81,25 @@ describe('FileRepository', () => {
     expect(await repo.listArtifacts('project', 'p1')).toEqual([]);
   });
 
+  it('round-trips per-project workspace ui in project_config.json', async () => {
+    const repo = await makeRepo();
+    await repo.saveProject(project('p1'));
+    await repo.saveProjectUiState('p1', {
+      pane_width: 520,
+      mindmap_zoom: 1.25,
+      mindmap_origin_x: 80,
+      mindmap_origin_y: 40,
+    });
+    expect(await repo.getProjectUiState('p1')).toEqual({
+      pane_width: 520,
+      mindmap_zoom: 1.25,
+      mindmap_origin_x: 80,
+      mindmap_origin_y: 40,
+    });
+    const raw = JSON.parse(await fs.readFile(path.join(await repo.root(), 'p1', 'project_config.json'), 'utf8'));
+    expect(raw.ui.pane_width).toBe(520);
+  });
+
   it('writes app config atomically', async () => {
     const repo = await makeRepo();
     const saved = await repo.writeAppConfig({ theme: 'dusk', pane_width: 500, current_project_id: 'p1' });

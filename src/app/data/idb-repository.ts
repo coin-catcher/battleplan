@@ -8,6 +8,8 @@ import type {
   TaskCodeOutput,
   TaskResearchOutput,
 } from '../core/models';
+import type { ProjectWorkspaceUiState } from '../core/project-ui-state';
+import { normalizeProjectWorkspaceUiState } from '../core/project-ui-state';
 import type { BattleplanRepository } from './repository';
 
 const DB_NAME = 'battleplan';
@@ -19,6 +21,7 @@ type ArtifactRecord = ChatArtifact & { id: string; owner: string };
 type ProjectStoreRecord = Project & {
   agents?: ProjectAgent[];
   agent_usage_ledger?: Record<string, AgentUsageLedger>;
+  ui?: ProjectWorkspaceUiState;
 };
 
 function stripProjectRecord(record: ProjectStoreRecord): Project {
@@ -90,6 +93,7 @@ export class IdbRepository implements BattleplanRepository {
       ...project,
       agents: existing?.agents ?? [],
       agent_usage_ledger: existing?.agent_usage_ledger,
+      ui: existing?.ui,
     };
     await this.put('projects', next);
   }
@@ -244,6 +248,18 @@ export class IdbRepository implements BattleplanRepository {
   async saveAgentUsageLedger(projectId: string, ledger: Record<string, AgentUsageLedger>): Promise<void> {
     const record = await this.requireProjectRecord(projectId);
     await this.put('projects', { ...record, agent_usage_ledger: ledger });
+  }
+
+  async getProjectUiState(projectId: string): Promise<ProjectWorkspaceUiState | null> {
+    const record = await this.get<ProjectStoreRecord>('projects', projectId);
+    return normalizeProjectWorkspaceUiState(record?.ui ?? null);
+  }
+
+  async saveProjectUiState(projectId: string, state: ProjectWorkspaceUiState): Promise<void> {
+    const normalized = normalizeProjectWorkspaceUiState(state);
+    if (!normalized) return;
+    const record = await this.requireProjectRecord(projectId);
+    await this.put('projects', { ...record, ui: normalized });
   }
 
   private async requireProjectRecord(projectId: string): Promise<ProjectStoreRecord> {

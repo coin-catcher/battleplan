@@ -9,6 +9,7 @@ import type {
   TaskCodeOutput,
   TaskResearchOutput,
 } from '../core/models';
+import type { ProjectWorkspaceUiState } from '../core/project-ui-state';
 
 export interface BattleplanRepository {
   saveProject(project: Project): Promise<void>;
@@ -41,4 +42,7 @@ export interface BattleplanRepository {
   saveProjectAgents(projectId: string, agents: ProjectAgent[]): Promise<void>;
   getAgentUsageLedger(projectId: string): Promise<Record<string, AgentUsageLedger>>;
   saveAgentUsageLedger(projectId: string, ledger: Record<string, AgentUsageLedger>): Promise<void>;
+
+  getProjectUiState(projectId: string): Promise<ProjectWorkspaceUiState | null>;
+  saveProjectUiState(projectId: string, state: ProjectWorkspaceUiState): Promise<void>;
 }
