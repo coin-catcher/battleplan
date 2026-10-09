@@ -129,6 +129,46 @@ export function pointerToWorld(
   return { x: localX / zoom, y: localY / zoom };
 }
 
+export interface WorldRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+export function mindmapNodeBounds(node: MindmapNode): WorldRect {
+  const halfW = node.width / 2;
+  const halfH = node.height / 2;
+  return {
+    left: node.x - halfW,
+    top: node.y - halfH,
+    right: node.x + halfW,
+    bottom: node.y + halfH,
+  };
+}
+
+export function normalizeWorldRect(x1: number, y1: number, x2: number, y2: number): WorldRect {
+  return {
+    left: Math.min(x1, x2),
+    top: Math.min(y1, y2),
+    right: Math.max(x1, x2),
+    bottom: Math.max(y1, y2),
+  };
+}
+
+export function worldRectsIntersect(left: WorldRect, right: WorldRect): boolean {
+  return left.left <= right.right
+    && left.right >= right.left
+    && left.top <= right.bottom
+    && left.bottom >= right.top;
+}
+
+export function mindmapNodesInWorldRect(nodes: MindmapNode[], rect: WorldRect): string[] {
+  return nodes
+    .filter((node) => worldRectsIntersect(mindmapNodeBounds(node), rect))
+    .map((node) => node.id);
+}
+
 const WORLD_X = 1600;
 const WORLD_Y = 1200;
 

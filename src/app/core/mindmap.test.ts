@@ -3,6 +3,8 @@ import type { ProjectTask } from './models';
 import {
   cardinalAnchor,
   layoutMindmap,
+  mindmapNodesInWorldRect,
+  normalizeWorldRect,
   pickCardinalEdge,
   pointerToWorld,
   positionConnectedNode,
@@ -97,6 +99,17 @@ describe('mindmap', () => {
     const rect = { left: 10, top: 10, width: 800, height: 600 } as DOMRect;
     const world = pointerToWorld(110, 210, rect, 100, 50, 2);
     expect(world).toEqual({ x: 100, y: 125 });
+  });
+
+  it('selects nodes whose bounds intersect a world rectangle', () => {
+    const layout = layoutMindmap('Plan', [task('alpha'), task('beta', {}, 1)]);
+    const alpha = layout.nodes.find((node) => node.id === 'alpha')!;
+    const beta = layout.nodes.find((node) => node.id === 'beta')!;
+    const taskNodes = layout.nodes.filter((node) => node.kind === 'task');
+    const box = normalizeWorldRect(alpha.x, alpha.y, beta.x, beta.y);
+    expect(mindmapNodesInWorldRect(taskNodes, box).sort()).toEqual(['alpha', 'beta']);
+    const tiny = normalizeWorldRect(alpha.x, alpha.y, alpha.x + 1, alpha.y + 1);
+    expect(mindmapNodesInWorldRect(taskNodes, tiny)).toEqual(['alpha']);
   });
 
   it('keeps a dragged task in place and rebalances the others', () => {
