@@ -40,8 +40,11 @@ import {
   pickNorthWestCorner,
   pointerToWorld,
   type CardinalDirection,
+  type MindmapEdge,
   type MindmapNode,
+  mindmapNodeAtPoint,
 } from './core/mindmap';
+import { linkKey, type MindmapLinkRef } from './core/link-relocation';
 import { MarkdownComponent } from 'ngx-markdown';
 import { editorPanelDirty } from './core/editor-dirty';
 import { taskDar, taskInitialPrompt } from './core/task-fields';
@@ -138,6 +141,20 @@ export class AppComponent implements OnInit {
   dependencies: string[] = [];
   siblingDependencies: string[] = [];
   readonly executeChildrenPrompt = signal<string | null>(null);
+  readonly selectedMindmapLink = signal<MindmapLinkRef | null>(null);
+  readonly linkEndpointDrag = signal<{ link: MindmapLinkRef; end: 'from' | 'to'; x: number; y: number } | null>(null);
+  readonly mindmapLinkKey = linkKey;
+  readonly displayMindmapEdges = computed(() => {
+    const edges = this.map().edges;
+    const drag = this.linkEndpointDrag();
+    if (!drag) return edges;
+    const key = linkKey(drag.link);
+    return edges.map((edge) => {
+      if (linkKey(edge) !== key) return edge;
+      if (drag.end === 'from') return { ...edge, x1: drag.x, y1: drag.y };
+      return { ...edge, x2: drag.x, y2: drag.y };
+    });
+  });
   codeRepo = '';
   codeBranch = '';
   codeMessage = '';
@@ -728,6 +745,70 @@ export class AppComponent implements OnInit {
     return { x: node.x + node.width / 2 - 10, y: node.y - node.height / 2 + 10 };
   }
 
+  isMindmapLinkSelected(edge: MindmapEdge): boolean {
+    const selected = this.selectedMindmapLink();
+    return Boolean(selected && linkKey(selected) === linkKey(edge));
+  }
+
+  mindmapLinkHandleVisible(edge: MindmapEdge, end: 'from' | 'to'): boolean {
+    if (!this.isMindmapLinkSelected(edge)) return false;
+    if (edge.kind === 'project-root' && end === 'from') return false;
+    return true;
+  }
+
+  mindmapLinkHandlePoint(edge: MindmapEdge, end: 'from' | 'to'): { x: number; y: number } {
+    const drag = this.linkEndpointDrag();
+    if (drag && linkKey(drag.link) === linkKey(edge) && drag.end === end) {
+      return { x: drag.x, y: drag.y };
+    }
+    return end === 'from' ? { x: edge.x1, y: edge.y1 } : { x: edge.x2, y: edge.y2 };
+  }
+
+  onMindmapLinkPointerDown(edge: MindmapEdge, event: PointerEvent): void {
+    event.stopPropagation();
+    event.preventDefault();
+    this.selectedMindmapLink.set({ kind: edge.kind, from: edge.from, to: edge.to });
+  }
+
+  onMindmapLinkHandlePointerDown(edge: MindmapEdge, end: 'from' | 'to', event: PointerEvent): void {
+    event.stopPropagation();
+    event.preventDefault();
+    if (edge.kind === 'project-root' && end === 'from') return;
+    const link: MindmapLinkRef = { kind: edge.kind, from: edge.from, to: edge.to };
+    this.selectedMindmapLink.set(link);
+    const start = this.mindmapLinkHandlePoint(edge, end);
+    this.linkEndpointDrag.set({ link, end, x: start.x, y: start.y });
+    const stage = this.mapStage()?.nativeElement;
+    if (!stage) return;
+    const move = (ev: PointerEvent): void => {
+      const rect = stage.getBoundingClientRect();
+      const world = pointerToWorld(ev.clientX, ev.clientY, rect, stage.scrollLeft, stage.scrollTop, this.zoom());
+      this.linkEndpointDrag.set({ link, end, x: world.x, y: world.y });
+    };
+    const up = (ev: PointerEvent): void => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      this.linkEndpointDrag.set(null);
+      const rect = stage.getBoundingClientRect();
+      const world = pointerToWorld(ev.clientX, ev.clientY, rect, stage.scrollLeft, stage.scrollTop, this.zoom());
+      const target = mindmapNodeAtPoint(this.map().nodes, world.x, world.y);
+      const anchorId = end === 'from' ? link.to : link.from;
+      const originalEndId = end === 'from' ? link.from : link.to;
+      if (
+        target
+        && target.id !== anchorId
+        && target.id !== originalEndId
+        && (edge.kind !== 'project-root' || end === 'to')
+      ) {
+        void this.store.relocateMindmapLink(link, end, target.id);
+      }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  }
+
   requestExecuteChildren(taskId: string, event: Event): void {
     event.stopPropagation();
     event.preventDefault();
@@ -966,7 +1047,8 @@ export class AppComponent implements OnInit {
 
   onStagePointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-play-children, .zoom-controls')) return;
+    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-play-children, .map-link-handle, .map-link-hit, .zoom-controls')) return;
+    this.selectedMindmapLink.set(null);
     if (this.connectPanel()) {
       this.dismissConnectPanel();
       return;
@@ -1452,7 +1534,7 @@ export class AppComponent implements OnInit {
 
   onMapDismissPointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-connect-panel, .map-convert-panel, .map-edge-arrow, .map-convert-handle, .map-play-children')) return;
+    if (target.closest('.map-connect-panel, .map-convert-panel, .map-edge-arrow, .map-convert-handle, .map-play-children, .map-link-handle, .map-link-hit')) return;
     this.dismissConnectPanel();
     this.convertPanel.set(null);
   }
