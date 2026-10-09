@@ -28,14 +28,14 @@
     font-weight: 700;
 
     &.success {
-      background: #1f6b3a;
-      color: #dff7e8;
+      background: var(--agent-connection-ok-bg);
+      color: var(--agent-connection-ok-ink);
       animation: fade-test 5s ease forwards;
     }
 
     &.error {
-      background: #7a1f1f;
-      color: #ffe8e8;
+      background: var(--agent-connection-error-bg);
+      color: var(--agent-connection-error-ink);
     }
   }
 

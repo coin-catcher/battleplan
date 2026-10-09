@@ -211,6 +211,12 @@ export class BattleplanStore {
     this.selection.set({ kind: 'agent-create', role });
   }
 
+  discardAgentDraft(agentId: string): void {
+    if (!isAgentDraftId(agentId)) return;
+    this.agents.update((agents) => agents.filter((item) => item.agent_id !== agentId));
+    this.selection.set({ kind: 'project' });
+  }
+
   createAgentDraft(role: AgentKind): ProjectAgent {
     const type: AgentType = role === 'code' ? 'Cursor Agent' : 'OpenAI';
     const definition = getAgentTypeDefinition(type);

@@ -365,7 +365,18 @@ export class AppComponent implements OnInit {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
       this.saveCurrent();
+      return;
     }
+    if (event.key !== 'Escape' || this.unsavedPromptOpen() || this.editingNodeId()) {
+      return;
+    }
+    const selection = this.store.selection();
+    const closingCreate =
+      selection.kind === 'agent-create'
+      || (selection.kind === 'agent' && isAgentDraftId(selection.agentId));
+    if (!closingCreate) return;
+    event.preventDefault();
+    this.cancelAgentCreate();
   }
 
   private handleMenuAction(action: string): void {
@@ -1144,6 +1155,24 @@ export class AppComponent implements OnInit {
     void this.guardUnsavedChanges(async () => {
       this.store.selectAgentCreate(role);
     });
+  }
+
+  cancelAgentCreate(): void {
+    void this.guardUnsavedChanges(async () => {
+      await this.closeAgentCreateFlow();
+    });
+  }
+
+  private async closeAgentCreateFlow(): Promise<void> {
+    const selection = this.store.selection();
+    if (selection.kind === 'agent-create') {
+      this.boundAgentFormId = '';
+      this.store.selection.set({ kind: 'project' });
+      return;
+    }
+    if (selection.kind === 'agent' && isAgentDraftId(selection.agentId)) {
+      await this.store.deleteAgent(selection.agentId);
+    }
   }
 
   saveAgentExplicit(): void {

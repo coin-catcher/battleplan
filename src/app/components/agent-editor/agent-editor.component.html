@@ -10,9 +10,18 @@
         <div class="agent-actions">
           <button type="button" class="ghost" (click)="testConnection()">Test Connection</button>
           @if (testState() === 'success') {
-            <span class="test-indicator success" aria-live="polite" title="Connection OK">✓</span>
+            <span
+              class="test-indicator success"
+              role="status"
+              aria-live="polite"
+              aria-label="Connection test succeeded"
+            >✓</span>
           } @else if (testState() === 'error') {
-            <span class="test-indicator error" aria-live="assertive" [title]="testMessage()">✕</span>
+            <span
+              class="test-indicator error"
+              role="img"
+              aria-label="Connection test failed"
+            >✕</span>
           }
           @if (showSave(agent)) {
             <button type="button" class="primary" [disabled]="store.busy()" (click)="save()">Save</button>
