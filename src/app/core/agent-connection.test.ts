@@ -80,7 +80,7 @@ describe('buildAgentTestConnectionRequest', () => {
       'https://generativelanguage.googleapis.com/v1beta/',
     );
     expect(request.url).toBe('https://generativelanguage.googleapis.com/v1beta/models');
-    expect(request.headers.Authorization).toBe('Bearer token');
+    expect(request.headers['Authorization']).toBe('Bearer token');
   });
 
   it('defines Grok fallback POST /responses for connection testing', () => {
