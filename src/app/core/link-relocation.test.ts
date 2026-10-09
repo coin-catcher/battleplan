@@ -39,6 +39,15 @@ describe('applyLinkRelocation', () => {
     expect(next.find((item) => item.task_id === 'parent2')?.dependencies).toEqual(['child']);
   });
 
+  it('reattaches a child link end to the project root', () => {
+    const tasks = [
+      task({ task_id: 'parent', dependencies: ['child'] }),
+      task({ task_id: 'child' }),
+    ];
+    const next = applyLinkRelocation(tasks, { kind: 'child', from: 'parent', to: 'child' }, 'to', 'project');
+    expect(next.find((item) => item.task_id === 'parent')?.dependencies).toEqual([]);
+  });
+
   it('moves a sibling link target', () => {
     const tasks = [
       task({ task_id: 'a', sibling_dependencies: ['b'] }),
@@ -49,12 +58,32 @@ describe('applyLinkRelocation', () => {
     expect(next.find((item) => item.task_id === 'a')?.sibling_dependencies).toEqual(['c']);
   });
 
-  it('detaches a task from parents for project-root moves', () => {
+  it('attaches a project-root task to a parent when the project end moves to a task', () => {
     const tasks = [
-      task({ task_id: 'parent', dependencies: ['child'] }),
+      task({ task_id: 'parent' }),
       task({ task_id: 'child' }),
     ];
-    const next = applyLinkRelocation(tasks, { kind: 'project-root', from: 'project', to: 'child' }, 'to', 'child');
+    const next = applyLinkRelocation(
+      tasks,
+      { kind: 'project-root', from: 'project', to: 'child' },
+      'from',
+      'parent',
+    );
+    expect(next.find((item) => item.task_id === 'parent')?.dependencies).toEqual(['child']);
+  });
+
+  it('detaches a different task onto the project root when the task end moves', () => {
+    const tasks = [
+      task({ task_id: 'parent', dependencies: ['other'] }),
+      task({ task_id: 'root' }),
+      task({ task_id: 'other' }),
+    ];
+    const next = applyLinkRelocation(
+      tasks,
+      { kind: 'project-root', from: 'project', to: 'root' },
+      'to',
+      'other',
+    );
     expect(next.find((item) => item.task_id === 'parent')?.dependencies).toEqual([]);
   });
 });
