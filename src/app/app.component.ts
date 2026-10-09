@@ -1,7 +1,30 @@
 import { Component, computed, effect, ElementRef, HostListener, inject, NgZone, OnInit, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { ChatArtifact, ChatMessage, OutputType, ProjectTask, TaskStatus } from './core/models';
+import type {
+  AgentKind,
+  AgentOptionValue,
+  AgentType,
+  ChatArtifact,
+  ChatMessage,
+  OutputType,
+  ProjectAgent,
+  ProjectTask,
+  TaskStatus,
+} from './core/models';
 import { TASK_STATUSES } from './core/models';
+import {
+  agentLogoPublicPath,
+  agentOptionRows,
+  agentTypesForKind,
+  defaultOptionValues,
+  getAgentTypeDefinition,
+  isAgentOptionVisible,
+  mergeAgentOptions,
+} from './core/agent-types';
+import { optionsAfterTypeChange } from './core/agent-form';
+import { isAgentDraftId } from './core/agent-id';
+import { AgentStatsComponent } from './agent/agent-stats.component';
+import { AgentConnectionService } from './data/agent-connection.service';
 import { isMarkdownPath, prepareMarkdown } from './core/markdown';
 import { applyTheme, THEMES, type ThemeId } from './core/themes';
 import { AppPreferences } from './data/app-preferences.service';
@@ -18,9 +41,6 @@ import {
   type MindmapNode,
 } from './core/mindmap';
 import { MarkdownComponent } from 'ngx-markdown';
-import { AgentEditorComponent } from './components/agent-editor/agent-editor.component';
-import { agentLogoPublicPath } from './core/agent-types';
-import type { AgentKind, AgentType } from './core/models';
 import { editorPanelDirty } from './core/editor-dirty';
 import { taskDar, taskInitialPrompt } from './core/task-fields';
 import { normalChildIds } from './core/dependencies';
@@ -28,12 +48,13 @@ import { BattleplanStore } from './state/battleplan-store.service';
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, MarkdownComponent, AgentEditorComponent],
+  imports: [FormsModule, MarkdownComponent, AgentStatsComponent],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss',
 })
 export class AppComponent implements OnInit {
   readonly store = inject(BattleplanStore);
+  private readonly agentConnections = inject(AgentConnectionService);
   readonly cursorKey = inject(CursorKey);
   readonly preferences = inject(AppPreferences);
   readonly portability = inject(ProjectPortability);
@@ -54,7 +75,6 @@ export class AppComponent implements OnInit {
   readonly mapDraggingNodeId = signal<string | null>(null);
   readonly mapStage = viewChild<ElementRef<HTMLElement>>('mapStage');
   readonly chatTranscript = viewChild<ElementRef<HTMLElement>>('chatTranscript');
-  readonly agentEditor = viewChild(AgentEditorComponent);
   private edgeHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private convertHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private edgeLongPressFired = false;
@@ -121,9 +141,26 @@ export class AppComponent implements OnInit {
   researchLink = '';
   researchPath = '';
 
+  agentType: AgentType = 'OpenAI';
+  agentName = '';
+  agentUrl = '';
+  agentApiKey = '';
+  agentAdminApiKey = '';
+  agentOptions: Record<string, AgentOptionValue> = {};
+  agentNameTouched = false;
+  agentUrlTouched = false;
+  agentApiKeyEdited = false;
+  agentApiKeyFocused = false;
+  agentAdminApiKeyEdited = false;
+  agentAdminApiKeyFocused = false;
+  readonly agentTestMessage = signal<string | null>(null);
+  readonly agentTestSuccess = signal(false);
+  private agentTestFadeTimer: ReturnType<typeof setTimeout> | undefined;
+
   private centeredProject = '';
   private titleSignature = '';
   private boundTaskFormId = '';
+  private boundAgentFormId = '';
   private outputSignature = '';
   private readonly chatTranscriptAutoScrolled = new Set<string>();
   private chatTranscriptScrollObserver: ResizeObserver | undefined;
@@ -197,13 +234,33 @@ export class AppComponent implements OnInit {
     });
 
     effect(() => {
+      const selection = this.store.selection();
+      if (selection.kind === 'agent') {
+        const agent = this.store.selectedAgent();
+        if (!agent || this.boundAgentFormId === agent.agent_id) return;
+        this.bindAgentForm(agent);
+        return;
+      }
+      if (selection.kind === 'agent-create') {
+        const key = `create:${selection.role}`;
+        if (this.boundAgentFormId === key) return;
+        this.boundAgentFormId = key;
+        this.resetAgentFormForRole(selection.role);
+        return;
+      }
+      this.boundAgentFormId = '';
+    });
+
+    effect(() => {
       if (!this.desktop) return;
       const selection = this.store.selection();
       const exportEnabled = Boolean(this.store.project());
       const saveEnabled = this.editorIsDirty()
         || ((selection.kind === 'project' && Boolean(this.title.trim()))
         || (selection.kind === 'subproject' && Boolean(this.title.trim()))
-        || selection.kind === 'task');
+        || selection.kind === 'task'
+        || selection.kind === 'agent'
+        || selection.kind === 'agent-create');
       void electronBridge()?.invoke('menu:sync-state', { exportEnabled, saveEnabled });
     });
     effect(() => {
@@ -336,9 +393,6 @@ export class AppComponent implements OnInit {
   editorIsDirty(): boolean {
     const selection = this.store.selection();
     const project = selection.kind === 'subproject' ? this.store.editorProject() : this.store.project();
-    if (selection.kind === 'agent' || selection.kind === 'agent-create') {
-      return this.agentEditor()?.isDirty() ?? false;
-    }
     return editorPanelDirty(
       selection.kind,
       {
@@ -359,7 +413,23 @@ export class AppComponent implements OnInit {
       },
       project,
       this.store.selectedTask(),
+      this.agentEditorForm(),
+      this.store.selectedAgent(),
+      selection.kind === 'agent-create' ? selection.role : undefined,
     );
+  }
+
+  private agentEditorForm() {
+    return {
+      type: this.agentType,
+      name: this.agentName,
+      url: this.agentUrl,
+      api_key: this.agentApiKey,
+      admin_api_key: this.agentAdminApiKey,
+      options: this.agentOptions,
+      apiKeyEdited: this.agentApiKeyEdited,
+      adminApiKeyEdited: this.agentAdminApiKeyEdited,
+    };
   }
 
   onEditorFieldBlur(): void {
@@ -400,7 +470,13 @@ export class AppComponent implements OnInit {
         sibling_dependencies: this.siblingDependencies,
       });
     } else if (selection.kind === 'agent' || selection.kind === 'agent-create') {
-      await this.agentEditor()?.save();
+      await this.store.saveAgentFromEditor(this.agentEditorForm());
+      this.agentApiKeyEdited = false;
+      this.agentApiKeyFocused = false;
+      this.agentAdminApiKeyEdited = false;
+      this.agentAdminApiKeyFocused = false;
+      const agent = this.store.selectedAgent();
+      if (agent) this.bindAgentForm(agent);
     } else {
       return true;
     }
@@ -889,28 +965,6 @@ export class AppComponent implements OnInit {
     window.addEventListener('pointerup', up);
   }
 
-  agentLogoPath(type: AgentType): string {
-    return agentLogoPublicPath(type);
-  }
-
-  isAgentSelected(agentId: string): boolean {
-    const selection = this.store.selection();
-    return selection.kind === 'agent' && selection.agentId === agentId;
-  }
-
-  beginAgentCreate(role: AgentKind): void {
-    void this.guardUnsavedChanges(async () => {
-      this.store.beginAgentCreate(role);
-    });
-  }
-
-  selectLibraryAgent(agentId: string): void {
-    if (this.isAgentSelected(agentId)) return;
-    void this.guardUnsavedChanges(async () => {
-      this.store.selectAgent(agentId);
-    });
-  }
-
   selectMapNode(node: MindmapNode): void {
     if (this.isSameMapSelection(node)) return;
     void this.guardUnsavedChanges(async () => {
@@ -924,6 +978,239 @@ export class AppComponent implements OnInit {
     if (node.kind === 'project') return selection.kind === 'project';
     return (selection.kind === 'task' || selection.kind === 'subproject' || selection.kind === 'code' || selection.kind === 'research')
       && selection.taskId === node.id;
+  }
+
+  agentLogoFor(type: AgentType): string {
+    return agentLogoPublicPath(type);
+  }
+
+  agentTypesForSelection(): AgentType[] {
+    const selection = this.store.selection();
+    const role: AgentKind = selection.kind === 'agent-create'
+      ? selection.role
+      : (this.store.selectedAgent()?.kind ?? 'research');
+    return agentTypesForKind(role);
+  }
+
+  visibleAgentOptionRows() {
+    return agentOptionRows(this.agentType).filter((row) => isAgentOptionVisible(row, this.agentOptions));
+  }
+
+  agentEditorHeaderName(): string {
+    return this.agentName.trim() || 'Untitled agent';
+  }
+
+  agentShowSaveButton(): boolean {
+    const selection = this.store.selection();
+    if (selection.kind === 'agent-create') return true;
+    if (selection.kind === 'agent') return isAgentDraftId(selection.agentId);
+    return false;
+  }
+
+  agentShowDeleteButton(): boolean {
+    const selection = this.store.selection();
+    return selection.kind === 'agent' && !isAgentDraftId(selection.agentId);
+  }
+
+  agentStatsPreview(): ProjectAgent | null {
+    const selection = this.store.selection();
+    if (selection.kind === 'agent') {
+      const saved = this.store.selectedAgent();
+      if (!saved) return null;
+      return {
+        ...saved,
+        type: this.agentType,
+        admin_api_key: this.agentAdminApiKeyEdited
+          ? this.agentAdminApiKey.trim() || undefined
+          : saved.admin_api_key,
+      };
+    }
+    if (selection.kind === 'agent-create') {
+      const now = new Date().toISOString();
+      return {
+        agent_id: 'preview',
+        kind: selection.role,
+        type: this.agentType,
+        name: this.agentName,
+        url: this.agentUrl,
+        admin_api_key: this.agentAdminApiKey.trim() || undefined,
+        created_at: now,
+        updated_at: now,
+      };
+    }
+    return null;
+  }
+
+  agentApiKeyInputValue(): string {
+    const agent = this.store.selectedAgent();
+    if (!this.agentApiKeyEdited && !this.agentApiKeyFocused && agent?.api_key && !isAgentDraftId(agent.agent_id)) {
+      return '********';
+    }
+    return this.agentApiKey;
+  }
+
+  onAgentApiKeyFocus(): void {
+    this.agentApiKeyFocused = true;
+    if (!this.agentApiKeyEdited && this.agentApiKey === '' && this.store.selectedAgent()?.api_key) {
+      this.agentApiKey = '';
+    }
+  }
+
+  onAgentApiKeyInput(value: string): void {
+    this.agentApiKeyEdited = true;
+    this.agentApiKey = value;
+  }
+
+  onAgentApiKeyBlur(): void {
+    this.agentApiKeyFocused = false;
+    this.onEditorFieldBlur();
+  }
+
+  onAgentTypeChange(type: AgentType): void {
+    this.agentType = type;
+    const definition = getAgentTypeDefinition(type);
+    if (!this.agentNameTouched) this.agentName = definition.defaultName;
+    if (!this.agentUrlTouched) this.agentUrl = definition.defaultUrl;
+    this.agentOptions = optionsAfterTypeChange(type, this.agentOptions);
+  }
+
+  onAgentNameInput(value: string): void {
+    this.agentNameTouched = true;
+    this.agentName = value;
+  }
+
+  onAgentUrlInput(value: string): void {
+    this.agentUrlTouched = true;
+    this.agentUrl = value;
+  }
+
+  setAgentOption(key: string, value: AgentOptionValue): void {
+    this.agentOptions = { ...this.agentOptions, [key]: value };
+  }
+
+  isToolboxAgentSelected(agentId: string): boolean {
+    const selection = this.store.selection();
+    return selection.kind === 'agent' && selection.agentId === agentId;
+  }
+
+  openAgent(agentId: string): void {
+    void this.guardUnsavedChanges(async () => {
+      this.store.selectAgent(agentId);
+    });
+  }
+
+  openAgentCreate(role: 'research' | 'code'): void {
+    void this.guardUnsavedChanges(async () => {
+      this.store.selectAgentCreate(role);
+    });
+  }
+
+  saveAgentExplicit(): void {
+    void this.persistEditorChanges();
+  }
+
+  deleteSelectedAgent(): void {
+    const selection = this.store.selection();
+    if (selection.kind !== 'agent' || isAgentDraftId(selection.agentId)) return;
+    const agent = this.store.selectedAgent();
+    if (!agent || !confirm(`Delete agent "${agent.name}"?`)) return;
+    void this.store.deleteAgent(agent.agent_id);
+  }
+
+  testAgentConnection(): void {
+    void this.runAgentConnectionTest();
+  }
+
+  private async runAgentConnectionTest(): Promise<void> {
+    const saved = this.store.selectedAgent();
+    const apiKey = this.agentApiKeyEdited
+      ? this.agentApiKey.trim()
+      : (saved?.api_key ?? this.agentApiKey).trim();
+    const result = await this.agentConnections.testConnection({
+      type: this.agentType,
+      url: this.agentUrl.trim() || getAgentTypeDefinition(this.agentType).defaultUrl,
+      apiKey,
+    });
+    if (this.agentTestFadeTimer) clearTimeout(this.agentTestFadeTimer);
+    this.agentTestMessage.set(result.message);
+    if (result.ok) {
+      this.agentTestSuccess.set(true);
+      this.agentTestFadeTimer = setTimeout(() => {
+        this.agentTestMessage.set(null);
+        this.agentTestSuccess.set(false);
+      }, 5000);
+    } else {
+      this.agentTestSuccess.set(false);
+    }
+    if (saved && !isAgentDraftId(saved.agent_id)) {
+      await this.store.persistAgentTestResult(saved.agent_id, {
+        last_test_at: new Date().toISOString(),
+        last_test_status: result.ok ? 'success' : 'error',
+        last_test_message: result.message,
+      });
+    }
+  }
+
+  private resetAgentFormForRole(role: AgentKind): void {
+    const type: AgentType = role === 'code' ? 'Cursor Agent' : 'OpenAI';
+    const definition = getAgentTypeDefinition(type);
+    this.agentType = type;
+    this.agentName = definition.defaultName;
+    this.agentUrl = definition.defaultUrl;
+    this.agentApiKey = '';
+    this.agentAdminApiKey = '';
+    this.agentOptions = defaultOptionValues(type);
+    this.agentNameTouched = false;
+    this.agentUrlTouched = false;
+    this.agentApiKeyEdited = false;
+    this.agentApiKeyFocused = false;
+    this.agentAdminApiKeyEdited = false;
+    this.agentAdminApiKeyFocused = false;
+    this.agentTestMessage.set(null);
+    this.agentTestSuccess.set(false);
+  }
+
+  private bindAgentForm(agent: ProjectAgent): void {
+    this.boundAgentFormId = agent.agent_id;
+    this.agentType = agent.type;
+    this.agentName = agent.name;
+    this.agentUrl = agent.url;
+    this.agentApiKey = '';
+    this.agentAdminApiKey = '';
+    this.agentOptions = mergeAgentOptions(agent.type, agent.options);
+    this.agentNameTouched = true;
+    this.agentUrlTouched = true;
+    this.agentApiKeyEdited = false;
+    this.agentApiKeyFocused = false;
+    this.agentAdminApiKeyEdited = false;
+    this.agentAdminApiKeyFocused = false;
+    this.agentTestMessage.set(agent.last_test_status === 'error' ? (agent.last_test_message ?? null) : null);
+    this.agentTestSuccess.set(false);
+  }
+
+  agentAdminApiKeyInputValue(): string {
+    const agent = this.store.selectedAgent();
+    if (!this.agentAdminApiKeyEdited && !this.agentAdminApiKeyFocused && agent?.admin_api_key && !isAgentDraftId(agent.agent_id)) {
+      return '********';
+    }
+    return this.agentAdminApiKey;
+  }
+
+  onAgentAdminApiKeyFocus(): void {
+    this.agentAdminApiKeyFocused = true;
+    if (!this.agentAdminApiKeyEdited && this.agentAdminApiKey === '' && this.store.selectedAgent()?.admin_api_key) {
+      this.agentAdminApiKey = '';
+    }
+  }
+
+  onAgentAdminApiKeyInput(value: string): void {
+    this.agentAdminApiKeyEdited = true;
+    this.agentAdminApiKey = value;
+  }
+
+  onAgentAdminApiKeyBlur(): void {
+    this.agentAdminApiKeyFocused = false;
+    this.onEditorFieldBlur();
   }
 
   connectArrowClass(direction: CardinalDirection): string {
