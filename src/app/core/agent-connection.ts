@@ -255,17 +255,23 @@ export async function runAgentConnectionTest(
     try {
       const response = await fetchFn(requestUrl, init);
       const bodyText = await response.text();
+      const testedAt = new Date().toISOString();
       if (successCodes.includes(response.status)) {
-        return { ok: true, status: response.status, message: 'Connection successful.' };
+        return { ok: true, status: response.status, message: 'Connection successful.', testedAt };
       }
       return {
         ok: false,
         status: response.status,
         message: userMessage(recipe, response.status, bodyText),
+        testedAt,
       };
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'Network error';
-      return { ok: false, message: `Could not reach the server (${detail}).` };
+      return {
+        ok: false,
+        message: `Could not reach the server (${detail}).`,
+        testedAt: new Date().toISOString(),
+      };
     }
   };
 
