@@ -5,6 +5,7 @@ import { buildApplicationMenu, rebuildApplicationMenu, setExportProjectEnabled, 
 import { readJsonFile } from './atomic-write';
 import { exportProject, importProject } from './battleplan-archive';
 import type { AppConfigDocument } from './document-types';
+import { runAgentConnectionInMain } from './agent-connection';
 import { FileRepository } from './file-repository';
 import { downloadReleaseAsset, installDownloadedRelease } from './release-installer';
 import {
@@ -17,7 +18,6 @@ import {
   type GithubRelease,
   type GithubReleaseAsset,
 } from './desktop-release-update';
-import { runAgentConnectionTest } from '../src/app/core/agent-connection';
 import type {
   ChatArtifact,
   ChatMessage,
@@ -149,6 +149,8 @@ function registerRepositoryHandlers(): void {
       await shell.openExternal(url as string);
       return { ok: true };
     },
+    'agent:testConnection': async (params) =>
+      runAgentConnectionInMain(params as import('../src/app/core/agent-connection').AgentConnectionInput),
     'menu:sync-state': async (state) => {
       const patch = state as { exportEnabled?: boolean; saveEnabled?: boolean };
       if (typeof patch.exportEnabled === 'boolean') {
@@ -171,10 +173,6 @@ function registerRepositoryHandlers(): void {
       );
       return { ok: true };
     },
-    'agent:testConnection': (input) => runAgentConnectionTest(
-      input as import('../src/app/core/agent-connection').AgentConnectionInput,
-      (url, init) => fetch(url, init),
-    ),
   };
 
   for (const [channel, handler] of Object.entries(handlers)) {

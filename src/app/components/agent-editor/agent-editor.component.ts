@@ -17,6 +17,7 @@ import {
   isAgentOptionVisible,
   type AgentOptionDefinition,
 } from '../../core/agent-types';
+import { applyDynamicModelsToOptions, selectChoicesForOption } from '../../core/agent-connection';
 import { AgentConnectionService } from '../../data/agent-connection.service';
 import { BattleplanStore } from '../../state/battleplan-store.service';
 import { AgentStatsComponent } from '../agent-stats/agent-stats.component';
@@ -39,6 +40,7 @@ export class AgentEditorComponent {
   readonly adminApiKeyFocused = signal(false);
   readonly testState = signal<'idle' | 'success' | 'error'>('idle');
   readonly testMessage = signal('');
+  readonly dynamicModelChoices = signal<string[]>([]);
   private testFadeTimer: ReturnType<typeof setTimeout> | undefined;
 
   @Input({ required: true }) set agent(value: ProjectAgent | null) {
@@ -74,9 +76,22 @@ export class AgentEditorComponent {
         return;
       }
       this.form.set(agentFormFromSaved(agent));
+      this.dynamicModelChoices.set([]);
       this.apiKeyFocused.set(false);
       this.adminApiKeyFocused.set(false);
     });
+  }
+
+  selectChoices(row: AgentOptionDefinition): string[] {
+    const form = this.form();
+    if (!form) return row.choices ? [...row.choices] : [];
+    return selectChoicesForOption(form.type, row.key, row.choices, this.dynamicModelChoices());
+  }
+
+  localLlmBrowserNotice(): string | null {
+    const form = this.form();
+    if (!form) return null;
+    return this.connections.browserLimitationMessage(form.type);
   }
 
   agentLogo(type: AgentType): string {
@@ -87,6 +102,7 @@ export class AgentEditorComponent {
     const form = this.form();
     if (!form || form.type === nextType) return;
     applyAgentTypeChange(form, nextType);
+    this.dynamicModelChoices.set([]);
     this.form.set({ ...form, options: { ...form.options } });
     this.syncDraft();
   }
@@ -194,6 +210,12 @@ export class AgentEditorComponent {
     if (result.ok) {
       this.testState.set('success');
       this.testMessage.set(result.message);
+      if (result.models?.length) {
+        this.dynamicModelChoices.set(result.models);
+        form.options = applyDynamicModelsToOptions(form.type, form.options, result.models);
+        this.form.set({ ...form, options: { ...form.options } });
+        this.syncDraft();
+      }
       this.testFadeTimer = setTimeout(() => {
         this.testState.set('idle');
         this.testMessage.set('');

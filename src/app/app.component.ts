@@ -22,6 +22,8 @@ import {
   isAgentOptionVisible,
   mergeAgentOptions,
 } from './core/agent-types';
+import { applyDynamicModelsToOptions, selectChoicesForOption } from './core/agent-connection';
+import type { AgentOptionDefinition } from './core/agent-types';
 import { isAgentDraftId } from './core/agent-id';
 import { AgentStatsComponent } from './agent/agent-stats.component';
 import { AgentConnectionService } from './data/agent-connection.service';
@@ -152,6 +154,7 @@ export class AppComponent implements OnInit {
   agentApiKey = '';
   agentAdminApiKey = '';
   agentOptions: Record<string, AgentOptionValue> = {};
+  agentDynamicModelChoices: string[] = [];
   agentNameTouched = false;
   agentUrlTouched = false;
   agentApiKeyEdited = false;
@@ -1017,6 +1020,14 @@ export class AppComponent implements OnInit {
     return agentOptionRows(this.agentType).filter((row) => isAgentOptionVisible(row, this.agentOptions));
   }
 
+  agentSelectChoices(row: AgentOptionDefinition): string[] {
+    return selectChoicesForOption(this.agentType, row.key, row.choices, this.agentDynamicModelChoices);
+  }
+
+  agentLocalLlmBrowserNotice(): string | null {
+    return this.agentConnections.browserLimitationMessage(this.agentType);
+  }
+
   agentEditorHeaderName(): string {
     return this.agentName.trim() || 'Untitled agent';
   }
@@ -1101,6 +1112,7 @@ export class AppComponent implements OnInit {
     this.agentName = changed.name;
     this.agentUrl = changed.url;
     this.agentOptions = changed.options;
+    this.agentDynamicModelChoices = [];
   }
 
   onAgentNameInput(value: string): void {
@@ -1164,6 +1176,10 @@ export class AppComponent implements OnInit {
     this.agentTestMessage.set(result.message);
     if (result.ok) {
       this.agentTestSuccess.set(true);
+      if (result.models?.length) {
+        this.agentDynamicModelChoices = result.models;
+        this.agentOptions = applyDynamicModelsToOptions(this.agentType, this.agentOptions, result.models);
+      }
       this.agentTestFadeTimer = setTimeout(() => {
         this.agentTestMessage.set(null);
         this.agentTestSuccess.set(false);
@@ -1189,6 +1205,7 @@ export class AppComponent implements OnInit {
     this.agentApiKey = '';
     this.agentAdminApiKey = '';
     this.agentOptions = defaultOptionValues(type);
+    this.agentDynamicModelChoices = [];
     this.agentNameTouched = false;
     this.agentUrlTouched = false;
     this.agentApiKeyEdited = false;
@@ -1207,6 +1224,7 @@ export class AppComponent implements OnInit {
     this.agentApiKey = '';
     this.agentAdminApiKey = '';
     this.agentOptions = mergeAgentOptions(agent.type, agent.options);
+    this.agentDynamicModelChoices = [];
     this.agentNameTouched = true;
     this.agentUrlTouched = true;
     this.agentApiKeyEdited = false;

@@ -8,6 +8,8 @@ export interface AgentStatisticsSnapshot {
   tokensToday: number | null;
   tokensPeriod: number | null;
   tokensRemaining: number | null;
+  /** When set (e.g. LocalLLM ∞), shown instead of formatting tokensRemaining. */
+  tokensRemainingDisplay?: string;
   requestsToday: number | null;
   requestsPeriod: number | null;
   costTodayUsd: number | null;
@@ -67,9 +69,25 @@ function cursorAgentStatisticsSnapshot(agent: ProjectAgent): AgentStatisticsSnap
   };
 }
 
+function localLlmStatisticsSnapshot(): AgentStatisticsSnapshot {
+  return {
+    badge: 'Recorded locally',
+    tokensToday: 0,
+    tokensPeriod: 0,
+    tokensRemaining: null,
+    tokensRemainingDisplay: '∞',
+    requestsToday: 0,
+    requestsPeriod: 0,
+    costTodayUsd: 0,
+    costPeriodUsd: 0,
+    note: 'Local inference has no provider billing; remaining tokens are unlimited.',
+  };
+}
+
 export function agentStatisticsSnapshot(agent: ProjectAgent): AgentStatisticsSnapshot {
   if (agent.type === 'OpenAI') return openAiStatisticsSnapshot(agent);
   if (agent.type === 'Cursor Agent') return cursorAgentStatisticsSnapshot(agent);
+  if (agent.type === 'LocalLLM') return localLlmStatisticsSnapshot();
   const stats = getAgentTypeDefinition(agent.type).statistics;
   return {
     badge: 'Unavailable',
@@ -90,6 +108,9 @@ export function statisticsLabelForType(type: AgentType): string {
   }
   if (type === 'Cursor Agent') {
     return 'Poll team usage at most once per hour when an Enterprise Admin API key is configured.';
+  }
+  if (type === 'LocalLLM') {
+    return 'Throughput may also be read from vLLM Prometheus /metrics when wired; costs are always zero.';
   }
   return '';
 }

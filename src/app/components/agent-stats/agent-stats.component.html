@@ -24,7 +24,7 @@
       </div>
       <div>
         <span class="label">Tokens remaining</span>
-        <strong>{{ formatMetric(stats.tokensRemaining) }}</strong>
+        <strong>{{ stats.tokensRemainingDisplay ?? formatMetric(stats.tokensRemaining) }}</strong>
       </div>
       <div>
         <span class="label">Requests today</span>

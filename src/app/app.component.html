@@ -756,6 +756,9 @@
             } @else if (agentTestMessage() && agentTestSuccess()) {
               <p class="banner notice">{{ agentTestMessage() }}</p>
             }
+            @if (agentLocalLlmBrowserNotice(); as llmNotice) {
+              <p class="banner pending" role="status">{{ llmNotice }}</p>
+            }
             <label class="field">
               <span>Type</span>
               <div class="agent-type-field">
@@ -871,7 +874,7 @@
                               [name]="'agentOpt-' + agent.agent_id + '-' + row.key"
                               (blur)="onEditorFieldBlur()"
                             >
-                              @for (choice of row.choices ?? []; track choice) {
+                              @for (choice of agentSelectChoices(row); track choice) {
                                 <option [ngValue]="choice">{{ choice }}</option>
                               }
                             </select>
@@ -916,6 +919,9 @@
               <p class="banner error" role="alert">{{ agentTestMessage() }}</p>
             } @else if (agentTestMessage() && agentTestSuccess()) {
               <p class="banner notice">{{ agentTestMessage() }}</p>
+            }
+            @if (agentLocalLlmBrowserNotice(); as llmNotice) {
+              <p class="banner pending" role="status">{{ llmNotice }}</p>
             }
             <label class="field">
               <span>Type</span>
@@ -1008,7 +1014,7 @@
                               (ngModelChange)="setAgentOption(row.key, $event)"
                               [name]="'agentCreateOpt-' + row.key"
                             >
-                              @for (choice of row.choices ?? []; track choice) {
+                              @for (choice of agentSelectChoices(row); track choice) {
                                 <option [ngValue]="choice">{{ choice }}</option>
                               }
                             </select>

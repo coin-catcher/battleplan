@@ -43,6 +43,16 @@ describe('agent-types registry', () => {
     expect(defaultOptionValues('Cursor Agent').default_mode).toBe('agent');
   });
 
+  it('defines LocalLLM defaults and dynamic model option', () => {
+    expect(agentLogoPublicPath('LocalLLM')).toBe('/assets/agents/vllm.svg');
+    const model = agentOptionRows('LocalLLM').find((row) => row.key === 'model');
+    expect(model?.dynamic).toBe(true);
+    expect(defaultOptionValues('LocalLLM').temperature).toBe(0.7);
+    const toolToggle = agentOptionRows('LocalLLM').find((row) => row.key === 'enable_auto_tool_choice');
+    expect(isAgentOptionVisible(toolToggle!, { use_tool_calls: false })).toBe(false);
+    expect(isAgentOptionVisible(toolToggle!, { use_tool_calls: true })).toBe(true);
+  });
+
   describe('Anthropic research type', () => {
     it('uses Messages API defaults and test recipe', () => {
       const def = getAgentTypeDefinition('Anthropic');

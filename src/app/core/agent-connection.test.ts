@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getAgentTypeDefinition } from './agent-types';
-import { buildAgentTestConnectionRequest, joinAgentApiUrl, testProjectAgentConnection } from './agent-connection';
+import {
+  applyDynamicModelsToOptions,
+  buildAgentTestConnectionRequest,
+  joinAgentApiUrl,
+  parseOpenAiModelIds,
+  runAgentConnectionTest,
+  selectChoicesForOption,
+  testProjectAgentConnection,
+} from './agent-connection';
+import { localLlmHealthUrl, localLlmModelsUrl } from './local-llm';
 import type { ProjectAgent } from './models';
 
 const cursorAgent = (): ProjectAgent => ({
@@ -80,5 +89,65 @@ describe('testProjectAgentConnection (Cursor Agent)', () => {
     const result = await testProjectAgentConnection(cursorAgent(), '', vi.fn());
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/Cursor API key/i);
+  });
+});
+
+describe('LocalLLM connection', () => {
+  it('loads models after successful health check', async () => {
+    const health = localLlmHealthUrl('http://127.0.0.1:8000/v1');
+    const models = localLlmModelsUrl('http://127.0.0.1:8000/v1');
+    const fetchFn = vi.fn(async (url: string) => {
+      if (url === health) return new Response('ok', { status: 200 });
+      if (url === models) {
+        return new Response(JSON.stringify({ data: [{ id: 'meta-llama/Llama-3.1-8B' }, { id: 'other' }] }), { status: 200 });
+      }
+      return new Response('', { status: 404 });
+    });
+
+    const result = await runAgentConnectionTest(
+      { type: 'LocalLLM', url: 'http://127.0.0.1:8000/v1', apiKey: '' },
+      fetchFn,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.models).toEqual(['meta-llama/Llama-3.1-8B', 'other']);
+  });
+
+  it('falls back to /v1/models when /health fails', async () => {
+    const health = localLlmHealthUrl('http://127.0.0.1:8000/v1');
+    const models = localLlmModelsUrl('http://127.0.0.1:8000/v1');
+    const fetchFn = async (url: string) => {
+      if (url === health) return new Response('', { status: 404 });
+      if (url === models) {
+        return new Response(JSON.stringify({ data: [{ id: 'demo' }] }), { status: 200 });
+      }
+      return new Response('', { status: 500 });
+    };
+
+    const result = await runAgentConnectionTest(
+      { type: 'LocalLLM', url: 'http://127.0.0.1:8000/v1', apiKey: '' },
+      fetchFn,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.models).toEqual(['demo']);
+  });
+
+  it('populates model dropdown choices and selects first model', () => {
+    const choices = selectChoicesForOption('LocalLLM', 'model', [], ['alpha', 'beta']);
+    expect(choices).toEqual(['alpha', 'beta']);
+
+    const merged = applyDynamicModelsToOptions('LocalLLM', { model: '' }, ['alpha', 'beta']);
+    expect(merged.model).toBe('alpha');
+  });
+});
+
+describe('parseOpenAiModelIds', () => {
+  it('extracts unique sorted ids', () => {
+    expect(
+      parseOpenAiModelIds({
+        data: [{ id: 'b' }, { id: 'a' }, { id: 'b' }],
+      }),
+    ).toEqual(['a', 'b']);
   });
 });

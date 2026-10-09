@@ -28,6 +28,9 @@
       @if (testState() === 'error' && testMessage()) {
         <p class="banner error test-message" role="alert">{{ testMessage() }}</p>
       }
+      @if (localLlmBrowserNotice(); as llmNotice) {
+        <p class="banner pending" role="status">{{ llmNotice }}</p>
+      }
 
       <label class="field">
         <span>Type</span>
@@ -129,7 +132,7 @@
                       (ngModelChange)="onOptionChange(row.key, $event)"
                       [name]="'opt-' + row.key"
                     >
-                      @for (choice of row.choices ?? []; track choice) {
+                      @for (choice of selectChoices(row); track choice) {
                         <option [ngValue]="choice">{{ choice }}</option>
                       }
                     </select>

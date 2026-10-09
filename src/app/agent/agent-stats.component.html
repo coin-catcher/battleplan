@@ -16,7 +16,7 @@
     <div class="metrics">
       <div><span class="label">Tokens today</span><strong>{{ formatMetric(stats.tokensToday) }}</strong></div>
       <div><span class="label">Tokens (period)</span><strong>{{ formatMetric(stats.tokensPeriod) }}</strong></div>
-      <div><span class="label">Tokens remaining</span><strong>{{ formatMetric(stats.tokensRemaining) }}</strong></div>
+      <div><span class="label">Tokens remaining</span><strong>{{ stats.tokensRemainingDisplay ?? formatMetric(stats.tokensRemaining) }}</strong></div>
       <div><span class="label">Requests today</span><strong>{{ formatMetric(stats.requestsToday) }}</strong></div>
       <div><span class="label">Cost today</span><strong>{{ formatCost(stats.costTodayUsd) }}</strong></div>
       <div><span class="label">Cost (period)</span><strong>{{ formatCost(stats.costPeriodUsd) }}</strong></div>
