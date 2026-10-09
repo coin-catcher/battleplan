@@ -213,6 +213,10 @@ export class BattleplanApi {
   releaseProjectChanges(projectId: string): Promise<ChatMessage> {
     return this.engine.releaseProjectChanges(projectId);
   }
+
+  getAgentUsageLedger(projectId: string): Promise<Record<string, import('../core/models').AgentUsageLedger>> {
+    return this.repository.getAgentUsageLedger(projectId);
+  }
 }
 
 export type AgentEditorSaveInput = {

@@ -1,9 +1,12 @@
 @if (snapshot(); as stats) {
-  <section class="agent-stats" aria-label="Agent usage statistics">
+  <footer class="agent-stats" aria-label="Agent usage statistics">
     <header>
       <h3>Usage</h3>
       <span class="badge">{{ stats.badge }}</span>
     </header>
+    @if (loading()) {
+      <p class="hint">Refreshing statistics…</p>
+    }
     @if (typeNote()) {
       <p class="hint">{{ typeNote() }}</p>
     }
@@ -13,31 +16,82 @@
     @if (stats.adminKeyHint) {
       <p class="hint admin-hint">{{ stats.adminKeyHint }}</p>
     }
-    <div class="metrics">
-      <div>
-        <span class="label">Tokens today</span>
-        <strong>{{ formatMetric(stats.tokensToday) }}</strong>
+
+    <div class="dashboard">
+      <div class="chart-panel" aria-label="Tokens and cost chart">
+        <div class="chart-title">Today vs billing period</div>
+        <div class="chart-body">
+          <div class="bar-group">
+            <div class="bars tokens">
+              <div class="bar today" [style.height]="barHeight(stats.chart.tokensToday, chartMax(stats))" title="Tokens today"></div>
+              <div class="bar period" [style.height]="barHeight(stats.chart.tokensPeriod, chartMax(stats))" title="Tokens period"></div>
+            </div>
+            @if (stats.chart.showCost) {
+              <div class="cost-line" aria-hidden="true">
+                <span
+                  class="point today"
+                  [style.bottom]="barHeight(stats.chart.costTodayUsd, costMax(stats))"
+                ></span>
+                <span
+                  class="point period"
+                  [style.bottom]="barHeight(stats.chart.costPeriodUsd, costMax(stats))"
+                ></span>
+              </div>
+            }
+          </div>
+          <div class="chart-legend">
+            <span><i class="swatch today"></i> Today</span>
+            <span><i class="swatch period"></i> Period</span>
+            @if (stats.chart.showCost) {
+              <span><i class="swatch cost"></i> Cost overlay</span>
+            }
+          </div>
+          <div class="chart-metrics">
+            <div>
+              <span class="label">Tokens today <em class="src">{{ stats.tokensToday.source }}</em></span>
+              <strong>{{ formatMetric(stats.tokensToday) }}</strong>
+            </div>
+            <div>
+              <span class="label">Tokens (period) <em class="src">{{ stats.tokensPeriod.source }}</em></span>
+              <strong>{{ formatMetric(stats.tokensPeriod) }}</strong>
+            </div>
+            @if (stats.chart.showCost) {
+              <div>
+                <span class="label">Cost today <em class="src">{{ stats.costTodayUsd.source }}</em></span>
+                <strong>{{ formatMetric(stats.costTodayUsd, true) }}</strong>
+              </div>
+              <div>
+                <span class="label">Cost (period) <em class="src">{{ stats.costPeriodUsd.source }}</em></span>
+                <strong>{{ formatMetric(stats.costPeriodUsd, true) }}</strong>
+              </div>
+            }
+          </div>
+        </div>
       </div>
-      <div>
-        <span class="label">Tokens (period)</span>
-        <strong>{{ formatMetric(stats.tokensPeriod) }}</strong>
-      </div>
-      <div>
-        <span class="label">Tokens remaining</span>
-        <strong>{{ stats.tokensRemainingDisplay ?? formatMetric(stats.tokensRemaining) }}</strong>
-      </div>
-      <div>
-        <span class="label">Requests today</span>
-        <strong>{{ formatMetric(stats.requestsToday) }}</strong>
-      </div>
-      <div>
-        <span class="label">Cost today</span>
-        <strong>{{ formatCost(stats.costTodayUsd) }}</strong>
-      </div>
-      <div>
-        <span class="label">Cost (period)</span>
-        <strong>{{ formatCost(stats.costPeriodUsd) }}</strong>
+
+      <div class="side-panel">
+        <div class="metric-card">
+          <span class="label">Requests today <em class="src">{{ stats.requestsToday.source }}</em></span>
+          <strong class="big">{{ formatMetric(stats.requestsToday) }}</strong>
+        </div>
+        <div class="metric-card">
+          <span class="label">Requests (period) <em class="src">{{ stats.requestsPeriod.source }}</em></span>
+          <strong class="big">{{ formatMetric(stats.requestsPeriod) }}</strong>
+        </div>
+        <div class="metric-card remaining">
+          <span class="label">Tokens remaining <em class="src">{{ stats.tokensRemaining.source }}</em></span>
+          <strong class="big">{{ formatMetric(stats.tokensRemaining) }}</strong>
+          <div class="meter" aria-hidden="true">
+            @if (stats.tokensRemaining.display === '∞') {
+              <div class="meter-fill infinite"></div>
+            } @else if (stats.tokensRemaining.amount !== null && stats.tokensRemaining.amount > 0) {
+              <div class="meter-fill" [style.width.%]="remainingMeterWidth(stats.tokensRemaining.amount)"></div>
+            } @else {
+              <div class="meter-empty"></div>
+            }
+          </div>
+        </div>
       </div>
     </div>
-  </section>
+  </footer>
 }

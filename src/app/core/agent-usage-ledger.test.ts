@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { recordAgentUsageEntry } from './agent-usage-ledger';
+import { effectiveLedgerMetrics, recordAgentUsageEntry } from './agent-usage-ledger';
+
+describe('effectiveLedgerMetrics', () => {
+  it('zeroes daily totals when last request was on a prior day', () => {
+    const metrics = effectiveLedgerMetrics(
+      {
+        calendar_month: '2026-10',
+        tokens_today: 500,
+        tokens_period: 900,
+        requests_today: 3,
+        requests_period: 10,
+        last_request_at: '2026-10-08T10:00:00.000Z',
+      },
+      '2026-10-09T10:00:00.000Z',
+    );
+    expect(metrics.tokensToday).toBe(0);
+    expect(metrics.tokensPeriod).toBe(900);
+    expect(metrics.requestsToday).toBe(0);
+  });
+});
 
 describe('recordAgentUsageEntry', () => {
   it('increments request counters and rolls daily totals', () => {
