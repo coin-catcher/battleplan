@@ -23,7 +23,7 @@ export interface AgentOptionDefinition {
 export interface AgentTestConnectionRecipe {
   method: 'GET' | 'POST';
   path: string;
-  auth: 'bearer' | 'x-api-key' | 'query_key' | 'basic' | 'none';
+  auth: 'bearer' | 'x-api-key' | 'query_key' | 'basic' | 'none' | 'google_service_account';
   successHttp?: number[];
   userErrorMap?: Record<number, string>;
   headers?: Record<string, string>;
@@ -114,7 +114,15 @@ export const AGENT_TYPE_REGISTRY: Record<AgentType, AgentTypeDefinition> = {
       adminKeyHint: 'Organization Admin API key (not the same as project sk- key).',
     },
     specificOptions: [
-      { key: 'model', label: 'Model', control: 'select', default: 'gpt-4.1-mini', choices: ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'] },
+      {
+        key: 'model',
+        label: 'Model',
+        control: 'select',
+        default: 'gpt-4.1-mini',
+        choices: ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'],
+        dynamic: true,
+        help: 'Loaded from GET /v1/models when an API key is available (Test Connection or opening the editor).',
+      },
       {
         key: 'reasoning_effort',
         label: 'Reasoning effort',
@@ -185,12 +193,11 @@ export const AGENT_TYPE_REGISTRY: Record<AgentType, AgentTypeDefinition> = {
     testConnection: {
       method: 'GET',
       path: '/models',
-      auth: 'query_key',
-      queryParam: 'key',
+      auth: 'google_service_account',
       successHttp: [200],
       userErrorMap: {
-        400: 'Invalid API key or malformed request.',
-        403: 'API key lacks permission to list models.',
+        401: 'Service account authentication failed. Check the JSON key and that Generative Language API is enabled.',
+        403: 'Service account lacks permission to list models. Enable the Generative Language API for this project.',
       },
     },
     statistics: {
@@ -199,7 +206,7 @@ export const AGENT_TYPE_REGISTRY: Record<AgentType, AgentTypeDefinition> = {
       secondary: 'cloud_billing_export_optional',
       statisticsBadge: 'Estimated',
       quotaHint:
-        'Live quota and billing totals require Google AI Studio or Cloud Console; usage shown here is recorded locally from API response metadata unless Cloud Billing is linked.',
+        'Live quota and billing totals require Google Cloud Console for the service account project; usage shown here is recorded locally from API response metadata unless Cloud Billing is linked.',
     },
     specificOptions: [
       { key: 'model', label: 'Model', control: 'select', default: 'gemini-2.5-flash', choices: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'] },

@@ -1,6 +1,11 @@
-import { resolveAgentApiKey } from './agent-api-key';
+import { agentCredentialRequiredMessage, resolveAgentApiKey } from './agent-api-key';
 import type { AgentType, ProjectAgent } from './models';
 import { getAgentTypeDefinition, type AgentTestConnectionRecipe, type AgentTypeDefinition } from './agent-types';
+import {
+  geminiAccessTokenFromCredentialsJson,
+  parseGeminiModelNames,
+  parseGoogleServiceAccountJson,
+} from './gemini-service-account';
 import {
   localLlmHealthUrl,
   localLlmModelsUrl,
@@ -94,6 +99,71 @@ export function parseOpenAiModelIds(payload: unknown): string[] {
   return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
 }
 
+const OPENAI_NON_CHAT_PREFIXES = [
+  'text-embedding',
+  'text-search',
+  'whisper',
+  'tts-',
+  'dall-e',
+  'gpt-image',
+  'omni-moderation',
+  'sora-',
+  'davinci',
+  'babbage',
+  'curie',
+  'ada',
+  'code-search',
+  'code-davinci',
+];
+
+/** Drop embeddings, audio, image, and legacy completion-only ids from OpenAI /v1/models. */
+export function filterOpenAiSelectableModelIds(ids: string[]): string[] {
+  return ids.filter((id) => {
+    const lower = id.toLowerCase();
+    if (OPENAI_NON_CHAT_PREFIXES.some((prefix) => lower.startsWith(prefix))) return false;
+    if (lower.includes('embedding')) return false;
+    return true;
+  });
+}
+
+function modelsFromModelsListResponse(type: AgentType, bodyText: string): string[] | undefined {
+  try {
+    const parsed = JSON.parse(bodyText);
+    const ids = parseOpenAiModelIds(parsed);
+    if (type === 'OpenAI') return filterOpenAiSelectableModelIds(ids);
+    return ids;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function listAgentModels(
+  input: AgentConnectionInput,
+  fetchFn: AgentConnectionFetch = fetch,
+): Promise<string[]> {
+  if (input.type === 'LocalLLM') {
+    const result = await testLocalLlmConnection(input, fetchFn);
+    return result.models ?? [];
+  }
+  if (input.type !== 'OpenAI' && input.type !== 'Grok') return [];
+
+  const apiKey = input.apiKey.trim();
+  if (!apiKey) return [];
+
+  const definition = getAgentTypeDefinition(input.type);
+  const request = buildAgentTestConnectionRequest(definition, apiKey, input.url);
+  if (request.method !== 'GET') return [];
+
+  try {
+    const response = await fetchFn(request.url, { method: request.method, headers: request.headers });
+    if (!response.ok) return [];
+    const bodyText = await response.text();
+    return modelsFromModelsListResponse(input.type, bodyText) ?? [];
+  } catch {
+    return [];
+  }
+}
+
 /** Build HTTP request parameters for a registry test-connection recipe. */
 export function buildAgentTestConnectionRequest(
   definition: AgentTypeDefinition,
@@ -116,6 +186,9 @@ export function buildAgentTestConnectionRequest(
     case 'query_key':
       if (recipe.queryParam) url.searchParams.set(recipe.queryParam, apiKey);
       break;
+    case 'google_service_account':
+      headers.Authorization = `Bearer ${apiKey}`;
+      break;
     case 'basic': {
       const password = recipe.basicPasswordEmpty ? '' : apiKey;
       headers['Authorization'] = `Basic ${encodeBasicAuth(apiKey, password)}`;
@@ -133,6 +206,58 @@ export function buildAgentTestConnectionRequest(
     headers,
     body: recipe.body,
   };
+}
+
+async function testGeminiServiceAccountConnection(
+  input: AgentConnectionInput,
+  fetchFn: AgentConnectionFetch,
+): Promise<AgentConnectionResult> {
+  const recipe = getAgentTypeDefinition('Gemini').testConnection;
+  const successCodes = recipe.successHttp ?? [200];
+  const testedAt = new Date().toISOString();
+  const credentialsRaw = input.apiKey.trim();
+  if (!credentialsRaw) {
+    return { ok: false, message: agentCredentialRequiredMessage('Gemini'), testedAt };
+  }
+  let accessToken: string;
+  try {
+    parseGoogleServiceAccountJson(credentialsRaw);
+    accessToken = await geminiAccessTokenFromCredentialsJson(credentialsRaw, fetchFn);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid service account JSON.';
+    return { ok: false, message, testedAt };
+  }
+
+  const request = buildAgentTestConnectionRequest(
+    getAgentTypeDefinition('Gemini'),
+    accessToken,
+    input.url,
+  );
+  try {
+    const response = await fetchFn(request.url, { method: request.method, headers: request.headers });
+    const bodyText = await response.text();
+    if (successCodes.includes(response.status)) {
+      let models: string[] | undefined;
+      try {
+        models = parseGeminiModelNames(JSON.parse(bodyText));
+      } catch {
+        models = undefined;
+      }
+      const message = models?.length
+        ? `Connection successful. ${models.length} model(s) available.`
+        : 'Connection successful.';
+      return { ok: true, status: response.status, message, models, testedAt };
+    }
+    return {
+      ok: false,
+      status: response.status,
+      message: userMessage(recipe, response.status, bodyText),
+      testedAt,
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'Network error';
+    return { ok: false, message: `Could not reach the server (${detail}).`, testedAt };
+  }
 }
 
 async function testLocalLlmConnection(
@@ -218,6 +343,9 @@ export async function runAgentConnectionTest(
   if (input.type === 'LocalLLM') {
     return testLocalLlmConnection(input, fetchFn);
   }
+  if (input.type === 'Gemini') {
+    return testGeminiServiceAccountConnection(input, fetchFn);
+  }
 
   const recipe = getAgentTypeDefinition(input.type).testConnection;
   const successCodes = recipe.successHttp ?? [200];
@@ -257,7 +385,14 @@ export async function runAgentConnectionTest(
       const bodyText = await response.text();
       const testedAt = new Date().toISOString();
       if (successCodes.includes(response.status)) {
-        return { ok: true, status: response.status, message: 'Connection successful.', testedAt };
+        let models: string[] | undefined;
+        if ((input.type === 'OpenAI' || input.type === 'Grok') && recipe.path === '/models') {
+          models = modelsFromModelsListResponse(input.type, bodyText);
+        }
+        const message = models?.length
+          ? `Connection successful. ${models.length} model(s) available.`
+          : 'Connection successful.';
+        return { ok: true, status: response.status, message, models, testedAt };
       }
       return {
         ok: false,
@@ -305,7 +440,7 @@ export async function testProjectAgentConnection(
   );
 }
 
-/** Apply dynamic model ids to agent options after a successful LocalLLM test. */
+/** Apply dynamic model ids to agent options after a successful models-list fetch. */
 export function applyDynamicModelsToOptions(
   type: AgentType,
   options: Record<string, string | number | boolean>,
@@ -334,7 +469,9 @@ export function selectChoicesForOption(
   const def = getAgentTypeDefinition(type);
   const option = def.specificOptions.find((row) => row.key === optionKey);
   if (option?.dynamic) {
-    return type === 'LocalLLM' ? (dynamicModels ?? []) : [];
+    const live = dynamicModels ?? [];
+    if (live.length) return live;
+    return staticChoices ? [...staticChoices] : [];
   }
   return staticChoices ? [...staticChoices] : [];
 }

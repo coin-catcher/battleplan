@@ -44,6 +44,8 @@ types:
         label: Model
         control: select
         default: gpt-4.1-mini
+        dynamic: true
+        populate_from: GET /v1/models
         choices: [gpt-4.1, gpt-4.1-mini, gpt-4o, gpt-4o-mini, o3, o4-mini]
       - key: reasoning_effort
         label: Reasoning effort

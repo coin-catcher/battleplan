@@ -14,6 +14,7 @@ import type {
 import { TASK_STATUSES } from './core/models';
 import {
   agentLogoPublicPath,
+  agentModelOptionDefinition,
   agentOptionRows,
   agentTypesForKind,
   applyAgentTypeChange,
@@ -22,6 +23,7 @@ import {
   isAgentOptionVisible,
   mergeAgentOptions,
 } from './core/agent-types';
+import { agentCredentialFieldLabel, agentUsesServiceAccountJson } from './core/agent-api-key';
 import { applyDynamicModelsToOptions, selectChoicesForOption } from './core/agent-connection';
 import type { AgentOptionDefinition } from './core/agent-types';
 import { isAgentDraftId } from './core/agent-id';
@@ -1199,6 +1201,14 @@ export class AppComponent implements OnInit {
     return agentLogoPublicPath(type);
   }
 
+  agentCredentialFieldLabel(): string {
+    return agentCredentialFieldLabel(this.agentType);
+  }
+
+  agentUsesServiceAccountJson(): boolean {
+    return agentUsesServiceAccountJson(this.agentType);
+  }
+
   agentTypesForSelection(): AgentType[] {
     const selection = this.store.selection();
     const role: AgentKind = selection.kind === 'agent-create'
@@ -1286,6 +1296,7 @@ export class AppComponent implements OnInit {
 
   onAgentApiKeyBlur(): void {
     this.agentApiKeyFocused = false;
+    void this.refreshDynamicModelChoices();
     this.onEditorFieldBlur();
   }
 
@@ -1304,6 +1315,7 @@ export class AppComponent implements OnInit {
     this.agentUrl = changed.url;
     this.agentOptions = changed.options;
     this.agentDynamicModelChoices = [];
+    void this.refreshDynamicModelChoices();
   }
 
   onAgentNameInput(value: string): void {
@@ -1369,6 +1381,27 @@ export class AppComponent implements OnInit {
 
   testAgentConnection(): void {
     void this.runAgentConnectionTest();
+  }
+
+  private agentApiKeyForModelFetch(): string {
+    const saved = this.store.selectedAgent();
+    return this.agentApiKeyEdited
+      ? this.agentApiKey.trim()
+      : (saved?.api_key ?? this.agentApiKey).trim();
+  }
+
+  private async refreshDynamicModelChoices(): Promise<void> {
+    if (!agentModelOptionDefinition(this.agentType)?.dynamic) return;
+    const apiKey = this.agentApiKeyForModelFetch();
+    if (!apiKey && this.agentType !== 'LocalLLM') return;
+    const models = await this.agentConnections.listModels({
+      type: this.agentType,
+      url: this.agentUrl.trim() || getAgentTypeDefinition(this.agentType).defaultUrl,
+      apiKey,
+    });
+    if (!models.length) return;
+    this.agentDynamicModelChoices = models;
+    this.agentOptions = applyDynamicModelsToOptions(this.agentType, this.agentOptions, models);
   }
 
   private async runAgentConnectionTest(): Promise<void> {
@@ -1442,6 +1475,7 @@ export class AppComponent implements OnInit {
     this.agentAdminApiKeyFocused = false;
     this.agentTestMessage.set(agent.last_test_status === 'error' ? (agent.last_test_message ?? null) : null);
     this.agentTestSuccess.set(false);
+    void this.refreshDynamicModelChoices();
   }
 
   agentAdminApiKeyInputValue(): string {

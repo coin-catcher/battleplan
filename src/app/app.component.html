@@ -875,17 +875,35 @@
               />
             </label>
             <label class="field">
-              <span>API key</span>
-              <input
-                type="password"
-                autocomplete="off"
-                [value]="agentApiKeyInputValue()"
-                (input)="onAgentApiKeyInput($any($event.target).value)"
-                (focus)="onAgentApiKeyFocus()"
-                (blur)="onAgentApiKeyBlur()"
-                [name]="'agentApiKey-' + agent.agent_id"
-                placeholder="Optional for Cursor Agent (uses global key)"
-              />
+              <span>{{ agentCredentialFieldLabel() }}</span>
+              @if (agentUsesServiceAccountJson()) {
+                <textarea
+                  class="service-account-json"
+                  rows="10"
+                  spellcheck="false"
+                  autocomplete="off"
+                  [value]="agentApiKeyInputValue()"
+                  (input)="onAgentApiKeyInput($any($event.target).value)"
+                  (focus)="onAgentApiKeyFocus()"
+                  (blur)="onAgentApiKeyBlur()"
+                  [name]="'agentServiceAccountJson-' + agent.agent_id"
+                  placeholder='{"type":"service_account","project_id":"…","private_key":"-----BEGIN PRIVATE KEY-----\n…",…}'
+                ></textarea>
+                <span class="agent-option-help">
+                  Google Cloud service account key JSON (not an API key). Enable the Generative Language API for the project.
+                </span>
+              } @else {
+                <input
+                  type="password"
+                  autocomplete="off"
+                  [value]="agentApiKeyInputValue()"
+                  (input)="onAgentApiKeyInput($any($event.target).value)"
+                  (focus)="onAgentApiKeyFocus()"
+                  (blur)="onAgentApiKeyBlur()"
+                  [name]="'agentApiKey-' + agent.agent_id"
+                  placeholder="Optional for Cursor Agent (uses global key)"
+                />
+              }
             </label>
             @if (agentType === 'OpenAI') {
               <label class="field">
@@ -1044,14 +1062,30 @@
               <input [ngModel]="agentUrl" (ngModelChange)="onAgentUrlInput($event)" name="agentCreateUrl" />
             </label>
             <label class="field">
-              <span>API key</span>
-              <input
-                type="password"
-                autocomplete="off"
-                [ngModel]="agentApiKey"
-                (ngModelChange)="onAgentApiKeyInput($event)"
-                name="agentCreateApiKey"
-              />
+              <span>{{ agentCredentialFieldLabel() }}</span>
+              @if (agentUsesServiceAccountJson()) {
+                <textarea
+                  class="service-account-json"
+                  rows="10"
+                  spellcheck="false"
+                  autocomplete="off"
+                  [ngModel]="agentApiKey"
+                  (ngModelChange)="onAgentApiKeyInput($event)"
+                  name="agentCreateServiceAccountJson"
+                  placeholder='{"type":"service_account","project_id":"…","private_key":"-----BEGIN PRIVATE KEY-----\n…",…}'
+                ></textarea>
+                <span class="agent-option-help">
+                  Google Cloud service account key JSON (not an API key). Enable the Generative Language API for the project.
+                </span>
+              } @else {
+                <input
+                  type="password"
+                  autocomplete="off"
+                  [ngModel]="agentApiKey"
+                  (ngModelChange)="onAgentApiKeyInput($event)"
+                  name="agentCreateApiKey"
+                />
+              }
             </label>
             @if (agentType === 'OpenAI') {
               <label class="field">

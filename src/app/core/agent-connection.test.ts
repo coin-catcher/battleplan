@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as geminiAuth from './gemini-service-account';
 import { getAgentTypeDefinition } from './agent-types';
 import {
   agentConnectionUserMessage,
   applyDynamicModelsToOptions,
   buildAgentTestConnectionRequest,
+  filterOpenAiSelectableModelIds,
   joinAgentApiUrl,
+  listAgentModels,
   parseOpenAiModelIds,
   runAgentConnectionTest,
   selectChoicesForOption,
@@ -61,22 +64,23 @@ describe('joinAgentApiUrl', () => {
 });
 
 describe('buildAgentTestConnectionRequest', () => {
-  it('builds Gemini GET /models with key query param', () => {
+  it('builds Gemini GET /models with Bearer access token', () => {
     const definition = getAgentTypeDefinition('Gemini');
-    const request = buildAgentTestConnectionRequest(definition, 'test-gemini-key');
+    const request = buildAgentTestConnectionRequest(definition, 'ya29.test-token');
     expect(request.method).toBe('GET');
-    expect(request.url).toBe('https://generativelanguage.googleapis.com/v1beta/models?key=test-gemini-key');
-    expect(request.headers).toEqual({ accept: 'application/json' });
+    expect(request.url).toBe('https://generativelanguage.googleapis.com/v1beta/models');
+    expect(request.headers).toEqual({ accept: 'application/json', Authorization: 'Bearer ya29.test-token' });
   });
 
   it('respects a custom base URL for Gemini', () => {
     const definition = getAgentTypeDefinition('Gemini');
     const request = buildAgentTestConnectionRequest(
       definition,
-      'k',
+      'token',
       'https://generativelanguage.googleapis.com/v1beta/',
     );
-    expect(request.url).toBe('https://generativelanguage.googleapis.com/v1beta/models?key=k');
+    expect(request.url).toBe('https://generativelanguage.googleapis.com/v1beta/models');
+    expect(request.headers.Authorization).toBe('Bearer token');
   });
 
   it('defines Grok fallback POST /responses for connection testing', () => {
@@ -171,6 +175,15 @@ describe('LocalLLM connection', () => {
     const merged = applyDynamicModelsToOptions('LocalLLM', { model: '' }, ['alpha', 'beta']);
     expect(merged.model).toBe('alpha');
   });
+
+  it('uses live OpenAI models when loaded, else static fallback', () => {
+    expect(
+      selectChoicesForOption('OpenAI', 'model', ['gpt-4.1-mini'], ['gpt-4o', 'gpt-4.1-nano']),
+    ).toEqual(['gpt-4o', 'gpt-4.1-nano']);
+    expect(
+      selectChoicesForOption('OpenAI', 'model', ['gpt-4.1-mini'], []),
+    ).toEqual(['gpt-4.1-mini']);
+  });
 });
 
 describe('parseOpenAiModelIds', () => {
@@ -180,6 +193,19 @@ describe('parseOpenAiModelIds', () => {
         data: [{ id: 'b' }, { id: 'a' }, { id: 'b' }],
       }),
     ).toEqual(['a', 'b']);
+  });
+});
+
+describe('filterOpenAiSelectableModelIds', () => {
+  it('removes embeddings and audio models', () => {
+    expect(
+      filterOpenAiSelectableModelIds([
+        'gpt-4o',
+        'text-embedding-3-small',
+        'whisper-1',
+        'o3-mini',
+      ]),
+    ).toEqual(['gpt-4o', 'o3-mini']);
   });
 });
 
@@ -199,8 +225,25 @@ describe('runAgentConnectionTest (OpenAI)', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.message).toMatch(/successful/i);
+    expect(result.message).toMatch(/model\(s\) available/i);
+    expect(result.models).toEqual(['gpt-4o']);
     expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('listAgentModels returns filtered chat models for OpenAI', async () => {
+    const fetchFn = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          data: [{ id: 'gpt-4o' }, { id: 'text-embedding-3-small' }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const models = await listAgentModels(
+      { type: 'OpenAI', url: 'https://api.openai.com/v1', apiKey: 'sk-valid' },
+      fetchFn,
+    );
+    expect(models).toEqual(['gpt-4o']);
   });
 
   it('returns a stable mapped error for invalid keys until a later success', async () => {
@@ -220,5 +263,37 @@ describe('runAgentConnectionTest (OpenAI)', () => {
       fetchFn,
     );
     expect(valid.ok).toBe(true);
+  });
+});
+
+describe('runAgentConnectionTest (Gemini service account)', () => {
+  const serviceAccountJson = JSON.stringify({
+    type: 'service_account',
+    project_id: 'test-project',
+    private_key_id: 'key-id',
+    private_key: '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n',
+    client_email: 'agent@test-project.iam.gserviceaccount.com',
+    client_id: '123',
+    token_uri: 'https://oauth2.googleapis.com/token',
+  });
+
+  it('lists models using OAuth bearer from service account JSON', async () => {
+    vi.spyOn(geminiAuth, 'geminiAccessTokenFromCredentialsJson').mockResolvedValue('ya29.gemini-test');
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/models');
+      expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer ya29.gemini-test');
+      return new Response(JSON.stringify({ models: [{ name: 'models/gemini-2.5-flash' }] }), { status: 200 });
+    });
+    const result = await runAgentConnectionTest(
+      {
+        type: 'Gemini',
+        url: 'https://generativelanguage.googleapis.com/v1beta',
+        apiKey: serviceAccountJson,
+      },
+      fetchFn,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.models).toEqual(['gemini-2.5-flash']);
+    vi.restoreAllMocks();
   });
 });

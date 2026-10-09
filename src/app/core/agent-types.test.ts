@@ -43,6 +43,12 @@ describe('agent-types registry', () => {
     expect(defaultOptionValues('Cursor Agent').default_mode).toBe('agent');
   });
 
+  it('defines OpenAI model option as dynamic with static fallback choices', () => {
+    const model = agentOptionRows('OpenAI').find((row) => row.key === 'model');
+    expect(model?.dynamic).toBe(true);
+    expect(model?.choices?.length).toBeGreaterThan(1);
+  });
+
   it('defines LocalLLM defaults and dynamic model option', () => {
     expect(agentLogoPublicPath('LocalLLM')).toBe('assets/agents/vllm.svg');
     const model = agentOptionRows('LocalLLM').find((row) => row.key === 'model');
@@ -141,7 +147,7 @@ describe('Gemini agent type', () => {
 
   it('documents estimated statistics and AI Studio quota requirements', () => {
     expect(agentStatisticsBadge('Gemini')).toBe('Estimated');
-    expect(agentStatisticsQuotaHint('Gemini')).toMatch(/AI Studio/i);
+    expect(agentStatisticsQuotaHint('Gemini')).toMatch(/Cloud Console/i);
   });
 
   it('gates thinking and tool-specific options', () => {
