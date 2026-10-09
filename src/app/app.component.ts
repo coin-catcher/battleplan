@@ -764,9 +764,7 @@ export class AppComponent implements OnInit {
   }
 
   mindmapLinkHandleVisible(edge: MindmapEdge, end: 'from' | 'to'): boolean {
-    if (!this.isMindmapLinkSelected(edge)) return false;
-    if (edge.kind === 'project-root' && end === 'from') return false;
-    return true;
+    return this.isMindmapLinkSelected(edge);
   }
 
   mindmapLinkHandlePoint(edge: MindmapEdge, end: 'from' | 'to'): { x: number; y: number } {
@@ -786,7 +784,6 @@ export class AppComponent implements OnInit {
   onMindmapLinkHandlePointerDown(edge: MindmapEdge, end: 'from' | 'to', event: PointerEvent): void {
     event.stopPropagation();
     event.preventDefault();
-    if (edge.kind === 'project-root' && end === 'from') return;
     const link: MindmapLinkRef = { kind: edge.kind, from: edge.from, to: edge.to };
     this.selectedMindmapLink.set(link);
     const start = this.mindmapLinkHandlePoint(edge, end);
@@ -808,12 +805,7 @@ export class AppComponent implements OnInit {
       const target = mindmapNodeAtPoint(this.map().nodes, world.x, world.y);
       const anchorId = end === 'from' ? link.to : link.from;
       const originalEndId = end === 'from' ? link.from : link.to;
-      if (
-        target
-        && target.id !== anchorId
-        && target.id !== originalEndId
-        && (edge.kind !== 'project-root' || end === 'to')
-      ) {
+      if (target && target.id !== originalEndId && (target.id !== anchorId || target.id === 'project')) {
         void this.store.relocateMindmapLink(link, end, target.id);
       }
     };
