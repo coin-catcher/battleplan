@@ -95,4 +95,23 @@ export class IpcRepository implements BattleplanRepository {
   savePendingChanges(projectId: string, changes: import('../core/models').PendingChange[]): Promise<void> {
     return bridge().invoke('repo:savePendingChanges', projectId, changes);
   }
+
+  listProjectAgents(projectId: string): Promise<import('../core/models').ProjectAgent[]> {
+    return bridge().invoke('repo:listProjectAgents', projectId);
+  }
+
+  saveProjectAgents(projectId: string, agents: import('../core/models').ProjectAgent[]): Promise<void> {
+    return bridge().invoke('repo:saveProjectAgents', projectId, agents);
+  }
+
+  getAgentUsageLedger(projectId: string): Promise<Record<string, import('../core/models').AgentUsageLedger>> {
+    return bridge().invoke('repo:getAgentUsageLedger', projectId);
+  }
+
+  saveAgentUsageLedger(
+    projectId: string,
+    ledger: Record<string, import('../core/models').AgentUsageLedger>,
+  ): Promise<void> {
+    return bridge().invoke('repo:saveAgentUsageLedger', projectId, ledger);
+  }
 }

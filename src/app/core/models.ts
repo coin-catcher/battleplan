@@ -126,4 +126,40 @@ export type Selection =
   | { kind: 'task'; taskId: string }
   | { kind: 'subproject'; taskId: string }
   | { kind: 'code'; taskId: string }
-  | { kind: 'research'; taskId: string };
+  | { kind: 'research'; taskId: string }
+  | { kind: 'agent'; agentId: string }
+  | { kind: 'agent-create'; role: 'research' | 'code' };
+
+export const AGENT_KINDS = ['research', 'code'] as const;
+export type AgentKind = (typeof AGENT_KINDS)[number];
+
+export const AGENT_TYPES = ['OpenAI', 'Anthropic', 'Gemini', 'Grok', 'Cursor Agent', 'LocalLLM'] as const;
+export type AgentType = (typeof AGENT_TYPES)[number];
+
+export type AgentOptionValue = string | number | boolean;
+
+export interface ProjectAgent {
+  agent_id: string;
+  kind: AgentKind;
+  type: AgentType;
+  name: string;
+  url: string;
+  api_key?: string;
+  options?: Record<string, AgentOptionValue>;
+  icon_asset?: string;
+  cursor_agent_id?: string;
+  last_test_at?: string;
+  last_test_status?: 'success' | 'error';
+  last_test_message?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentUsageLedger {
+  calendar_month?: string;
+  tokens_today?: number;
+  tokens_period?: number;
+  requests_today?: number;
+  requests_period?: number;
+  last_request_at?: string;
+}

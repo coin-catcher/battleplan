@@ -44,6 +44,23 @@ class MemoryRepository implements BattleplanRepository {
   async saveArtifact(artifact: ChatArtifact): Promise<void> { this.artifacts.push(artifact); }
   async listPendingChanges(): Promise<import('../core/models').PendingChange[]> { return []; }
   async savePendingChanges(): Promise<void> { return; }
+  agents = new Map<string, import('../core/models').ProjectAgent[]>();
+  ledgers = new Map<string, Record<string, import('../core/models').AgentUsageLedger>>();
+  async listProjectAgents(projectId: string): Promise<import('../core/models').ProjectAgent[]> {
+    return this.agents.get(projectId) ?? [];
+  }
+  async saveProjectAgents(projectId: string, agents: import('../core/models').ProjectAgent[]): Promise<void> {
+    this.agents.set(projectId, agents);
+  }
+  async getAgentUsageLedger(projectId: string): Promise<Record<string, import('../core/models').AgentUsageLedger>> {
+    return this.ledgers.get(projectId) ?? {};
+  }
+  async saveAgentUsageLedger(
+    projectId: string,
+    ledger: Record<string, import('../core/models').AgentUsageLedger>,
+  ): Promise<void> {
+    this.ledgers.set(projectId, ledger);
+  }
 }
 
 function cursor(): CursorClient & { prompts: string[] } {

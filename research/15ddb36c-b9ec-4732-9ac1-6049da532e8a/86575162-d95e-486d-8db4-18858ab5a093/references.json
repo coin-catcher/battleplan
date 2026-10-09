@@ -1,0 +1,90 @@
+{
+  "battleplan_in_repo": [
+    {
+      "path": "src/app/app.component.html",
+      "note": "Left sidebar mindmap + right editor switch on selection.kind"
+    },
+    {
+      "path": "src/app/app.component.scss",
+      "note": "zoom-controls fixed overlay pattern on map-frame"
+    },
+    {
+      "path": "src/app/core/models.ts",
+      "note": "Selection union — extend with agent / agent-create"
+    },
+    {
+      "path": "electron/document-types.ts",
+      "note": "ProjectDocument shape for project_config.json"
+    },
+    {
+      "path": "src/app/data/cursor-browser.ts",
+      "note": "Cursor API base URL and agent CRUD"
+    },
+    {
+      "path": "src/app/data/local-engine.ts",
+      "note": "Today wires Cursor-only agent launch"
+    }
+  ],
+  "external": [
+    {
+      "title": "OpenAI API reference (Chat Completions)",
+      "url": "https://platform.openai.com/docs/api-reference/chat/create"
+    },
+    {
+      "title": "OpenAI Usage and Cost API cookbook",
+      "url": "https://developers.openai.com/cookbook/examples/completions_usage_api"
+    },
+    {
+      "title": "Anthropic Messages API",
+      "url": "https://docs.anthropic.com/en/api/messages"
+    },
+    {
+      "title": "Anthropic Usage and Cost Admin API",
+      "url": "https://docs.anthropic.com/en/api/data-usage-cost-api"
+    },
+    {
+      "title": "Gemini API generateContent",
+      "url": "https://ai.google.dev/api/generate-content"
+    },
+    {
+      "title": "Gemini billing and usage monitoring",
+      "url": "https://ai.google.dev/gemini-api/docs/billing"
+    },
+    {
+      "title": "Gemini thinking / reasoning config",
+      "url": "https://ai.google.dev/gemini-api/docs/thinking"
+    },
+    {
+      "title": "xAI Grok API overview",
+      "url": "https://docs.x.ai/overview"
+    },
+    {
+      "title": "xAI reasoning effort",
+      "url": "https://docs.x.ai/developers/model-capabilities/text/reasoning"
+    },
+    {
+      "title": "xAI tools overview",
+      "url": "https://docs.x.ai/developers/tools/overview"
+    },
+    {
+      "title": "Cursor Cloud Agents API",
+      "url": "https://cursor.com/docs/cloud-agent/api/endpoints"
+    },
+    {
+      "title": "Cursor Admin API (team usage/spend)",
+      "url": "https://cursor.com/docs/account/teams/admin-api"
+    },
+    {
+      "title": "vLLM OpenAI-compatible server",
+      "url": "https://docs.vllm.ai/en/latest/serving/online_serving/"
+    },
+    {
+      "title": "vLLM Prometheus metrics",
+      "url": "https://docs.vllm.ai/en/latest/design/metrics/"
+    },
+    {
+      "title": "Simple Icons (vendor logos)",
+      "url": "https://simpleicons.org/"
+    }
+  ]
+}

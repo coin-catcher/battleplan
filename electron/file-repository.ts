@@ -1,10 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
+  AgentUsageLedger,
   ChatArtifact,
   ChatMessage,
   PendingChange,
   Project,
+  ProjectAgent,
   ProjectTask,
   TaskCodeOutput,
   TaskResearchOutput,
@@ -43,6 +45,8 @@ export class FileRepository implements BattleplanRepository {
       messages: doc?.messages ?? [],
       artifacts: doc?.artifacts ?? [],
       pending_changes: doc?.pending_changes,
+      agents: doc?.agents ?? [],
+      agent_usage_ledger: doc?.agent_usage_ledger,
     };
     await this.writeProjectDocument(project.project_id, next);
   }
@@ -141,6 +145,26 @@ export class FileRepository implements BattleplanRepository {
   async savePendingChanges(projectId: string, changes: PendingChange[]): Promise<void> {
     const doc = await this.requireProjectDocument(projectId);
     await this.writeProjectDocument(projectId, { ...doc, pending_changes: changes });
+  }
+
+  async listProjectAgents(projectId: string): Promise<ProjectAgent[]> {
+    const doc = await this.readProjectDocument(projectId);
+    return doc?.agents ?? [];
+  }
+
+  async saveProjectAgents(projectId: string, agents: ProjectAgent[]): Promise<void> {
+    const doc = await this.requireProjectDocument(projectId);
+    await this.writeProjectDocument(projectId, { ...doc, agents });
+  }
+
+  async getAgentUsageLedger(projectId: string): Promise<Record<string, AgentUsageLedger>> {
+    const doc = await this.readProjectDocument(projectId);
+    return doc?.agent_usage_ledger ?? {};
+  }
+
+  async saveAgentUsageLedger(projectId: string, ledger: Record<string, AgentUsageLedger>): Promise<void> {
+    const doc = await this.requireProjectDocument(projectId);
+    await this.writeProjectDocument(projectId, { ...doc, agent_usage_ledger: ledger });
   }
 
   async listTaskMessages(taskId: string): Promise<ChatMessage[]> {
