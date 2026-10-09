@@ -34,6 +34,8 @@ export interface AgentTestConnectionRecipe {
   note?: string;
 }
 
+export type AgentStatisticsBadge = 'Live' | 'Estimated' | 'Recorded locally';
+
 export interface AgentStatisticsRecipe {
   adapter: string;
   requiresSeparateAdminKey?: boolean;
@@ -42,6 +44,10 @@ export interface AgentStatisticsRecipe {
   pollIntervalMinutes?: number;
   primary?: string;
   secondary?: string;
+  /** Shown on the statistics card when provider data is partial or ledger-only. */
+  statisticsBadge?: AgentStatisticsBadge;
+  /** Editor copy when live quota or billing is not available via the standard API key. */
+  quotaHint?: string;
   priceHintUsdPerMtok?: { input: number; output: number; model: string };
   metricsPath?: string;
 }
@@ -173,8 +179,25 @@ export const AGENT_TYPE_REGISTRY: Record<AgentType, AgentTypeDefinition> = {
     defaultUrl: 'https://generativelanguage.googleapis.com/v1beta',
     logoAsset: 'googlegemini.svg',
     logoAlt: 'Google Gemini',
-    testConnection: { method: 'GET', path: '/models', auth: 'query_key', queryParam: 'key', successHttp: [200] },
-    statistics: { adapter: 'gemini_hybrid', primary: 'local_ledger_from_usage_metadata', secondary: 'cloud_billing_export_optional' },
+    testConnection: {
+      method: 'GET',
+      path: '/models',
+      auth: 'query_key',
+      queryParam: 'key',
+      successHttp: [200],
+      userErrorMap: {
+        400: 'Invalid API key or malformed request.',
+        403: 'API key lacks permission to list models.',
+      },
+    },
+    statistics: {
+      adapter: 'gemini_hybrid',
+      primary: 'local_ledger_from_usage_metadata',
+      secondary: 'cloud_billing_export_optional',
+      statisticsBadge: 'Estimated',
+      quotaHint:
+        'Live quota and billing totals require Google AI Studio or Cloud Console; usage shown here is recorded locally from API response metadata unless Cloud Billing is linked.',
+    },
     specificOptions: [
       { key: 'model', label: 'Model', control: 'select', default: 'gemini-2.5-flash', choices: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'] },
       { key: 'thinking_budget', label: 'Thinking budget', control: 'select', default: 'auto', choices: ['auto', 'off', 'low', 'medium', 'high'], visibleWhen: { use_reasoning: true }, mapsToApi: 'thinkingConfig / thinkingBudget per model docs' },
@@ -327,4 +350,16 @@ export function applyAgentTypeChange(input: AgentTypeChangeInput): AgentTypeChan
     options: { ...nextDefaults, ...preserved },
     logoPath: agentLogoPublicPath(input.nextType),
   };
+}
+
+export function agentStatisticsBadge(type: AgentType): AgentStatisticsBadge | undefined {
+  return AGENT_TYPE_REGISTRY[type].statistics.statisticsBadge;
+}
+
+export function agentStatisticsQuotaHint(type: AgentType): string | undefined {
+  return AGENT_TYPE_REGISTRY[type].statistics.quotaHint;
+}
+
+export function agentModelOptionDefinition(type: AgentType): AgentOptionDefinition | undefined {
+  return agentOptionRows(type).find((row) => row.key === 'model');
 }
