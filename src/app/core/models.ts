@@ -34,6 +34,12 @@ export interface Project {
   parent_task_id?: string;
   /** Child projects attached directly to this project. */
   subproject_ids?: string[];
+  /** Default research agent from the project library for new tasks. */
+  default_research_agent_id?: string;
+  /** Default code agent from the project library for new tasks. */
+  default_code_agent_id?: string;
+  /** One-time Agent Library migration marker. */
+  agent_library_version?: number;
   created_at: string;
   updated_at: string;
 }
@@ -64,6 +70,10 @@ export interface ProjectTask {
   cursor_chat_link?: string;
   latest_run_id?: string;
   pending_action?: 'merge';
+  /** Bound research agent from the project library (optional). */
+  research_agent_id?: string;
+  /** Bound code agent from the project library (optional). */
+  code_agent_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -126,7 +136,9 @@ export type Selection =
   | { kind: 'task'; taskId: string }
   | { kind: 'subproject'; taskId: string }
   | { kind: 'code'; taskId: string }
-  | { kind: 'research'; taskId: string };
+  | { kind: 'research'; taskId: string }
+  | { kind: 'agent'; agentId: string }
+  | { kind: 'agent-create'; role: 'research' | 'code' };
 
 export const AGENT_KINDS = ['research', 'code'] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];
@@ -143,6 +155,8 @@ export interface ProjectAgent {
   name: string;
   url: string;
   api_key?: string;
+  /** Optional org Admin API key for usage/cost statistics (separate from chat api_key). */
+  admin_api_key?: string;
   options?: Record<string, AgentOptionValue>;
   icon_asset?: string;
   cursor_agent_id?: string;

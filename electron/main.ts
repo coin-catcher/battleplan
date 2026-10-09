@@ -150,7 +150,7 @@ function registerRepositoryHandlers(): void {
       return { ok: true };
     },
     'agent:testConnection': async (params) =>
-      runAgentConnectionInMain(params as import('../src/app/core/agent-connection').AgentConnectionParams),
+      runAgentConnectionInMain(params as import('../src/app/core/agent-connection').AgentConnectionInput),
     'menu:sync-state': async (state) => {
       const patch = state as { exportEnabled?: boolean; saveEnabled?: boolean };
       if (typeof patch.exportEnabled === 'boolean') {

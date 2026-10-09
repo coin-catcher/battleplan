@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { projectEditorDirty, taskEditorDirty } from './editor-dirty';
-import type { Project, ProjectTask } from './models';
+import { agentCreateEditorDirty, agentEditorDirty, projectEditorDirty, taskEditorDirty } from './editor-dirty';
+import { defaultOptionValues } from './agent-types';
+import type { Project, ProjectAgent, ProjectTask } from './models';
 
 const baseProject = (): Project => ({
   project_id: 'p1',
@@ -122,5 +123,72 @@ describe('taskEditorDirty', () => {
       dependencies: ['t0'],
       sibling_dependencies: [],
     }, task)).toBe(false);
+  });
+});
+
+describe('agentEditorDirty', () => {
+  const savedAgent = (): ProjectAgent => ({
+    agent_id: 'a1',
+    kind: 'research',
+    type: 'OpenAI',
+    name: 'OpenAI Research',
+    url: 'https://api.openai.com/v1',
+    api_key: 'secret',
+    options: defaultOptionValues('OpenAI'),
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
+  });
+
+  it('is false when the form matches the saved agent and the key is masked', () => {
+    const agent = savedAgent();
+    expect(agentEditorDirty({
+      type: 'OpenAI',
+      name: 'OpenAI Research',
+      url: 'https://api.openai.com/v1',
+      api_key: '',
+      admin_api_key: '',
+      options: defaultOptionValues('OpenAI'),
+      apiKeyEdited: false,
+      adminApiKeyEdited: false,
+    }, agent)).toBe(false);
+  });
+
+  it('detects name and api key edits', () => {
+    const agent = savedAgent();
+    expect(agentEditorDirty({
+      type: 'OpenAI',
+      name: 'Renamed',
+      url: 'https://api.openai.com/v1',
+      api_key: '',
+      admin_api_key: '',
+      options: defaultOptionValues('OpenAI'),
+      apiKeyEdited: false,
+      adminApiKeyEdited: false,
+    }, agent)).toBe(true);
+    expect(agentEditorDirty({
+      type: 'OpenAI',
+      name: 'OpenAI Research',
+      url: 'https://api.openai.com/v1',
+      api_key: 'new-secret',
+      admin_api_key: '',
+      options: defaultOptionValues('OpenAI'),
+      apiKeyEdited: true,
+      adminApiKeyEdited: false,
+    }, agent)).toBe(true);
+  });
+});
+
+describe('agentCreateEditorDirty', () => {
+  it('is false for pristine research defaults', () => {
+    expect(agentCreateEditorDirty({
+      type: 'OpenAI',
+      name: 'OpenAI Research',
+      url: 'https://api.openai.com/v1',
+      api_key: '',
+      admin_api_key: '',
+      options: defaultOptionValues('OpenAI'),
+      apiKeyEdited: false,
+      adminApiKeyEdited: false,
+    }, 'research')).toBe(false);
   });
 });

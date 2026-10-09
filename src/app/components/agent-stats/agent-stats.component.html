@@ -1,0 +1,43 @@
+@if (snapshot(); as stats) {
+  <section class="agent-stats" aria-label="Agent usage statistics">
+    <header>
+      <h3>Usage</h3>
+      <span class="badge">{{ stats.badge }}</span>
+    </header>
+    @if (typeNote()) {
+      <p class="hint">{{ typeNote() }}</p>
+    }
+    @if (stats.note) {
+      <p class="note">{{ stats.note }}</p>
+    }
+    @if (stats.adminKeyHint) {
+      <p class="hint admin-hint">{{ stats.adminKeyHint }}</p>
+    }
+    <div class="metrics">
+      <div>
+        <span class="label">Tokens today</span>
+        <strong>{{ formatMetric(stats.tokensToday) }}</strong>
+      </div>
+      <div>
+        <span class="label">Tokens (period)</span>
+        <strong>{{ formatMetric(stats.tokensPeriod) }}</strong>
+      </div>
+      <div>
+        <span class="label">Tokens remaining</span>
+        <strong>{{ stats.tokensRemainingDisplay ?? formatMetric(stats.tokensRemaining) }}</strong>
+      </div>
+      <div>
+        <span class="label">Requests today</span>
+        <strong>{{ formatMetric(stats.requestsToday) }}</strong>
+      </div>
+      <div>
+        <span class="label">Cost today</span>
+        <strong>{{ formatCost(stats.costTodayUsd) }}</strong>
+      </div>
+      <div>
+        <span class="label">Cost (period)</span>
+        <strong>{{ formatCost(stats.costPeriodUsd) }}</strong>
+      </div>
+    </div>
+  </section>
+}

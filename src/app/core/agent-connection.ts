@@ -1,31 +1,73 @@
-import type { AgentType } from './models';
-import { getAgentTypeDefinition } from './agent-types';
-import type { AgentTestConnectionRecipe } from './agent-types';
+import { resolveAgentApiKey } from './agent-api-key';
+import type { AgentType, ProjectAgent } from './models';
+import { getAgentTypeDefinition, type AgentTestConnectionRecipe, type AgentTypeDefinition } from './agent-types';
 import {
   localLlmHealthUrl,
   localLlmModelsUrl,
   normalizeLocalLlmApiBase,
 } from './local-llm';
 
-export interface AgentConnectionParams {
+export interface AgentConnectionInput {
   type: AgentType;
   url: string;
-  apiKey?: string;
+  apiKey: string;
 }
 
 export interface AgentConnectionResult {
   ok: boolean;
+  status?: number;
   message: string;
   models?: string[];
-  testedAt: string;
+  testedAt?: string;
 }
 
-export type AgentHttpFetch = (
-  url: string,
-  init: { method: string; headers: Record<string, string>; body?: string },
-) => Promise<{ status: number; bodyText: string }>;
+export interface AgentTestConnectionRequest {
+  url: string;
+  method: 'GET' | 'POST';
+  headers: Record<string, string>;
+  body?: unknown;
+}
 
-const HTML_SNIPPET = /<html[\s>]/i;
+export type AgentConnectionFetch = (
+  input: string,
+  init?: RequestInit,
+) => Promise<Response>;
+
+export function joinAgentApiUrl(baseUrl: string, requestPath: string): string {
+  const base = baseUrl.trim().replace(/\/+$/, '');
+  const path = requestPath.startsWith('/') ? requestPath : `/${requestPath}`;
+  try {
+    const parsed = new URL(base);
+    if (path.startsWith('/v1') && parsed.pathname.replace(/\/+$/, '').endsWith('/v1')) {
+      return `${parsed.origin}${path}`;
+    }
+    return `${base}${path}`;
+  } catch {
+    return `${base}${path}`;
+  }
+}
+
+function encodeBasicAuth(username: string, password: string): string {
+  return globalThis.btoa(`${username}:${password}`);
+}
+
+function authHeaders(recipe: AgentTestConnectionRecipe, apiKey: string): Record<string, string> {
+  const headers: Record<string, string> = { ...(recipe.headers ?? {}), accept: 'application/json' };
+  if (recipe.auth === 'bearer') headers['Authorization'] = `Bearer ${apiKey}`;
+  if (recipe.auth === 'x-api-key') headers['x-api-key'] = apiKey;
+  return headers;
+}
+
+function userMessage(recipe: AgentTestConnectionRecipe, status: number, bodyText: string): string {
+  const mapped = recipe.userErrorMap?.[status];
+  if (mapped) return mapped;
+  if (status === 0) return 'Could not reach the server. Check the URL and that the service is running.';
+  if (status === 401) return 'Authentication failed. Check the API key.';
+  if (status === 403) return 'The API key lacks permission for this request.';
+  if (status >= 500) return 'The provider returned a server error. Try again later.';
+  const snippet = bodyText.replace(/\s+/g, ' ').trim().slice(0, 160);
+  return snippet ? `Request failed (${status}): ${snippet}` : `Connection failed (HTTP ${status}).`;
+}
 
 export function parseOpenAiModelIds(payload: unknown): string[] {
   if (!payload || typeof payload !== 'object') return [];
@@ -40,202 +82,209 @@ export function parseOpenAiModelIds(payload: unknown): string[] {
   return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
 }
 
-export function mapConnectionHttpError(
-  status: number,
-  recipe: AgentTestConnectionRecipe,
-  bodyText: string,
-): string {
-  const mapped = recipe.userErrorMap?.[status];
-  if (mapped) return mapped;
-  if (status === 0) return 'Could not reach the server. Check the URL and that the service is running.';
-  if (status >= 500) return `Server error (${status}). Try again after the provider recovers.`;
-  if (status === 404) return 'Endpoint not found. Verify the base URL matches your provider docs.';
-  if (HTML_SNIPPET.test(bodyText)) return `Unexpected HTML response (${status}). Check the base URL.`;
-  const trimmed = bodyText.trim().slice(0, 160);
-  if (trimmed && !trimmed.startsWith('{')) return `Request failed (${status}): ${trimmed}`;
-  return `Request failed with HTTP ${status}.`;
-}
+/** Build HTTP request parameters for a registry test-connection recipe. */
+export function buildAgentTestConnectionRequest(
+  definition: AgentTypeDefinition,
+  apiKey: string,
+  baseUrl?: string,
+): AgentTestConnectionRequest {
+  const recipe = definition.testConnection;
+  const root = baseUrl?.trim() || definition.defaultUrl;
+  const path = recipe.path.startsWith('/') ? recipe.path : `/${recipe.path}`;
+  const url = new URL(joinAgentApiUrl(root, path));
+  const headers: Record<string, string> = { ...(recipe.headers ?? {}), accept: 'application/json' };
 
-function joinUrl(base: string, path: string): string {
-  const normalizedBase = base.replace(/\/+$/, '');
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return `${normalizedBase}${normalizedPath}`;
-}
-
-function authHeaders(recipe: AgentTestConnectionRecipe, apiKey: string | undefined): Record<string, string> {
-  const headers: Record<string, string> = { ...(recipe.headers ?? {}) };
-  const key = apiKey?.trim() ?? '';
   switch (recipe.auth) {
     case 'bearer':
-      if (key) headers.Authorization = `Bearer ${key}`;
+      headers['Authorization'] = `Bearer ${apiKey}`;
       break;
     case 'x-api-key':
-      if (key) headers['x-api-key'] = key;
-      break;
-    case 'basic':
-      if (key) headers.Authorization = `Basic ${btoa(`${key}:`)}`;
+      headers['x-api-key'] = apiKey;
       break;
     case 'query_key':
+      if (recipe.queryParam) url.searchParams.set(recipe.queryParam, apiKey);
+      break;
+    case 'basic': {
+      const password = recipe.basicPasswordEmpty ? '' : apiKey;
+      headers['Authorization'] = `Basic ${encodeBasicAuth(apiKey, password)}`;
+      break;
+    }
     case 'none':
       break;
     default:
       break;
   }
-  return headers;
+
+  return {
+    url: url.toString(),
+    method: recipe.method,
+    headers,
+    body: recipe.body,
+  };
 }
 
-function withQueryKey(url: string, recipe: AgentTestConnectionRecipe, apiKey: string | undefined): string {
-  if (recipe.auth !== 'query_key' || !recipe.queryParam) return url;
-  const key = apiKey?.trim();
-  if (!key) return url;
-  const parsed = new URL(url);
-  parsed.searchParams.set(recipe.queryParam, key);
-  return parsed.toString();
-}
-
-function successStatuses(recipe: AgentTestConnectionRecipe): number[] {
-  return recipe.successHttp?.length ? recipe.successHttp : [200];
-}
-
-async function requestOnce(
-  fetchFn: AgentHttpFetch,
-  url: string,
-  recipe: AgentTestConnectionRecipe,
-  apiKey: string | undefined,
-  methodOverride?: 'GET' | 'POST',
-): Promise<{ ok: boolean; status: number; bodyText: string }> {
-  const method = methodOverride ?? recipe.method;
-  const headers = authHeaders(recipe, apiKey);
-  let body: string | undefined;
-  if (method === 'POST' && recipe.body !== undefined) {
-    headers['Content-Type'] = headers['Content-Type'] ?? 'application/json';
-    body = JSON.stringify(recipe.body);
-  }
-  const target = withQueryKey(url, recipe, apiKey);
-  const response = await fetchFn(target, { method, headers, body });
-  const ok = successStatuses(recipe).includes(response.status);
-  return { ok, status: response.status, bodyText: response.bodyText };
-}
-
-async function testLocalLlm(
-  params: AgentConnectionParams,
-  fetchFn: AgentHttpFetch,
+async function testLocalLlmConnection(
+  input: AgentConnectionInput,
+  fetchFn: AgentConnectionFetch,
 ): Promise<AgentConnectionResult> {
-  const apiBase = normalizeLocalLlmApiBase(params.url);
   const recipe = getAgentTypeDefinition('LocalLLM').testConnection;
+  const successCodes = recipe.successHttp ?? [200];
+  const apiBase = normalizeLocalLlmApiBase(input.url);
   const healthUrl = localLlmHealthUrl(apiBase);
   const modelsUrl = localLlmModelsUrl(apiBase);
+
+  const probe = async (url: string, method = 'GET'): Promise<{ ok: boolean; status: number; bodyText: string }> => {
+    try {
+      const response = await fetchFn(url, { method, headers: { accept: 'application/json' } });
+      const bodyText = await response.text();
+      return { ok: successCodes.includes(response.status), status: response.status, bodyText };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Network error';
+      return { ok: false, status: 0, bodyText: detail };
+    }
+  };
 
   let connected = false;
   let lastStatus = 0;
   let lastBody = '';
 
-  try {
-    const health = await requestOnce(fetchFn, healthUrl, { ...recipe, path: '/health' }, params.apiKey, 'GET');
-    if (health.ok) {
+  const health = await probe(healthUrl);
+  if (health.ok) {
+    connected = true;
+  } else {
+    lastStatus = health.status;
+    lastBody = health.bodyText;
+    const modelsProbe = await probe(modelsUrl);
+    if (modelsProbe.ok) {
       connected = true;
     } else {
-      lastStatus = health.status;
-      lastBody = health.bodyText;
-      const modelsProbe = await requestOnce(fetchFn, modelsUrl, { ...recipe, path: '/models' }, params.apiKey, 'GET');
-      if (modelsProbe.ok) {
-        connected = true;
-      } else {
-        lastStatus = modelsProbe.status;
-        lastBody = modelsProbe.bodyText;
-      }
+      lastStatus = modelsProbe.status;
+      lastBody = modelsProbe.bodyText;
     }
-  } catch {
-    return {
-      ok: false,
-      message: 'Could not reach the local vLLM server. Start vLLM and confirm the URL (default http://127.0.0.1:8000/v1).',
-      testedAt: new Date().toISOString(),
-    };
   }
+
+  const testedAt = new Date().toISOString();
 
   if (!connected) {
+    if (lastStatus === 0) {
+      return {
+        ok: false,
+        message: 'Could not reach the local vLLM server. Start vLLM and confirm the URL (default http://127.0.0.1:8000/v1).',
+        testedAt,
+      };
+    }
     return {
       ok: false,
-      message: mapConnectionHttpError(lastStatus, recipe, lastBody),
-      testedAt: new Date().toISOString(),
+      status: lastStatus,
+      message: userMessage(recipe, lastStatus, lastBody),
+      testedAt,
     };
   }
 
+  const modelsResponse = await probe(modelsUrl);
+  if (!modelsResponse.ok) {
+    return { ok: true, message: 'Connected, but model list could not be loaded.', testedAt };
+  }
   try {
-    const modelsResponse = await requestOnce(fetchFn, modelsUrl, { ...recipe, path: '/models' }, params.apiKey, 'GET');
-    if (!modelsResponse.ok) {
-      return {
-        ok: true,
-        message: 'Connected, but model list could not be loaded.',
-        testedAt: new Date().toISOString(),
-      };
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(modelsResponse.bodyText);
-    } catch {
-      return {
-        ok: true,
-        message: 'Connected, but the model list response was not valid JSON.',
-        testedAt: new Date().toISOString(),
-      };
-    }
+    const parsed = JSON.parse(modelsResponse.bodyText);
     const models = parseOpenAiModelIds(parsed);
     return {
       ok: true,
       message: models.length ? `Connected. ${models.length} model(s) available.` : 'Connected. No models reported by the server.',
       models,
-      testedAt: new Date().toISOString(),
+      testedAt,
     };
   } catch {
-    return {
-      ok: true,
-      message: 'Connected, but loading models failed.',
-      testedAt: new Date().toISOString(),
-    };
+    return { ok: true, message: 'Connected, but the model list response was not valid JSON.', testedAt };
   }
-}
-
-async function testWithRecipe(
-  params: AgentConnectionParams,
-  fetchFn: AgentHttpFetch,
-): Promise<AgentConnectionResult> {
-  const def = getAgentTypeDefinition(params.type);
-  const recipe = def.testConnection;
-  const base = params.url.trim().replace(/\/+$/, '');
-  const primaryUrl = joinUrl(base, recipe.path);
-  const attempts = [primaryUrl];
-  if (recipe.fallbackPath) attempts.push(joinUrl(base, recipe.fallbackPath));
-  if (recipe.altPath) attempts.push(joinUrl(base, recipe.altPath));
-
-  let lastStatus = 0;
-  let lastBody = '';
-  for (const url of attempts) {
-    try {
-      const result = await requestOnce(fetchFn, url, recipe, params.apiKey);
-      if (result.ok) {
-        return { ok: true, message: 'Connection successful.', testedAt: new Date().toISOString() };
-      }
-      lastStatus = result.status;
-      lastBody = result.bodyText;
-    } catch {
-      lastStatus = 0;
-      lastBody = '';
-    }
-  }
-  return {
-    ok: false,
-    message: mapConnectionHttpError(lastStatus, recipe, lastBody),
-    testedAt: new Date().toISOString(),
-  };
 }
 
 export async function runAgentConnectionTest(
-  params: AgentConnectionParams,
-  fetchFn: AgentHttpFetch,
+  input: AgentConnectionInput,
+  fetchFn: AgentConnectionFetch = fetch,
 ): Promise<AgentConnectionResult> {
-  if (params.type === 'LocalLLM') return testLocalLlm(params, fetchFn);
-  return testWithRecipe(params, fetchFn);
+  if (input.type === 'LocalLLM') {
+    return testLocalLlmConnection(input, fetchFn);
+  }
+
+  const recipe = getAgentTypeDefinition(input.type).testConnection;
+  const successCodes = recipe.successHttp ?? [200];
+  const apiKey = input.apiKey.trim();
+  if (recipe.auth !== 'none' && !apiKey) {
+    if (input.type === 'Cursor Agent') {
+      return {
+        ok: false,
+        message: 'Save a Cursor API key in the Cursor API key panel or on this agent.',
+      };
+    }
+    return { ok: false, message: 'Enter an API key before testing the connection.' };
+  }
+
+  const attempt = async (
+    path: string,
+    method = recipe.method,
+    body: unknown = recipe.body,
+  ): Promise<AgentConnectionResult> => {
+    let requestUrl = joinAgentApiUrl(input.url, path);
+    const init: RequestInit = { method, headers: authHeaders(recipe, apiKey) };
+    if (recipe.auth === 'basic') {
+      const password = recipe.basicPasswordEmpty ? '' : apiKey;
+      init.headers = { ...init.headers, Authorization: `Basic ${encodeBasicAuth(apiKey, password)}` };
+    }
+    if (recipe.auth === 'query_key' && recipe.queryParam) {
+      const url = new URL(requestUrl);
+      url.searchParams.set(recipe.queryParam, apiKey);
+      requestUrl = url.toString();
+    }
+    if (method === 'POST' && body !== undefined) {
+      init.headers = { ...init.headers, 'Content-Type': 'application/json' };
+      init.body = JSON.stringify(body);
+    }
+    try {
+      const response = await fetchFn(requestUrl, init);
+      const bodyText = await response.text();
+      if (successCodes.includes(response.status)) {
+        return { ok: true, status: response.status, message: 'Connection successful.' };
+      }
+      return {
+        ok: false,
+        status: response.status,
+        message: userMessage(recipe, response.status, bodyText),
+      };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Network error';
+      return { ok: false, message: `Could not reach the server (${detail}).` };
+    }
+  };
+
+  let result = await attempt(recipe.path);
+  if (!result.ok && recipe.fallbackPath) {
+    result = await attempt(
+      recipe.fallbackPath,
+      recipe.fallbackMethod ?? recipe.method,
+      recipe.fallbackBody ?? recipe.body,
+    );
+  }
+  if (!result.ok && recipe.altPath) {
+    result = await attempt(recipe.altPath);
+  }
+  return result;
+}
+
+/** Test connection for a saved agent record, resolving Cursor API key fallback. */
+export async function testProjectAgentConnection(
+  agent: ProjectAgent,
+  globalCursorApiKey: string,
+  fetchFn: AgentConnectionFetch = fetch,
+): Promise<AgentConnectionResult> {
+  return runAgentConnectionTest(
+    {
+      type: agent.type,
+      url: agent.url,
+      apiKey: resolveAgentApiKey(agent, globalCursorApiKey),
+    },
+    fetchFn,
+  );
 }
 
 /** Apply dynamic model ids to agent options after a successful LocalLLM test. */
@@ -248,22 +297,14 @@ export function applyDynamicModelsToOptions(
   const def = getAgentTypeDefinition(type);
   const modelOption = def.specificOptions.find((row) => row.key === 'model' && row.dynamic);
   if (!modelOption) return options;
-  const current = options.model;
+  const current = options['model'];
   const nextModel =
     typeof current === 'string' && current && models.includes(current)
       ? current
       : models.includes(String(modelOption.default))
         ? String(modelOption.default)
         : models[0];
-  return { ...options, model: nextModel };
-}
-
-export function dynamicModelChoices(
-  type: AgentType,
-  dynamicModels: string[] | undefined,
-): string[] {
-  if (type !== 'LocalLLM') return [];
-  return dynamicModels ?? [];
+  return { ...options, ['model']: nextModel };
 }
 
 export function selectChoicesForOption(
@@ -274,6 +315,8 @@ export function selectChoicesForOption(
 ): string[] {
   const def = getAgentTypeDefinition(type);
   const option = def.specificOptions.find((row) => row.key === optionKey);
-  if (option?.dynamic) return dynamicModelChoices(type, dynamicModels);
+  if (option?.dynamic) {
+    return type === 'LocalLLM' ? (dynamicModels ?? []) : [];
+  }
   return staticChoices ? [...staticChoices] : [];
 }

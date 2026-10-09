@@ -1,61 +1,42 @@
-import type { AgentType, AgentUsageLedger } from './models';
+import type { AgentType, ProjectAgent } from './models';
 import { getAgentTypeDefinition } from './agent-types';
 
-export type AgentStatisticsSourceBadge = 'live' | 'estimated' | 'recorded_locally' | 'unavailable';
+export type AgentStatisticsBadge = 'Live' | 'Estimated' | 'Recorded locally' | 'Unavailable';
 
 export interface AgentStatisticsSnapshot {
+  badge: AgentStatisticsBadge;
   tokensToday: number | null;
   tokensPeriod: number | null;
-  tokensRemaining: number | 'infinity' | null;
+  tokensRemaining: number | null;
+  /** When set (e.g. LocalLLM ∞), shown instead of formatting tokensRemaining. */
+  tokensRemainingDisplay?: string;
   requestsToday: number | null;
   requestsPeriod: number | null;
   costTodayUsd: number | null;
   costPeriodUsd: number | null;
-  sourceBadge: AgentStatisticsSourceBadge;
   note?: string;
+  adminKeyHint?: string;
 }
 
-function calendarMonthUtc(): string {
-  const now = new Date();
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
-export function normalizeUsageLedgerMonth(ledger: AgentUsageLedger | undefined): AgentUsageLedger {
-  const month = calendarMonthUtc();
-  if (!ledger || ledger.calendar_month !== month) {
+export function openAiStatisticsSnapshot(agent: ProjectAgent): AgentStatisticsSnapshot {
+  const stats = getAgentTypeDefinition('OpenAI').statistics;
+  const hasAdminKey = Boolean(agent.admin_api_key?.trim());
+  if (!hasAdminKey) {
     return {
-      calendar_month: month,
-      tokens_today: 0,
-      tokens_period: 0,
-      requests_today: 0,
-      requests_period: 0,
+      badge: 'Unavailable',
+      tokensToday: null,
+      tokensPeriod: null,
+      tokensRemaining: null,
+      requestsToday: null,
+      requestsPeriod: null,
+      costTodayUsd: null,
+      costPeriodUsd: null,
+      note: 'Usage and cost require an Organization Admin API key (optional). Chat uses the standard project API key above.',
+      adminKeyHint: stats.adminKeyHint,
     };
   }
-  return ledger;
-}
-
-export function buildLocalLlmStatistics(ledger?: AgentUsageLedger): AgentStatisticsSnapshot {
-  const normalized = normalizeUsageLedgerMonth(ledger);
   return {
-    tokensToday: normalized.tokens_today ?? 0,
-    tokensPeriod: normalized.tokens_period ?? 0,
-    tokensRemaining: 'infinity',
-    requestsToday: normalized.requests_today ?? 0,
-    requestsPeriod: normalized.requests_period ?? 0,
-    costTodayUsd: 0,
-    costPeriodUsd: 0,
-    sourceBadge: 'recorded_locally',
-    note: 'Local inference has no provider billing; remaining tokens are unlimited.',
-  };
-}
-
-export function buildAgentStatisticsSnapshot(
-  type: AgentType,
-  ledger?: AgentUsageLedger,
-): AgentStatisticsSnapshot {
-  const adapter = getAgentTypeDefinition(type).statistics.adapter;
-  if (adapter === 'vllm_metrics_plus_ledger') return buildLocalLlmStatistics(ledger);
-  return {
+    badge: 'Live',
     tokensToday: null,
     tokensPeriod: null,
     tokensRemaining: null,
@@ -63,18 +44,73 @@ export function buildAgentStatisticsSnapshot(
     requestsPeriod: null,
     costTodayUsd: null,
     costPeriodUsd: null,
-    sourceBadge: 'unavailable',
-    note: 'Statistics for this provider are not configured yet.',
+    note: 'OpenAI org Admin usage/cost endpoints will populate these metrics when wired (adapter: openai_org_admin).',
+    adminKeyHint: stats.adminKeyHint,
   };
 }
 
-export function formatTokensRemaining(value: number | 'infinity' | null): string {
-  if (value === 'infinity') return '∞';
-  if (value === null) return '—';
-  return String(value);
+function cursorAgentStatisticsSnapshot(agent: ProjectAgent): AgentStatisticsSnapshot {
+  const stats = getAgentTypeDefinition('Cursor Agent').statistics;
+  return {
+    badge: 'Recorded locally',
+    tokensToday: null,
+    tokensPeriod: null,
+    tokensRemaining: null,
+    requestsToday: null,
+    requestsPeriod: null,
+    costTodayUsd: null,
+    costPeriodUsd: null,
+    note: agent.cursor_agent_id
+      ? 'Enterprise Admin API when configured; otherwise BattlePlan runs for this cursor_agent_id.'
+      : 'Enterprise Admin API when configured; otherwise local run ledger after first cloud agent launch.',
+    adminKeyHint: stats.requiresEnterpriseAdminKey
+      ? 'Optional Enterprise Admin API key on this agent for team usage endpoints.'
+      : undefined,
+  };
 }
 
-export function formatUsd(value: number | null): string {
-  if (value === null) return '—';
-  return `$${value.toFixed(2)}`;
+function localLlmStatisticsSnapshot(): AgentStatisticsSnapshot {
+  return {
+    badge: 'Recorded locally',
+    tokensToday: 0,
+    tokensPeriod: 0,
+    tokensRemaining: null,
+    tokensRemainingDisplay: '∞',
+    requestsToday: 0,
+    requestsPeriod: 0,
+    costTodayUsd: 0,
+    costPeriodUsd: 0,
+    note: 'Local inference has no provider billing; remaining tokens are unlimited.',
+  };
+}
+
+export function agentStatisticsSnapshot(agent: ProjectAgent): AgentStatisticsSnapshot {
+  if (agent.type === 'OpenAI') return openAiStatisticsSnapshot(agent);
+  if (agent.type === 'Cursor Agent') return cursorAgentStatisticsSnapshot(agent);
+  if (agent.type === 'LocalLLM') return localLlmStatisticsSnapshot();
+  const stats = getAgentTypeDefinition(agent.type).statistics;
+  return {
+    badge: 'Unavailable',
+    tokensToday: null,
+    tokensPeriod: null,
+    tokensRemaining: null,
+    requestsToday: null,
+    requestsPeriod: null,
+    costTodayUsd: null,
+    costPeriodUsd: null,
+    note: `Statistics adapter "${stats.adapter}" is not configured for ${agent.type} yet.`,
+  };
+}
+
+export function statisticsLabelForType(type: AgentType): string {
+  if (type === 'OpenAI') {
+    return 'Tokens remaining are not exposed for standard sk- project keys; add an optional Organization Admin API key for live usage and cost.';
+  }
+  if (type === 'Cursor Agent') {
+    return 'Poll team usage at most once per hour when an Enterprise Admin API key is configured.';
+  }
+  if (type === 'LocalLLM') {
+    return 'Throughput may also be read from vLLM Prometheus /metrics when wired; costs are always zero.';
+  }
+  return '';
 }

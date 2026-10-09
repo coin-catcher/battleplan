@@ -1,0 +1,50 @@
+.agent-stats {
+  border-top: 1px solid var(--line, #2a3340);
+  padding-top: 1rem;
+  margin-top: 1rem;
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+
+    h3 {
+      margin: 0;
+      font-size: 0.95rem;
+    }
+  }
+
+  .badge {
+    font-size: 0.75rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 999px;
+    background: var(--panel-muted, #1a2330);
+    color: var(--text-muted, #9aa7b8);
+  }
+
+  .hint,
+  .note {
+    font-size: 0.85rem;
+    color: var(--text-muted, #9aa7b8);
+    margin: 0.35rem 0;
+  }
+
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+
+    .label {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--text-muted, #9aa7b8);
+    }
+
+    strong {
+      font-size: 0.95rem;
+    }
+  }
+}

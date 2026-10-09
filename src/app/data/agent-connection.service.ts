@@ -1,11 +1,17 @@
-import { Injectable } from '@angular/core';
-import type { AgentConnectionParams, AgentConnectionResult } from '../core/agent-connection';
+import { Injectable, inject } from '@angular/core';
+import {
+  runAgentConnectionTest,
+  type AgentConnectionInput,
+  type AgentConnectionResult,
+} from '../core/agent-connection';
 import { LOCAL_LLM_BROWSER_LIMITATION } from '../core/local-llm';
 import type { AgentType } from '../core/models';
+import { CursorKey } from './cursor-key.service';
 import { electronBridge, isElectronApp } from './electron-bridge';
 
 @Injectable({ providedIn: 'root' })
 export class AgentConnectionService {
+  private readonly cursorKey = inject(CursorKey);
   readonly isDesktop = isElectronApp();
 
   requiresDesktopApp(type: AgentType): boolean {
@@ -17,8 +23,8 @@ export class AgentConnectionService {
     return null;
   }
 
-  async testConnection(params: AgentConnectionParams): Promise<AgentConnectionResult> {
-    const limitation = this.browserLimitationMessage(params.type);
+  async testConnection(input: AgentConnectionInput): Promise<AgentConnectionResult> {
+    const limitation = this.browserLimitationMessage(input.type);
     if (limitation) {
       return {
         ok: false,
@@ -26,31 +32,14 @@ export class AgentConnectionService {
         testedAt: new Date().toISOString(),
       };
     }
+
+    const apiKey = input.apiKey.trim()
+      || (input.type === 'Cursor Agent' ? this.cursorKey.value().trim() : '');
+    const payload: AgentConnectionInput = { ...input, apiKey };
     const bridge = electronBridge();
     if (bridge) {
-      return bridge.invoke<AgentConnectionResult>('agent:testConnection', params);
+      return bridge.invoke<AgentConnectionResult>('agent:testConnection', payload);
     }
-    return bridgeInvokeViaFetch(params);
+    return runAgentConnectionTest(payload);
   }
-}
-
-/** Browser fallback for cloud providers (LocalLLM blocked above). */
-async function bridgeInvokeViaFetch(params: AgentConnectionParams): Promise<AgentConnectionResult> {
-  const { runAgentConnectionTest } = await import('../core/agent-connection');
-  const fetchFn: import('../core/agent-connection').AgentHttpFetch = async (url, init) => {
-    try {
-      const response = await fetch(url, {
-        method: init.method,
-        headers: init.headers,
-        body: init.body,
-      });
-      return { status: response.status, bodyText: await response.text() };
-    } catch (error) {
-      return {
-        status: 0,
-        bodyText: error instanceof Error ? error.message : 'Network error.',
-      };
-    }
-  };
-  return runAgentConnectionTest(params, fetchFn);
 }
