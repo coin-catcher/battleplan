@@ -1,0 +1,37 @@
+agent_type,metric,source,live_api,notes
+OpenAI,tokens_today,organization usage completions API,yes,Requires org Admin API key (not standard sk- project key). Filter by api_key_ids when agent stores dedicated key id mapping.
+OpenAI,tokens_billing_period,organization usage completions API,yes,Sum buckets from month start (UTC). Calendar month aligns with most dashboards.
+OpenAI,tokens_remaining,prepaid balance API,no,No supported REST balance for API keys; show em dash or link to platform billing UI.
+OpenAI,requests_today,usage API num_model_requests,yes,Same admin endpoints.
+OpenAI,requests_billing_period,usage API,yes,
+OpenAI,cost_today,organization costs API,yes,USD cents in response; convert for display.
+OpenAI,cost_billing_period,organization costs API,yes,
+Anthropic,tokens_today,messages usage report,yes,Requires Admin API key (sk-ant-admin...) distinct from Messages API key.
+Anthropic,tokens_billing_period,messages usage report,yes,
+Anthropic,tokens_remaining,console only,no,No public remaining-credit endpoint for standard keys.
+Anthropic,requests_today,usage report input/output token rows,partial,Derive request counts from grouped buckets if exposed; else estimate from local ledger.
+Anthropic,cost_today,cost_report,yes,Admin API USD cents strings.
+Anthropic,cost_billing_period,cost_report,yes,
+Gemini,tokens_today,AI Studio / Cloud Billing,partial,No simple API-key-accessible aggregate; prefer Cloud Billing export or record from response usageMetadata on each BattlePlan call.
+Gemini,tokens_billing_period,Cloud Billing,partial,Latency hours to days; badge as estimated.
+Gemini,tokens_remaining,AI Studio quota UI,no,Show tier limits from docs as static hint only unless user connects Cloud project id (future).
+Gemini,requests_today,local ledger,partial,Increment on each successful generateContent from usageMetadata.
+Gemini,cost_billing_period,Cloud Billing,partial,
+Gemini,cost_today,Cloud Billing,partial,
+Grok,tokens_today,xAI console / future billing API,partial,Assume local ledger + optional account API when documented for key.
+Grok,tokens_billing_period,local ledger,partial,
+Grok,tokens_remaining,unknown,no,
+Grok,cost_today,local ledger,partial,Apply list prices from docs if token counts known.
+Grok,cost_billing_period,local ledger,partial,
+Cursor Agent,tokens_today,Admin API filtered-usage-events,yes,Enterprise team Admin API key; filter by user or label if agents tagged.
+Cursor Agent,tokens_billing_period,filtered-usage-events + spend,yes,Sum tokenUsage and chargedCents for cycle.
+Cursor Agent,tokens_remaining,team spend limits,partial,From /teams/spend limits if configured.
+Cursor Agent,requests_today,daily-usage-data,yes,Hourly aggregation; poll at most once per hour.
+Cursor Agent,cost_today,sum chargedCents,yes,
+Cursor Agent,cost_billing_period,/teams/spend,yes,
+LocalLLM,tokens_today,vLLM /metrics + ledger,yes,Prometheus counters (e.g. iteration_tokens_total) plus BattlePlan ledger for chat not via vLLM.
+LocalLLM,tokens_billing_period,ledger,yes,Calendar month in project_config agent_usage_ledger.
+LocalLLM,tokens_remaining,constant infinity,yes,Display ∞ symbol always.
+LocalLLM,requests_today,/metrics or ledger,yes,vllm:num_requests_* gauges are concurrent not daily—prefer ledger for daily counts.
+LocalLLM,cost_today,fixed zero,yes,Always $0.00.
+LocalLLM,cost_billing_period,fixed zero,yes,

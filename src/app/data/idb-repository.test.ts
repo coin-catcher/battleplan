@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
-import type { ChatArtifact, ChatMessage, Project, ProjectTask } from '../core/models';
+import type { AgentUsageLedger, ChatArtifact, ChatMessage, Project, ProjectAgent, ProjectTask } from '../core/models';
 import { IdbRepository } from './idb-repository';
 
 function project(id: string): Project {
@@ -65,5 +65,30 @@ describe('IdbRepository', () => {
     expect(await repo.listTasks('p1')).toEqual([]);
     expect(await repo.listProjectMessages('p1')).toEqual([]);
     expect(await repo.listArtifacts('project', 'p1')).toEqual([]);
+  });
+
+  it('round-trips project agents and usage ledger', async () => {
+    const repo = new IdbRepository();
+    await repo.saveProject(project('p1'));
+    expect(await repo.listProjectAgents('p1')).toEqual([]);
+
+    const agents: ProjectAgent[] = [
+      {
+        agent_id: 'a1',
+        kind: 'code',
+        type: 'Cursor Agent',
+        name: 'Cursor Code Agent',
+        url: 'https://api.cursor.com/v1',
+        created_at: '2026-10-09T00:00:00.000Z',
+        updated_at: '2026-10-09T00:00:00.000Z',
+      },
+    ];
+    const ledger: Record<string, AgentUsageLedger> = { a1: { requests_today: 2 } };
+    await repo.saveProjectAgents('p1', agents);
+    await repo.saveAgentUsageLedger('p1', ledger);
+    await repo.saveProject({ ...project('p1'), title: 'Renamed' });
+
+    expect(await repo.listProjectAgents('p1')).toEqual(agents);
+    expect(await repo.getAgentUsageLedger('p1')).toEqual(ledger);
   });
 });
