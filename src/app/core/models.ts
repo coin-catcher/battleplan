@@ -155,6 +155,8 @@ export interface ProjectAgent {
   name: string;
   url: string;
   api_key?: string;
+  /** Optional org Admin API key for usage/cost statistics (separate from chat api_key). */
+  admin_api_key?: string;
   options?: Record<string, AgentOptionValue>;
   icon_asset?: string;
   cursor_agent_id?: string;

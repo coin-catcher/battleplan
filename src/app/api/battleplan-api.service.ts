@@ -141,6 +141,14 @@ export class BattleplanApi {
     return this.engine.listPendingChanges(projectId);
   }
 
+  listProjectAgents(projectId: string): Promise<ProjectAgent[]> {
+    return this.engine.listProjectAgents(projectId);
+  }
+
+  saveProjectAgents(projectId: string, agents: ProjectAgent[]): Promise<void> {
+    return this.engine.saveProjectAgents(projectId, agents);
+  }
+
   savePendingChanges(projectId: string, changes: PendingChange[]): Promise<void> {
     return this.engine.savePendingChanges(projectId, changes);
   }
@@ -205,14 +213,6 @@ export class BattleplanApi {
   releaseProjectChanges(projectId: string): Promise<ChatMessage> {
     return this.engine.releaseProjectChanges(projectId);
   }
-
-  listProjectAgents(projectId: string): Promise<ProjectAgent[]> {
-    return this.repository.listProjectAgents(projectId);
-  }
-
-  saveProjectAgents(projectId: string, agents: ProjectAgent[]): Promise<void> {
-    return this.repository.saveProjectAgents(projectId, agents);
-  }
 }
 
 export type AgentEditorSaveInput = {
@@ -221,5 +221,7 @@ export type AgentEditorSaveInput = {
   url: string;
   api_key?: string;
   apiKeyEdited: boolean;
+  admin_api_key?: string;
+  adminApiKeyEdited: boolean;
   options: Record<string, AgentOptionValue>;
 };

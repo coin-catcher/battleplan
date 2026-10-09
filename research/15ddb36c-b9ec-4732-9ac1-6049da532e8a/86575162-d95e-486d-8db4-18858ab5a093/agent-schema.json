@@ -45,6 +45,10 @@
           "type": "string",
           "description": "Plaintext in local project_config; omit on export if redaction enabled."
         },
+        "admin_api_key": {
+          "type": "string",
+          "description": "Optional organization Admin API key for usage/cost statistics (not used for chat)."
+        },
         "options": {
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/AgentOptionValue" },

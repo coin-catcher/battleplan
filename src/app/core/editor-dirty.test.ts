@@ -146,8 +146,10 @@ describe('agentEditorDirty', () => {
       name: 'OpenAI Research',
       url: 'https://api.openai.com/v1',
       api_key: '',
+      admin_api_key: '',
       options: defaultOptionValues('OpenAI'),
       apiKeyEdited: false,
+      adminApiKeyEdited: false,
     }, agent)).toBe(false);
   });
 
@@ -158,16 +160,20 @@ describe('agentEditorDirty', () => {
       name: 'Renamed',
       url: 'https://api.openai.com/v1',
       api_key: '',
+      admin_api_key: '',
       options: defaultOptionValues('OpenAI'),
       apiKeyEdited: false,
+      adminApiKeyEdited: false,
     }, agent)).toBe(true);
     expect(agentEditorDirty({
       type: 'OpenAI',
       name: 'OpenAI Research',
       url: 'https://api.openai.com/v1',
       api_key: 'new-secret',
+      admin_api_key: '',
       options: defaultOptionValues('OpenAI'),
       apiKeyEdited: true,
+      adminApiKeyEdited: false,
     }, agent)).toBe(true);
   });
 });
@@ -179,8 +185,10 @@ describe('agentCreateEditorDirty', () => {
       name: 'OpenAI Research',
       url: 'https://api.openai.com/v1',
       api_key: '',
+      admin_api_key: '',
       options: defaultOptionValues('OpenAI'),
       apiKeyEdited: false,
+      adminApiKeyEdited: false,
     }, 'research')).toBe(false);
   });
 });

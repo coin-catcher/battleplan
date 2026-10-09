@@ -751,8 +751,10 @@
                 }
               </div>
             </header>
-            @if (agentTestNotice()) {
-              <p class="banner notice">{{ agentTestNotice() }}</p>
+            @if (agentTestMessage() && !agentTestSuccess()) {
+              <p class="banner error" role="alert">{{ agentTestMessage() }}</p>
+            } @else if (agentTestMessage() && agentTestSuccess()) {
+              <p class="banner notice">{{ agentTestMessage() }}</p>
             }
             <label class="field">
               <span>Type</span>
@@ -800,6 +802,22 @@
                 placeholder="Optional for Cursor Agent (uses global key)"
               />
             </label>
+            @if (agentType === 'OpenAI') {
+              <label class="field">
+                <span>Organization Admin API key (optional)</span>
+                <input
+                  type="password"
+                  autocomplete="off"
+                  [value]="agentAdminApiKeyInputValue()"
+                  (input)="onAgentAdminApiKeyInput($any($event.target).value)"
+                  (focus)="onAgentAdminApiKeyFocus()"
+                  (blur)="onAgentAdminApiKeyBlur()"
+                  [name]="'agentAdminApiKey-' + agent.agent_id"
+                  placeholder="For usage statistics only — not used for chat"
+                />
+                <span class="agent-option-help">Separate from the project sk- key. Required for live OpenAI usage and cost metrics; tokens remaining are not available via standard API keys.</span>
+              </label>
+            }
             <div class="agent-options">
               <h3>Agent Options</h3>
               <table>
@@ -873,7 +891,7 @@
                 </tbody>
               </table>
             </div>
-            <app-agent-stats [agentId]="agentStatsId()" />
+            <app-agent-stats [agent]="agentStatsPreview()" />
           </section>
         }
       }
@@ -894,8 +912,10 @@
                 <button type="button" class="primary" [disabled]="store.busy() || !agentName.trim()" (click)="saveAgentExplicit()">Save</button>
               </div>
             </header>
-            @if (agentTestNotice()) {
-              <p class="banner notice">{{ agentTestNotice() }}</p>
+            @if (agentTestMessage() && !agentTestSuccess()) {
+              <p class="banner error" role="alert">{{ agentTestMessage() }}</p>
+            } @else if (agentTestMessage() && agentTestSuccess()) {
+              <p class="banner notice">{{ agentTestMessage() }}</p>
             }
             <label class="field">
               <span>Type</span>
@@ -930,6 +950,20 @@
                 name="agentCreateApiKey"
               />
             </label>
+            @if (agentType === 'OpenAI') {
+              <label class="field">
+                <span>Organization Admin API key (optional)</span>
+                <input
+                  type="password"
+                  autocomplete="off"
+                  [ngModel]="agentAdminApiKey"
+                  (ngModelChange)="onAgentAdminApiKeyInput($event)"
+                  name="agentCreateAdminApiKey"
+                  placeholder="For usage statistics only — not used for chat"
+                />
+                <span class="agent-option-help">Separate from the project sk- key. Required for live OpenAI usage and cost metrics; tokens remaining are not available via standard API keys.</span>
+              </label>
+            }
             <div class="agent-options">
               <h3>Agent Options</h3>
               <table>
@@ -993,7 +1027,7 @@
                 </tbody>
               </table>
             </div>
-            <app-agent-stats [agentId]="null" />
+            <app-agent-stats [agent]="agentStatsPreview()" />
           </section>
           }
         }
