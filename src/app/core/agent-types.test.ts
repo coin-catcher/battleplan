@@ -3,6 +3,7 @@ import {
   AGENT_COMMON_OPTIONS,
   agentLogoPublicPath,
   agentOptionRows,
+  agentTypesForCreateRole,
   agentTypesForKind,
   defaultOptionValues,
   isAgentOptionVisible,
@@ -12,6 +13,11 @@ describe('agent-types registry', () => {
   it('lists research and code types by kind', () => {
     expect(agentTypesForKind('research')).toContain('OpenAI');
     expect(agentTypesForKind('code')).toEqual(['Cursor Agent']);
+  });
+
+  it('filters create-flow types by role', () => {
+    expect(agentTypesForCreateRole('code')).toEqual(['Cursor Agent']);
+    expect(agentTypesForCreateRole('research')).not.toContain('Cursor Agent');
   });
 
   it('prepends common options before type-specific rows', () => {
