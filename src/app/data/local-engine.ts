@@ -45,6 +45,7 @@ import {
   siblingDependencyIds,
 } from '../core/dependencies';
 import { availableDescendants, independentBatch } from '../core/execute-children';
+import { applyLinkRelocation, type MindmapLinkRef } from '../core/link-relocation';
 import {
   buildGenerateTaskTasksUserMessage,
   generateTasksInstructionForProject,
@@ -342,6 +343,30 @@ export class LocalEngine {
     assertAcyclicNormalLinks([...existing, ...created]);
     await this.repo.saveTasks([...existing, ...created]);
     return created;
+  }
+
+  async relocateMindmapLink(
+    projectId: string,
+    link: MindmapLinkRef,
+    end: 'from' | 'to',
+    dropNodeId: string,
+  ): Promise<ProjectTask[]> {
+    await this.requireProject(projectId);
+    const tasks = await this.listTasks(projectId);
+    const updated = applyLinkRelocation(tasks, link, end, dropNodeId);
+    const timestamp = this.now();
+    const beforeById = new Map(tasks.map((task) => [task.task_id, task]));
+    for (const task of updated) {
+      const before = beforeById.get(task.task_id);
+      if (!before) continue;
+      const depsChanged = before.dependencies.join(',') !== task.dependencies.join(',');
+      const siblingsChanged = (before.sibling_dependencies ?? []).join(',') !== (task.sibling_dependencies ?? []).join(',');
+      if (!depsChanged && !siblingsChanged) continue;
+      task.updated_at = timestamp;
+      await this.repo.saveTask(task);
+      await this.repo.saveMessage(this.taskNote(task, 'Mindmap link updated.'));
+    }
+    return updated;
   }
 
   async updateTask(projectId: string, taskId: string, patch: {

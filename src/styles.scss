@@ -242,12 +242,32 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .map-scaler { position: relative; }
 .map-canvas { position: relative; }
 .map-canvas svg { display: block; }
-.map-canvas line {
+.map-canvas line.map-link-visible {
   stroke: #f4efe6;
   stroke-width: 1.6;
   fill: none;
 }
-.map-canvas line.dashed { stroke: #d7c4a1; stroke-dasharray: 7 5; }
+.map-canvas line.map-link-visible.dashed { stroke: #d7c4a1; stroke-dasharray: 7 5; }
+.map-canvas line.map-link-visible.selected { stroke-width: 2.4; }
+.map-canvas line.map-link-hit {
+  stroke: transparent;
+  stroke-width: 16px;
+  fill: none;
+  cursor: pointer;
+}
+.map-link-handle {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 2px;
+  background: #2563eb;
+  z-index: 3;
+  cursor: grab;
+}
+.map-link-handle:active { cursor: grabbing; }
 .map-canvas #arrow-solid path, .map-canvas marker path { fill: #f4efe6; }
 .map-canvas marker#arrow-dashed path { fill: #d7c4a1; }
 

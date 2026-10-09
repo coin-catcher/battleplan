@@ -563,6 +563,20 @@ export class BattleplanStore {
     }
   }
 
+  async relocateMindmapLink(
+    link: { kind: 'child' | 'sibling' | 'project-root'; from: string; to: string },
+    end: 'from' | 'to',
+    dropNodeId: string,
+  ): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    await this.run(async () => {
+      await this.api.relocateMindmapLink(projectId, link, end, dropNodeId);
+      await this.reloadTasks();
+      this.notice.set('Link updated.');
+    });
+  }
+
   async executeChildren(parentTaskId: string): Promise<void> {
     const projectId = this.projectId();
     if (!projectId) return;

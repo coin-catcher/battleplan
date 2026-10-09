@@ -172,6 +172,15 @@ export class BattleplanApi {
     return this.engine.executeChildren(projectId, parentTaskId);
   }
 
+  relocateMindmapLink(
+    projectId: string,
+    link: { kind: 'child' | 'sibling' | 'project-root'; from: string; to: string },
+    end: 'from' | 'to',
+    dropNodeId: string,
+  ): Promise<ProjectTask[]> {
+    return this.engine.relocateMindmapLink(projectId, link, end, dropNodeId);
+  }
+
   executeProjectChat(projectId: string): Promise<{ message: ChatMessage; project: Project }> {
     return this.engine.executeProjectChat(projectId);
   }
