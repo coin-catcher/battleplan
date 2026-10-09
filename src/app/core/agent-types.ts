@@ -298,6 +298,12 @@ export function agentTypesForKind(kind: AgentKind): AgentType[] {
   return listAgentTypes().filter((type) => AGENT_TYPE_REGISTRY[type].kind === kind);
 }
 
+/** Types offered in the agent-create flow (+ buttons on the mindmap toolbox). */
+export function agentTypesForCreateRole(role: 'research' | 'code'): AgentType[] {
+  if (role === 'code') return ['Cursor Agent'];
+  return agentTypesForKind('research');
+}
+
 export function getAgentTypeDefinition(type: AgentType): AgentTypeDefinition {
   return AGENT_TYPE_REGISTRY[type];
 }

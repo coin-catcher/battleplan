@@ -1,4 +1,5 @@
-import type { AgentType } from './models';
+import { resolveAgentApiKey } from './agent-api-key';
+import type { AgentType, ProjectAgent } from './models';
 import { getAgentTypeDefinition, type AgentTestConnectionRecipe, type AgentTypeDefinition } from './agent-types';
 
 export interface AgentConnectionInput {
@@ -20,10 +21,23 @@ export interface AgentTestConnectionRequest {
   body?: unknown;
 }
 
-function joinUrl(base: string, path: string): string {
-  const trimmed = base.replace(/\/+$/, '');
-  const suffix = path.startsWith('/') ? path : `/${path}`;
-  return `${trimmed}${suffix}`;
+export type AgentConnectionFetch = (
+  input: string,
+  init?: RequestInit,
+) => Promise<Response>;
+
+export function joinAgentApiUrl(baseUrl: string, requestPath: string): string {
+  const base = baseUrl.trim().replace(/\/+$/, '');
+  const path = requestPath.startsWith('/') ? requestPath : `/${requestPath}`;
+  try {
+    const parsed = new URL(base);
+    if (path.startsWith('/v1') && parsed.pathname.replace(/\/+$/, '').endsWith('/v1')) {
+      return `${parsed.origin}${path}`;
+    }
+    return `${base}${path}`;
+  } catch {
+    return `${base}${path}`;
+  }
 }
 
 function encodeBasicAuth(username: string, password: string): string {
@@ -35,14 +49,20 @@ function encodeBasicAuth(username: string, password: string): string {
 }
 
 function authHeaders(recipe: AgentTestConnectionRecipe, apiKey: string): Record<string, string> {
-  const headers: Record<string, string> = { ...(recipe.headers ?? {}) };
+  const headers: Record<string, string> = { ...(recipe.headers ?? {}), accept: 'application/json' };
   if (recipe.auth === 'bearer') headers['Authorization'] = `Bearer ${apiKey}`;
   if (recipe.auth === 'x-api-key') headers['x-api-key'] = apiKey;
   return headers;
 }
 
-function userMessage(recipe: AgentTestConnectionRecipe, status: number, fallback: string): string {
-  return recipe.userErrorMap?.[status] ?? fallback;
+function userMessage(recipe: AgentTestConnectionRecipe, status: number, bodyText: string): string {
+  const mapped = recipe.userErrorMap?.[status];
+  if (mapped) return mapped;
+  if (status === 401) return 'Authentication failed. Check the API key.';
+  if (status === 403) return 'The API key lacks permission for this request.';
+  if (status >= 500) return 'The provider returned a server error. Try again later.';
+  const snippet = bodyText.replace(/\s+/g, ' ').trim().slice(0, 160);
+  return snippet ? `Request failed (${status}): ${snippet}` : `Connection failed (HTTP ${status}).`;
 }
 
 /** Build HTTP request parameters for a registry test-connection recipe. */
@@ -52,10 +72,10 @@ export function buildAgentTestConnectionRequest(
   baseUrl?: string,
 ): AgentTestConnectionRequest {
   const recipe = definition.testConnection;
-  const root = (baseUrl?.trim() || definition.defaultUrl).replace(/\/$/, '');
+  const root = baseUrl?.trim() || definition.defaultUrl;
   const path = recipe.path.startsWith('/') ? recipe.path : `/${recipe.path}`;
-  const url = new URL(`${root}${path}`);
-  const headers: Record<string, string> = { ...(recipe.headers ?? {}) };
+  const url = new URL(joinAgentApiUrl(root, path));
+  const headers: Record<string, string> = { ...(recipe.headers ?? {}), accept: 'application/json' };
 
   switch (recipe.auth) {
     case 'bearer':
@@ -86,11 +106,20 @@ export function buildAgentTestConnectionRequest(
   };
 }
 
-export async function runAgentConnectionTest(input: AgentConnectionInput): Promise<AgentConnectionResult> {
+export async function runAgentConnectionTest(
+  input: AgentConnectionInput,
+  fetchFn: AgentConnectionFetch = fetch,
+): Promise<AgentConnectionResult> {
   const recipe = getAgentTypeDefinition(input.type).testConnection;
   const successCodes = recipe.successHttp ?? [200];
   const apiKey = input.apiKey.trim();
   if (recipe.auth !== 'none' && !apiKey) {
+    if (input.type === 'Cursor Agent') {
+      return {
+        ok: false,
+        message: 'Save a Cursor API key in the Cursor API key panel or on this agent.',
+      };
+    }
     return { ok: false, message: 'Enter an API key before testing the connection.' };
   }
 
@@ -99,7 +128,7 @@ export async function runAgentConnectionTest(input: AgentConnectionInput): Promi
     method = recipe.method,
     body: unknown = recipe.body,
   ): Promise<AgentConnectionResult> => {
-    let requestUrl = joinUrl(input.url, path);
+    let requestUrl = joinAgentApiUrl(input.url, path);
     const init: RequestInit = { method, headers: authHeaders(recipe, apiKey) };
     if (recipe.auth === 'basic') {
       const password = recipe.basicPasswordEmpty ? '' : apiKey;
@@ -115,14 +144,15 @@ export async function runAgentConnectionTest(input: AgentConnectionInput): Promi
       init.body = JSON.stringify(body);
     }
     try {
-      const response = await fetch(requestUrl, init);
+      const response = await fetchFn(requestUrl, init);
+      const bodyText = await response.text();
       if (successCodes.includes(response.status)) {
         return { ok: true, status: response.status, message: 'Connection successful.' };
       }
       return {
         ok: false,
         status: response.status,
-        message: userMessage(recipe, response.status, `Connection failed (HTTP ${response.status}).`),
+        message: userMessage(recipe, response.status, bodyText),
       };
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'Network error';
@@ -142,4 +172,20 @@ export async function runAgentConnectionTest(input: AgentConnectionInput): Promi
     result = await attempt(recipe.altPath);
   }
   return result;
+}
+
+/** Test connection for a saved agent record, resolving Cursor API key fallback. */
+export async function testProjectAgentConnection(
+  agent: ProjectAgent,
+  globalCursorApiKey: string,
+  fetchFn: AgentConnectionFetch = fetch,
+): Promise<AgentConnectionResult> {
+  return runAgentConnectionTest(
+    {
+      type: agent.type,
+      url: agent.url,
+      apiKey: resolveAgentApiKey(agent, globalCursorApiKey),
+    },
+    fetchFn,
+  );
 }

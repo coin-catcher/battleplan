@@ -109,7 +109,6 @@ function registerRepositoryHandlers(): void {
       );
       return { ok: true };
     },
-    'agent:testConnection': (input) => runAgentConnectionTest(input as import('../src/app/core/agent-connection').AgentConnectionInput),
     'repo:listArtifacts': async (scope, ownerId) => enrichArtifacts(scope as 'project' | 'task', ownerId as string),
     'repo:saveArtifact': (artifact) => repo().saveArtifact(artifact as ChatArtifact),
     'config:read': () => repo().readAppConfig(),
@@ -172,6 +171,10 @@ function registerRepositoryHandlers(): void {
       );
       return { ok: true };
     },
+    'agent:testConnection': (input) => runAgentConnectionTest(
+      input as import('../src/app/core/agent-connection').AgentConnectionInput,
+      (url, init) => fetch(url, init),
+    ),
   };
 
   for (const [channel, handler] of Object.entries(handlers)) {

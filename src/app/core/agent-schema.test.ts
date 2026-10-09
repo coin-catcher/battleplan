@@ -52,6 +52,40 @@ describe('agent-schema.json', () => {
     expect(validate.errors).toBeNull();
   });
 
+  it('validates a Cursor code agent with cloud options', () => {
+    const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+    const ajv = new Ajv2020({ allErrors: true, strict: false });
+    addFormats(ajv);
+    const validate = ajv.compile(schema);
+
+    const sample = {
+      agents: [
+        {
+          agent_id: 'agent-cursor-1',
+          kind: 'code',
+          type: 'Cursor Agent',
+          name: 'Cursor Code Agent',
+          url: 'https://api.cursor.com/v1',
+          options: {
+            default_mode: 'agent',
+            default_repo_url: 'https://github.com/org/repo',
+            default_starting_ref: 'develop',
+            auto_create_pr: false,
+            env_vars_json: '{}',
+          },
+          cursor_agent_id: 'bc_abc123',
+          last_test_status: 'success',
+          last_test_at: '2026-10-09T12:00:00.000Z',
+          created_at: '2026-10-09T00:00:00.000Z',
+          updated_at: '2026-10-09T00:00:00.000Z',
+        },
+      ],
+    };
+
+    expect(validate(sample)).toBe(true);
+    expect(validate.errors).toBeNull();
+  });
+
   it('validates a Grok research agent with Responses API options', () => {
     const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
     const ajv = new Ajv2020({ allErrors: true, strict: false });

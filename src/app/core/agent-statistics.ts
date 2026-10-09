@@ -47,8 +47,29 @@ export function openAiStatisticsSnapshot(agent: ProjectAgent): AgentStatisticsSn
   };
 }
 
+function cursorAgentStatisticsSnapshot(agent: ProjectAgent): AgentStatisticsSnapshot {
+  const stats = getAgentTypeDefinition('Cursor Agent').statistics;
+  return {
+    badge: 'Recorded locally',
+    tokensToday: null,
+    tokensPeriod: null,
+    tokensRemaining: null,
+    requestsToday: null,
+    requestsPeriod: null,
+    costTodayUsd: null,
+    costPeriodUsd: null,
+    note: agent.cursor_agent_id
+      ? 'Enterprise Admin API when configured; otherwise BattlePlan runs for this cursor_agent_id.'
+      : 'Enterprise Admin API when configured; otherwise local run ledger after first cloud agent launch.',
+    adminKeyHint: stats.requiresEnterpriseAdminKey
+      ? 'Optional Enterprise Admin API key on this agent for team usage endpoints.'
+      : undefined,
+  };
+}
+
 export function agentStatisticsSnapshot(agent: ProjectAgent): AgentStatisticsSnapshot {
   if (agent.type === 'OpenAI') return openAiStatisticsSnapshot(agent);
+  if (agent.type === 'Cursor Agent') return cursorAgentStatisticsSnapshot(agent);
   const stats = getAgentTypeDefinition(agent.type).statistics;
   return {
     badge: 'Unavailable',
@@ -66,6 +87,9 @@ export function agentStatisticsSnapshot(agent: ProjectAgent): AgentStatisticsSna
 export function statisticsLabelForType(type: AgentType): string {
   if (type === 'OpenAI') {
     return 'Tokens remaining are not exposed for standard sk- project keys; add an optional Organization Admin API key for live usage and cost.';
+  }
+  if (type === 'Cursor Agent') {
+    return 'Poll team usage at most once per hour when an Enterprise Admin API key is configured.';
   }
   return '';
 }
