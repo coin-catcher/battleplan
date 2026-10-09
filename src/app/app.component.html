@@ -357,6 +357,24 @@
                   <span>GitHub personal access token</span>
                   <input type="password" autocomplete="off" [(ngModel)]="projectGithubPat" name="projectGithubPat" placeholder="ghp_…" (blur)="onEditorFieldBlur()" />
                 </label>
+                <label class="field">
+                  <span>Default research agent</span>
+                  <select [(ngModel)]="defaultResearchAgentId" name="defaultResearchAgentId" (change)="onEditorFieldAutoSave()">
+                    <option value="">None</option>
+                    @for (agent of libraryAgents('research'); track agent.agent_id) {
+                      <option [value]="agent.agent_id">{{ agent.name }}</option>
+                    }
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Default code agent</span>
+                  <select [(ngModel)]="defaultCodeAgentId" name="defaultCodeAgentId" (change)="onEditorFieldAutoSave()">
+                    <option value="">None</option>
+                    @for (agent of libraryAgents('code'); track agent.agent_id) {
+                      <option [value]="agent.agent_id">{{ agent.name }}</option>
+                    }
+                  </select>
+                </label>
               </div>
               <p class="pending">Task agents branch from this base. Approve and merge creates and merges PRs into it using the token above.</p>
               <details class="editor-disclosure">
@@ -458,6 +476,28 @@
                     }
                   </select>
                 </label>
+                @if (task.output_type === 'research') {
+                  <label class="field">
+                    <span>Research agent</span>
+                    <select [(ngModel)]="taskResearchAgentId" [name]="'taskResearchAgent-' + task.task_id" (change)="onEditorFieldAutoSave()">
+                      <option value="">Project default</option>
+                      @for (agent of libraryAgents('research'); track agent.agent_id) {
+                        <option [value]="agent.agent_id">{{ agent.name }}</option>
+                      }
+                    </select>
+                  </label>
+                }
+                @if (task.output_type === 'code') {
+                  <label class="field">
+                    <span>Code agent</span>
+                    <select [(ngModel)]="taskCodeAgentId" [name]="'taskCodeAgent-' + task.task_id" (change)="onEditorFieldAutoSave()">
+                      <option value="">Project default</option>
+                      @for (agent of libraryAgents('code'); track agent.agent_id) {
+                        <option [value]="agent.agent_id">{{ agent.name }}</option>
+                      }
+                    </select>
+                  </label>
+                }
               </div>
               <details class="editor-disclosure">
                 <summary>Data and Rules</summary>

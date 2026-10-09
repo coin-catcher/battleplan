@@ -23,7 +23,13 @@ import { LocalEngine } from '../data/local-engine';
 export class BattleplanApi {
   private readonly keys = inject(CursorKey);
   private readonly repository = createBattleplanRepository();
-  private readonly engine = new LocalEngine(this.repository, new BrowserCursor(() => this.keys.value()));
+  private readonly engine = new LocalEngine(
+    this.repository,
+    new BrowserCursor(() => this.keys.value()),
+    undefined,
+    undefined,
+    () => this.keys.value(),
+  );
 
   listProjects(): Promise<Project[]> {
     return this.engine.listProjects();
@@ -46,8 +52,14 @@ export class BattleplanApi {
     github_pat?: string;
     map_x?: number;
     map_y?: number;
+    default_research_agent_id?: string;
+    default_code_agent_id?: string;
   }): Promise<Project> {
     return this.engine.updateProject(projectId, patch);
+  }
+
+  ensureAgentLibrary(projectId: string): Promise<Project> {
+    return this.engine.ensureAgentLibrary(projectId);
   }
 
   deleteProject(projectId: string): Promise<void> {
@@ -88,6 +100,8 @@ export class BattleplanApi {
       manual: typeof patch['manual'] === 'boolean' ? patch['manual'] : undefined,
       map_x: typeof patch['map_x'] === 'number' ? patch['map_x'] : undefined,
       map_y: typeof patch['map_y'] === 'number' ? patch['map_y'] : undefined,
+      research_agent_id: typeof patch['research_agent_id'] === 'string' ? patch['research_agent_id'] : undefined,
+      code_agent_id: typeof patch['code_agent_id'] === 'string' ? patch['code_agent_id'] : undefined,
     });
   }
 
