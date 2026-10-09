@@ -155,6 +155,13 @@
   object-fit: contain;
 }
 
+.service-account-json {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
 .agent-editor-actions {
   margin-left: auto;
 }

@@ -147,7 +147,7 @@ describe('Gemini agent type', () => {
 
   it('documents estimated statistics and AI Studio quota requirements', () => {
     expect(agentStatisticsBadge('Gemini')).toBe('Estimated');
-    expect(agentStatisticsQuotaHint('Gemini')).toMatch(/AI Studio/i);
+    expect(agentStatisticsQuotaHint('Gemini')).toMatch(/Cloud Console/i);
   });
 
   it('gates thinking and tool-specific options', () => {

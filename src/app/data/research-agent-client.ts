@@ -1,5 +1,6 @@
 import type { ChatMessage, ProjectAgent } from '../core/models';
 import { optionString } from '../core/agent-bindings';
+import { geminiAccessTokenFromCredentialsJson, parseGoogleServiceAccountJson } from '../core/gemini-service-account';
 
 export interface ResearchChatUsage {
   totalTokens?: number;
@@ -154,11 +155,19 @@ async function sendGemini(
   turns: ResearchChatTurn[],
   systemPrompt: string,
 ): Promise<ResearchChatResult> {
-  const apiKey = agent.api_key?.trim();
-  if (!apiKey) throw new Error('Save an API key on this research agent before chatting.');
-  const model = optionString(agent.options, 'model') || 'gemini-2.0-flash';
+  const credentialsJson = agent.api_key?.trim();
+  if (!credentialsJson) throw new Error('Save a Google service account JSON key on this agent before chatting.');
+  let accessToken: string;
+  try {
+    parseGoogleServiceAccountJson(credentialsJson);
+    accessToken = await geminiAccessTokenFromCredentialsJson(credentialsJson);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid service account JSON.';
+    throw new Error(message);
+  }
+  const model = optionString(agent.options, 'model') || 'gemini-2.5-flash';
   const base = agent.url.replace(/\/$/, '');
-  const path = `${base}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const path = `${base}/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const contents = turns.map((turn) => ({
     role: turn.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: turn.content }],
@@ -168,7 +177,10 @@ async function sendGemini(
 
   const { ok, payload, text } = await postJson(path, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${accessToken}`,
+    },
     body: JSON.stringify(body),
   });
   if (!ok) {

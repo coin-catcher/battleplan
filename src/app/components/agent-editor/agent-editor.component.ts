@@ -18,6 +18,7 @@ import {
   isAgentOptionVisible,
   type AgentOptionDefinition,
 } from '../../core/agent-types';
+import { agentCredentialFieldLabel, agentUsesServiceAccountJson } from '../../core/agent-api-key';
 import { applyDynamicModelsToOptions, selectChoicesForOption } from '../../core/agent-connection';
 import { AgentConnectionService } from '../../data/agent-connection.service';
 import { BattleplanStore } from '../../state/battleplan-store.service';
@@ -105,6 +106,14 @@ export class AgentEditorComponent {
 
   agentLogo(type: AgentType): string {
     return agentLogoPublicPath(type);
+  }
+
+  credentialFieldLabel(type: AgentType): string {
+    return agentCredentialFieldLabel(type);
+  }
+
+  usesServiceAccountJson(type: AgentType): boolean {
+    return agentUsesServiceAccountJson(type);
   }
 
   onTypeChange(nextType: AgentType): void {
