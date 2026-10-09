@@ -4,6 +4,7 @@ import type {
   OutputType,
   PendingChange,
   Project,
+  ProjectAgent,
   ProjectTask,
   TaskCodeOutput,
   TaskDraft,
@@ -546,6 +547,14 @@ export class LocalEngine {
 
   listPendingChanges(projectId: string): Promise<PendingChange[]> {
     return this.repo.listPendingChanges(projectId);
+  }
+
+  listProjectAgents(projectId: string): Promise<ProjectAgent[]> {
+    return this.repo.listProjectAgents(projectId);
+  }
+
+  saveProjectAgents(projectId: string, agents: ProjectAgent[]): Promise<void> {
+    return this.repo.saveProjectAgents(projectId, agents);
   }
 
   savePendingChanges(projectId: string, changes: PendingChange[]): Promise<void> {

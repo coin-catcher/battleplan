@@ -17,6 +17,7 @@ import {
   type GithubRelease,
   type GithubReleaseAsset,
 } from './desktop-release-update';
+import { runAgentConnectionTest } from '../src/app/core/agent-connection';
 import type {
   ChatArtifact,
   ChatMessage,
@@ -108,6 +109,7 @@ function registerRepositoryHandlers(): void {
       );
       return { ok: true };
     },
+    'agent:testConnection': (input) => runAgentConnectionTest(input as import('../src/app/core/agent-connection').AgentConnectionInput),
     'repo:listArtifacts': async (scope, ownerId) => enrichArtifacts(scope as 'project' | 'task', ownerId as string),
     'repo:saveArtifact': (artifact) => repo().saveArtifact(artifact as ChatArtifact),
     'config:read': () => repo().readAppConfig(),

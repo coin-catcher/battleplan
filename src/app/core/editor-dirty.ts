@@ -25,8 +25,10 @@ export interface AgentEditorForm {
   name: string;
   url: string;
   api_key: string;
+  admin_api_key: string;
   options: Record<string, AgentOptionValue>;
   apiKeyEdited: boolean;
+  adminApiKeyEdited: boolean;
 }
 
 export function projectEditorDirty(form: ProjectEditorForm, project: Project | null): boolean {
@@ -80,6 +82,7 @@ export function agentCreateEditorDirty(form: AgentEditorForm, role: 'research' |
   if (form.name.trim() !== def.defaultName) return true;
   if (form.url.trim() !== def.defaultUrl) return true;
   if (form.api_key.trim()) return true;
+  if ((form.admin_api_key ?? '').trim()) return true;
   return optionsDirty(form.options, defaults);
 }
 
@@ -89,10 +92,14 @@ export function agentEditorDirty(form: AgentEditorForm, agent: ProjectAgent | nu
   const apiDirty = form.apiKeyEdited
     ? form.api_key.trim() !== (agent.api_key ?? '').trim()
     : false;
+  const adminDirty = form.adminApiKeyEdited
+    ? (form.admin_api_key ?? '').trim() !== (agent.admin_api_key ?? '').trim()
+    : false;
   return form.type !== agent.type
     || form.name.trim() !== agent.name.trim()
     || form.url.trim() !== agent.url.trim()
     || apiDirty
+    || adminDirty
     || optionsDirty(form.options, savedOptions);
 }
 

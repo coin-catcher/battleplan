@@ -24,6 +24,7 @@ import {
 } from './core/agent-types';
 import { isAgentDraftId } from './core/agent-id';
 import { AgentStatsComponent } from './agent/agent-stats.component';
+import { AgentConnectionService } from './data/agent-connection.service';
 import { isMarkdownPath, prepareMarkdown } from './core/markdown';
 import { applyTheme, THEMES, type ThemeId } from './core/themes';
 import { AppPreferences } from './data/app-preferences.service';
@@ -54,6 +55,7 @@ import { BattleplanStore } from './state/battleplan-store.service';
 })
 export class AppComponent implements OnInit {
   readonly store = inject(BattleplanStore);
+  private readonly agentConnections = inject(AgentConnectionService);
   readonly cursorKey = inject(CursorKey);
   readonly preferences = inject(AppPreferences);
   readonly portability = inject(ProjectPortability);
@@ -148,12 +150,17 @@ export class AppComponent implements OnInit {
   agentName = '';
   agentUrl = '';
   agentApiKey = '';
+  agentAdminApiKey = '';
   agentOptions: Record<string, AgentOptionValue> = {};
   agentNameTouched = false;
   agentUrlTouched = false;
   agentApiKeyEdited = false;
   agentApiKeyFocused = false;
-  readonly agentTestNotice = signal<string | null>(null);
+  agentAdminApiKeyEdited = false;
+  agentAdminApiKeyFocused = false;
+  readonly agentTestMessage = signal<string | null>(null);
+  readonly agentTestSuccess = signal(false);
+  private agentTestFadeTimer: ReturnType<typeof setTimeout> | undefined;
 
   private centeredProject = '';
   private titleSignature = '';
@@ -427,8 +434,10 @@ export class AppComponent implements OnInit {
       name: this.agentName,
       url: this.agentUrl,
       api_key: this.agentApiKey,
+      admin_api_key: this.agentAdminApiKey,
       options: this.agentOptions,
       apiKeyEdited: this.agentApiKeyEdited,
+      adminApiKeyEdited: this.agentAdminApiKeyEdited,
     };
   }
 
@@ -477,6 +486,8 @@ export class AppComponent implements OnInit {
       await this.store.saveAgentFromEditor(this.agentEditorForm());
       this.agentApiKeyEdited = false;
       this.agentApiKeyFocused = false;
+      this.agentAdminApiKeyEdited = false;
+      this.agentAdminApiKeyFocused = false;
       const agent = this.store.selectedAgent();
       if (agent) this.bindAgentForm(agent);
     } else {
@@ -1022,9 +1033,32 @@ export class AppComponent implements OnInit {
     return selection.kind === 'agent' && !isAgentDraftId(selection.agentId);
   }
 
-  agentStatsId(): string | null {
+  agentStatsPreview(): ProjectAgent | null {
     const selection = this.store.selection();
-    if (selection.kind === 'agent' && !isAgentDraftId(selection.agentId)) return selection.agentId;
+    if (selection.kind === 'agent') {
+      const saved = this.store.selectedAgent();
+      if (!saved) return null;
+      return {
+        ...saved,
+        type: this.agentType,
+        admin_api_key: this.agentAdminApiKeyEdited
+          ? this.agentAdminApiKey.trim() || undefined
+          : saved.admin_api_key,
+      };
+    }
+    if (selection.kind === 'agent-create') {
+      const now = new Date().toISOString();
+      return {
+        agent_id: 'preview',
+        kind: selection.role,
+        type: this.agentType,
+        name: this.agentName,
+        url: this.agentUrl,
+        admin_api_key: this.agentAdminApiKey.trim() || undefined,
+        created_at: now,
+        updated_at: now,
+      };
+    }
     return null;
   }
 
@@ -1113,8 +1147,37 @@ export class AppComponent implements OnInit {
   }
 
   testAgentConnection(): void {
-    this.agentTestNotice.set('Connection testing will be available in a follow-up release.');
-    window.setTimeout(() => this.agentTestNotice.set(null), 5000);
+    void this.runAgentConnectionTest();
+  }
+
+  private async runAgentConnectionTest(): Promise<void> {
+    const saved = this.store.selectedAgent();
+    const apiKey = this.agentApiKeyEdited
+      ? this.agentApiKey.trim()
+      : (saved?.api_key ?? this.agentApiKey).trim();
+    const result = await this.agentConnections.testConnection({
+      type: this.agentType,
+      url: this.agentUrl.trim() || getAgentTypeDefinition(this.agentType).defaultUrl,
+      apiKey,
+    });
+    if (this.agentTestFadeTimer) clearTimeout(this.agentTestFadeTimer);
+    this.agentTestMessage.set(result.message);
+    if (result.ok) {
+      this.agentTestSuccess.set(true);
+      this.agentTestFadeTimer = setTimeout(() => {
+        this.agentTestMessage.set(null);
+        this.agentTestSuccess.set(false);
+      }, 5000);
+    } else {
+      this.agentTestSuccess.set(false);
+    }
+    if (saved && !isAgentDraftId(saved.agent_id)) {
+      await this.store.persistAgentTestResult(saved.agent_id, {
+        last_test_at: new Date().toISOString(),
+        last_test_status: result.ok ? 'success' : 'error',
+        last_test_message: result.message,
+      });
+    }
   }
 
   private resetAgentFormForRole(role: AgentKind): void {
@@ -1124,12 +1187,16 @@ export class AppComponent implements OnInit {
     this.agentName = definition.defaultName;
     this.agentUrl = definition.defaultUrl;
     this.agentApiKey = '';
+    this.agentAdminApiKey = '';
     this.agentOptions = defaultOptionValues(type);
     this.agentNameTouched = false;
     this.agentUrlTouched = false;
     this.agentApiKeyEdited = false;
     this.agentApiKeyFocused = false;
-    this.agentTestNotice.set(null);
+    this.agentAdminApiKeyEdited = false;
+    this.agentAdminApiKeyFocused = false;
+    this.agentTestMessage.set(null);
+    this.agentTestSuccess.set(false);
   }
 
   private bindAgentForm(agent: ProjectAgent): void {
@@ -1138,12 +1205,41 @@ export class AppComponent implements OnInit {
     this.agentName = agent.name;
     this.agentUrl = agent.url;
     this.agentApiKey = '';
+    this.agentAdminApiKey = '';
     this.agentOptions = mergeAgentOptions(agent.type, agent.options);
     this.agentNameTouched = true;
     this.agentUrlTouched = true;
     this.agentApiKeyEdited = false;
     this.agentApiKeyFocused = false;
-    this.agentTestNotice.set(null);
+    this.agentAdminApiKeyEdited = false;
+    this.agentAdminApiKeyFocused = false;
+    this.agentTestMessage.set(agent.last_test_status === 'error' ? (agent.last_test_message ?? null) : null);
+    this.agentTestSuccess.set(false);
+  }
+
+  agentAdminApiKeyInputValue(): string {
+    const agent = this.store.selectedAgent();
+    if (!this.agentAdminApiKeyEdited && !this.agentAdminApiKeyFocused && agent?.admin_api_key && !isAgentDraftId(agent.agent_id)) {
+      return '********';
+    }
+    return this.agentAdminApiKey;
+  }
+
+  onAgentAdminApiKeyFocus(): void {
+    this.agentAdminApiKeyFocused = true;
+    if (!this.agentAdminApiKeyEdited && this.agentAdminApiKey === '' && this.store.selectedAgent()?.admin_api_key) {
+      this.agentAdminApiKey = '';
+    }
+  }
+
+  onAgentAdminApiKeyInput(value: string): void {
+    this.agentAdminApiKeyEdited = true;
+    this.agentAdminApiKey = value;
+  }
+
+  onAgentAdminApiKeyBlur(): void {
+    this.agentAdminApiKeyFocused = false;
+    this.onEditorFieldBlur();
   }
 
   connectArrowClass(direction: CardinalDirection): string {

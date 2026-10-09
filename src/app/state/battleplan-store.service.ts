@@ -253,6 +253,9 @@ export class BattleplanStore {
         if (input.apiKeyEdited && input.api_key?.trim()) {
           agent.api_key = input.api_key.trim();
         }
+        if (input.adminApiKeyEdited && input.admin_api_key?.trim()) {
+          agent.admin_api_key = input.admin_api_key.trim();
+        }
         agents.push(agent);
         await this.persistAgentList(projectId, agents);
         this.selection.set({ kind: 'agent', agentId: agent.agent_id });
@@ -281,6 +284,9 @@ export class BattleplanStore {
       if (input.apiKeyEdited) {
         updated.api_key = input.api_key?.trim() || undefined;
       }
+      if (input.adminApiKeyEdited) {
+        updated.admin_api_key = input.admin_api_key?.trim() || undefined;
+      }
       if (wasDraft) {
         agents = agents.filter((item) => item.agent_id !== agentId);
         agents.push(updated);
@@ -307,6 +313,16 @@ export class BattleplanStore {
       this.selection.set({ kind: 'project' });
       this.notice.set('Agent deleted.');
     });
+  }
+
+  async persistAgentTestResult(
+    agentId: string,
+    patch: Pick<ProjectAgent, 'last_test_at' | 'last_test_status' | 'last_test_message'>,
+  ): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    const agents = this.agents().map((item) => (item.agent_id === agentId ? { ...item, ...patch } : item));
+    await this.persistAgentList(projectId, agents);
   }
 
   private async persistAgentList(projectId: string, agents: ProjectAgent[]): Promise<void> {
