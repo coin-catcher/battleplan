@@ -460,6 +460,47 @@ describe('LocalEngine', () => {
     vi.unstubAllGlobals();
   });
 
+  it('moves a DOING root project to REVIEW after a normal agent run', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    client.listRuns = async () => [{
+      id: 'run-chat',
+      agentId: 'agent-1',
+      status: 'FINISHED',
+      result: 'Here is the updated plan.',
+    }];
+    client.getRun = async () => ({
+      id: 'run-chat',
+      agentId: 'agent-1',
+      status: 'FINISHED',
+      result: 'Here is the updated plan.',
+    });
+    const engine = new LocalEngine(repo, client, () => '2026-10-09T12:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      cursor_agent_id: 'agent-1',
+      status: 'DOING',
+      latest_run_id: 'run-chat',
+      created_at: '2026-10-09T00:00:00.000Z',
+      updated_at: '2026-10-09T00:00:00.000Z',
+    });
+    await repo.saveMessage({
+      message_id: 'm-user',
+      scope: 'project',
+      project_id: 'p1',
+      role: 'user',
+      content: 'Continue planning',
+      created_at: '2026-10-09T00:00:00.000Z',
+      run_id: 'run-chat',
+      intent: 'chat',
+    });
+    const page = await engine.listProjectMessages('p1');
+    expect(page.project?.status).toBe('REVIEW');
+  });
+
   it('marks the root project DOING when project chat is sent', async () => {
     const repo = new MemoryRepository();
     const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => 'id-1');
@@ -572,6 +613,7 @@ describe('LocalEngine', () => {
     await engine.executeTask(task.task_id);
     expect(client.prompts.length).toBe(0);
     expect(fetchMock).toHaveBeenCalled();
+    expect((await repo.getTask(task.task_id))?.status).toBe('REVIEW');
     const messages = await repo.listTaskMessages(task.task_id);
     expect(messages.some((message) => message.role === 'assistant' && message.content.includes('findings'))).toBe(true);
     const ledger = await repo.getAgentUsageLedger('p1');

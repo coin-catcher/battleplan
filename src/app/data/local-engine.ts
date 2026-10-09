@@ -136,6 +136,7 @@ export class LocalEngine {
       created_at: timestamp,
       updated_at: timestamp,
     };
+    applyProjectStatusTransition(project, 'DOING', 'execute_or_send');
     await this.repo.saveProject(project);
     await this.seedAgentLibraryForProject(project.project_id);
     await this.repo.saveMessage({
@@ -185,7 +186,12 @@ export class LocalEngine {
     project.latest_run_id = created.run.id;
     project.updated_at = timestamp;
     await this.repo.saveProject(project);
-    await this.markSubprojectTaskDoing(project, created.run.id);
+    if (project.parent_task_id) {
+      await this.markSubprojectTaskDoing(project, created.run.id);
+    } else if (!project.parent_project_id) {
+      await this.markProjectDoingOnAgentChat(project);
+      await this.repo.saveProject(project);
+    }
     const message = await this.record({
       scope: 'project',
       project_id: projectId,
@@ -663,6 +669,10 @@ export class LocalEngine {
       text: wrapAgentRunPrompt(text, { baseBranch: base, agentBranch: output?.branch }),
       mode: task.cursor_agent_id ? 'agent' : 'plan',
     });
+    this.markTaskDoingOnAgentChat(task);
+    task.latest_run_id = run.id;
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
     return this.record({
       scope: 'task',
       project_id: task.project_id,
@@ -1042,27 +1052,27 @@ export class LocalEngine {
     if (rootProjectStatus(project) !== 'DOING') return;
     const user = (await this.repo.listProjectMessages(projectId))
       .find((message) => message.run_id === run.id && message.role === 'user');
-    if (user?.intent !== 'release_version_bump') return;
-
-    const token = project.github_pat?.trim();
-    const slug = projectRepoSlug(project);
-    const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
-    const branchNames = branchNamesFromRun(run);
-    let branch = parseReleaseVersionBranch(await this.assistantText(project.cursor_agent_id!, run));
-    if (token && slug) {
-      const picked = await pickTaskAgentBranch({
-        branchNames: branch ? [branch, ...branchNames] : branchNames,
-        preferred: branch ?? project.release_version_branch,
-        owner: slug.owner,
-        repo: slug.repo,
-        base,
-        token,
-      });
-      if (picked?.branch) branch = picked.branch;
-    } else if (!branch && branchNames.length > 0) {
-      branch = branchNames[branchNames.length - 1];
+    if (user?.intent === 'release_version_bump') {
+      const token = project.github_pat?.trim();
+      const slug = projectRepoSlug(project);
+      const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
+      const branchNames = branchNamesFromRun(run);
+      let branch = parseReleaseVersionBranch(await this.assistantText(project.cursor_agent_id!, run));
+      if (token && slug) {
+        const picked = await pickTaskAgentBranch({
+          branchNames: branch ? [branch, ...branchNames] : branchNames,
+          preferred: branch ?? project.release_version_branch,
+          owner: slug.owner,
+          repo: slug.repo,
+          base,
+          token,
+        });
+        if (picked?.branch) branch = picked.branch;
+      } else if (!branch && branchNames.length > 0) {
+        branch = branchNames[branchNames.length - 1];
+      }
+      if (branch) project.release_version_branch = branch;
     }
-    if (branch) project.release_version_branch = branch;
     applyProjectStatusTransition(project, 'REVIEW', 'agent_finished');
     project.updated_at = this.now();
     await this.repo.saveProject(project);
@@ -1329,8 +1339,13 @@ export class LocalEngine {
       return;
     }
     if (project.parent_project_id) return;
-    if (project.status === 'DONE' || project.status === 'ABANDONED' || project.status === 'DOING') return;
-    project.status = 'DOING';
+    const status = rootProjectStatus(project);
+    if (status === 'DONE' || status === 'ABANDONED' || status === 'DOING') return;
+    try {
+      applyProjectStatusTransition(project, 'DOING', 'execute_or_send');
+    } catch {
+      applyProjectStatusTransition(project, 'DOING', 'manual');
+    }
     project.updated_at = this.now();
     await this.repo.saveProject(project);
   }
@@ -1508,9 +1523,6 @@ export class LocalEngine {
     turns.push({ role: 'user', content });
     const result = await sendResearchAgentChat(agent, turns, systemPrompt);
     await this.bumpAgentUsage(project.project_id, agent.agent_id, result.usage.totalTokens);
-    applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
-    task.updated_at = this.now();
-    await this.repo.saveTask(task);
     const userRecord = await this.record({
       scope: 'task',
       project_id: task.project_id,
@@ -1527,6 +1539,11 @@ export class LocalEngine {
       content: result.assistantText,
       intent,
     });
+    if (task.status === 'DOING') {
+      applyTaskStatusTransition(task, 'REVIEW', 'agent_finished');
+    }
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
     return userRecord;
   }
 
