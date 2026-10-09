@@ -19,6 +19,8 @@ export const THEME_AGENT_UI: Record<
     connectionErrorBackground: string;
     connectionErrorForeground: string;
     toolboxIconBackground: string;
+    toolboxBackground: string;
+    toolboxForeground: string;
   }
 > = {
   harbor: {
@@ -29,6 +31,8 @@ export const THEME_AGENT_UI: Record<
     connectionErrorBackground: '#7a1f1f',
     connectionErrorForeground: '#ffe8e8',
     toolboxIconBackground: '#ffffff',
+    toolboxBackground: '#ffffff',
+    toolboxForeground: '#14202b',
   },
   grove: {
     toolboxAddBackground: '#3d7a2a',
@@ -38,6 +42,8 @@ export const THEME_AGENT_UI: Record<
     connectionErrorBackground: '#7a1f1f',
     connectionErrorForeground: '#ffe8e8',
     toolboxIconBackground: '#fffcf6',
+    toolboxBackground: '#fffcf6',
+    toolboxForeground: '#1c2418',
   },
   sunrise: {
     toolboxAddBackground: '#2e7d32',
@@ -47,6 +53,8 @@ export const THEME_AGENT_UI: Record<
     connectionErrorBackground: '#8b2222',
     connectionErrorForeground: '#ffe8e8',
     toolboxIconBackground: '#fffdfb',
+    toolboxBackground: '#fffdfb',
+    toolboxForeground: '#2b1c14',
   },
   dusk: {
     toolboxAddBackground: '#4caf50',
@@ -56,6 +64,8 @@ export const THEME_AGENT_UI: Record<
     connectionErrorBackground: '#9a3030',
     connectionErrorForeground: '#ffe8e8',
     toolboxIconBackground: '#221e2b',
+    toolboxBackground: '#221e2b',
+    toolboxForeground: '#f4efe8',
   },
   glacier: {
     toolboxAddBackground: '#2e7d32',
@@ -65,6 +75,8 @@ export const THEME_AGENT_UI: Record<
     connectionErrorBackground: '#7a1f1f',
     connectionErrorForeground: '#ffe8e8',
     toolboxIconBackground: '#ffffff',
+    toolboxBackground: '#ffffff',
+    toolboxForeground: '#152033',
   },
 };
 
