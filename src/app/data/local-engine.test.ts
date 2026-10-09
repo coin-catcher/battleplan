@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ChatArtifact, ChatMessage, Project, ProjectTask, TaskCodeOutput, TaskResearchOutput } from '../core/models';
 import type { CursorClient } from './cursor-browser';
 import { LocalEngine } from './local-engine';
@@ -475,6 +475,54 @@ describe('LocalEngine', () => {
     const page = await engine.listTaskMessages('t1');
     expect(page.task.status).toBe('REVIEW');
     expect(page.messages.some((message) => message.role === 'assistant')).toBe(true);
+  });
+
+  it('routes bound research tasks to a non-Cursor library agent', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    const engine = new LocalEngine(repo, client, () => '2026-10-09T12:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      created_at: '2026-10-09T00:00:00.000Z',
+      updated_at: '2026-10-09T00:00:00.000Z',
+    });
+    const openAiAgent: import('../core/models').ProjectAgent = {
+      agent_id: 'research-openai',
+      kind: 'research',
+      type: 'OpenAI',
+      name: 'OpenAI Research',
+      url: 'https://api.openai.com/v1',
+      api_key: 'sk-test',
+      options: { model: 'gpt-4.1-mini' },
+      created_at: '2026-10-09T00:00:00.000Z',
+      updated_at: '2026-10-09T00:00:00.000Z',
+    };
+    await repo.saveProjectAgents('p1', [openAiAgent]);
+    const task = await engine.createTask('p1', {
+      title: 'Research',
+      output_type: 'research',
+      initial_prompt: 'Summarize options',
+    });
+    task.research_agent_id = openAiAgent.agent_id;
+    await repo.saveTask(task);
+
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: 'Here are the findings.' } }],
+      usage: { total_tokens: 42 },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await engine.executeTask(task.task_id);
+    expect(client.prompts.length).toBe(0);
+    expect(fetchMock).toHaveBeenCalled();
+    const messages = await repo.listTaskMessages(task.task_id);
+    expect(messages.some((message) => message.role === 'assistant' && message.content.includes('findings'))).toBe(true);
+    const ledger = await repo.getAgentUsageLedger('p1');
+    expect(ledger[openAiAgent.agent_id]?.requests_period).toBe(1);
+    vi.unstubAllGlobals();
   });
 
   it('blocks execution for abandoned tasks', async () => {

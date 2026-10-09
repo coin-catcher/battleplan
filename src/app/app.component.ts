@@ -42,6 +42,7 @@ import { MarkdownComponent } from 'ngx-markdown';
 import { editorPanelDirty } from './core/editor-dirty';
 import { taskDar, taskInitialPrompt } from './core/task-fields';
 import { normalChildIds } from './core/dependencies';
+import { taskResearchChatStarted } from './core/agent-bindings';
 import { BattleplanStore } from './state/battleplan-store.service';
 
 @Component({
@@ -119,6 +120,10 @@ export class AppComponent implements OnInit {
   projectBranch = 'main';
   projectGithubPat = '';
   projectDar = '';
+  defaultResearchAgentId = '';
+  defaultCodeAgentId = '';
+  taskResearchAgentId = '';
+  taskCodeAgentId = '';
   chatDraft = '';
   taskTitle = '';
   taskDar = '';
@@ -188,6 +193,8 @@ export class AppComponent implements OnInit {
       this.projectBranch = project?.starting_ref || 'main';
       this.projectGithubPat = project?.github_pat ?? '';
       this.projectDar = project?.dar ?? '';
+      this.defaultResearchAgentId = project?.default_research_agent_id ?? '';
+      this.defaultCodeAgentId = project?.default_code_agent_id ?? '';
       if (selection.kind === 'subproject') {
         this.subprojectInitialPrompt = project?.initial_prompt ?? '';
       }
@@ -223,6 +230,8 @@ export class AppComponent implements OnInit {
       this.outputType = task.output_type;
       this.dependencies = [...task.dependencies];
       this.siblingDependencies = [...(task.sibling_dependencies ?? [])];
+      this.taskResearchAgentId = task.research_agent_id ?? '';
+      this.taskCodeAgentId = task.code_agent_id ?? '';
     });
 
     effect(() => {
@@ -440,6 +449,8 @@ export class AppComponent implements OnInit {
         starting_ref: this.projectBranch.trim() || 'main',
         github_pat: this.projectGithubPat.trim(),
         dar: this.projectDar,
+        default_research_agent_id: this.defaultResearchAgentId,
+        default_code_agent_id: this.defaultCodeAgentId,
       });
     } else if (selection.kind === 'subproject') {
       await this.store.saveEditorProject({
@@ -458,6 +469,8 @@ export class AppComponent implements OnInit {
         output_type: this.outputType,
         dependencies: this.dependencies,
         sibling_dependencies: this.siblingDependencies,
+        research_agent_id: this.taskResearchAgentId,
+        code_agent_id: this.taskCodeAgentId,
       });
     } else if (selection.kind === 'agent' || selection.kind === 'agent-create') {
       await this.store.saveAgentFromEditor(this.agentEditorForm());
@@ -769,6 +782,8 @@ export class AppComponent implements OnInit {
       starting_ref: this.projectBranch.trim() || 'main',
       github_pat: this.projectGithubPat.trim(),
       dar: this.projectDar,
+      default_research_agent_id: this.defaultResearchAgentId,
+      default_code_agent_id: this.defaultCodeAgentId,
     });
   }
 
@@ -784,7 +799,13 @@ export class AppComponent implements OnInit {
   }
 
   taskAgentStarted(task: ProjectTask): boolean {
-    return Boolean(task.cursor_agent_id);
+    const project = this.store.project();
+    if (!project) return Boolean(task.cursor_agent_id);
+    return taskResearchChatStarted(task, project, this.store.agents());
+  }
+
+  libraryAgents(kind: AgentKind): ProjectAgent[] {
+    return this.store.agents().filter((agent) => agent.kind === kind && !isAgentDraftId(agent.agent_id));
   }
 
   subprojectAgentStarted(): boolean {
@@ -1399,6 +1420,8 @@ export class AppComponent implements OnInit {
       output_type: this.outputType,
       dependencies: this.dependencies,
       sibling_dependencies: this.siblingDependencies,
+      research_agent_id: this.taskResearchAgentId,
+      code_agent_id: this.taskCodeAgentId,
     });
   }
 

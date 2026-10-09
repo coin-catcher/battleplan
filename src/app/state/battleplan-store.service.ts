@@ -198,6 +198,8 @@ export class BattleplanStore {
   }
 
   async reloadAgents(projectId: string): Promise<void> {
+    const project = await this.api.ensureAgentLibrary(projectId);
+    this.projects.update((projects) => projects.map((item) => item.project_id === project.project_id ? project : item));
     this.agents.set(await this.api.listProjectAgents(projectId));
   }
 
@@ -360,7 +362,16 @@ export class BattleplanStore {
     }
   }
 
-  async saveProject(patch: { title: string; repo_url: string; starting_ref: string; github_pat: string; dar: string; initial_prompt?: string }): Promise<void> {
+  async saveProject(patch: {
+    title: string;
+    repo_url: string;
+    starting_ref: string;
+    github_pat: string;
+    dar: string;
+    initial_prompt?: string;
+    default_research_agent_id?: string;
+    default_code_agent_id?: string;
+  }): Promise<void> {
     const project = this.project();
     if (!project) return;
     await this.run(async () => {
@@ -659,6 +670,8 @@ export class BattleplanStore {
     output_type: OutputType;
     dependencies: string[];
     sibling_dependencies: string[];
+    research_agent_id?: string;
+    code_agent_id?: string;
   }): Promise<void> {
     const task = this.selectedTask();
     if (!task) return;
