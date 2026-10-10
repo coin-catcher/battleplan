@@ -96,7 +96,7 @@
             </button>
           </div>
         </nav>
-        <div #mapStage class="map-stage" aria-label="Project mindmap" (pointerdown)="onStagePointerDown($event)">
+        <div #mapStage class="map-stage" aria-label="Project mindmap" (scroll)="onMapStageScroll()" (pointerdown)="onStagePointerDown($event)">
           <div class="map-scaler" [style.width.px]="map().width * zoom()" [style.height.px]="map().height * zoom()">
             <div class="map-canvas" [style.width.px]="map().width" [style.height.px]="map().height" [style.transform]="'scale(' + zoom() + ')'">
           <svg [attr.viewBox]="'0 0 ' + map().width + ' ' + map().height" [attr.width]="map().width" [attr.height]="map().height">

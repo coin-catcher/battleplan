@@ -26,6 +26,8 @@ import { generateTasksSourceTaskId, linkCreatedTasksUnderParent, prepareGenerate
 import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
 import { MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL } from '../core/github-client';
+import type { MindmapViewState, ProjectWorkspaceUiState } from '../core/project-ui-state';
+import { projectWorkspaceUiFromMindmap } from '../core/project-ui-state';
 import { doingBackgroundWatchTaskIds, taskNeedsDoingBackgroundPoll } from './doing-background-watch';
 
 const POLL_INTERVAL_MS = 3000;
@@ -41,6 +43,17 @@ export interface ProjectTabSnapshot {
   researchOutputs: Record<string, TaskResearchOutput | null>;
   pendingChanges: PendingChange[];
   paneWidth: number;
+  mindmapView: MindmapViewState | null;
+}
+
+export interface ProjectWorkspaceSnapshot {
+  paneWidth: number;
+  mindmapView: MindmapViewState | null;
+}
+
+export interface ProjectTabRestore {
+  paneWidth: number;
+  mindmapView: MindmapViewState | null;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -106,22 +119,36 @@ export class BattleplanStore {
   private readonly doingBackgroundTimer = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly doingBackgroundInflight = new Set<string>();
 
-  async loadProjects(): Promise<void> {
+  async loadProjects(): Promise<ProjectTabRestore | null> {
+    let restored: ProjectTabRestore | null = null;
     await this.run(async () => {
       const projects = await this.api.listProjects();
       this.projects.set(projects);
       const preferred = this.preferences.currentProjectId();
-      const initial = preferred && projects.some((item) => item.project_id === preferred)
+      const savedOpen = this.preferences.openProjectIds().filter((projectId) =>
+        projects.some((item) => item.project_id === projectId),
+      );
+      let tabs = savedOpen.length > 0 ? savedOpen : [];
+      const fallback = preferred && projects.some((item) => item.project_id === preferred)
         ? preferred
         : projects[0]?.project_id;
-      if (!this.projectId() && initial) {
-        await this.openProjectTab(initial, this.preferences.paneWidth());
+      if (tabs.length === 0 && fallback) tabs = [fallback];
+      if (tabs.length > 0) this.openTabs.set(tabs);
+      const active = preferred && tabs.includes(preferred) ? preferred : tabs[0] ?? null;
+      if (!this.projectId() && active) {
+        restored = await this.openProjectTab(active, {
+          paneWidth: this.preferences.paneWidth(),
+          mindmapView: null,
+        });
+      } else {
+        await this.persistOpenSession();
       }
       if (projects.length === 0) this.selection.set({ kind: 'create' });
     });
+    return restored;
   }
 
-  snapshotWorkspace(paneWidth: number): ProjectTabSnapshot {
+  snapshotWorkspace(workspace: ProjectWorkspaceSnapshot): ProjectTabSnapshot {
     return {
       selection: this.selection(),
       tasks: this.tasks(),
@@ -131,7 +158,8 @@ export class BattleplanStore {
       codeOutputs: this.codeOutputs(),
       researchOutputs: this.researchOutputs(),
       pendingChanges: this.pendingChanges(),
-      paneWidth,
+      paneWidth: workspace.paneWidth,
+      mindmapView: workspace.mindmapView,
     };
   }
 
@@ -146,10 +174,11 @@ export class BattleplanStore {
     this.pendingChanges.set(snapshot.pendingChanges);
   }
 
-  async openProjectTab(projectId: string, paneWidth: number): Promise<number> {
+  async openProjectTab(projectId: string, workspace: ProjectWorkspaceSnapshot): Promise<ProjectTabRestore> {
     const currentId = this.projectId();
     if (currentId && currentId !== projectId) {
-      this.tabSnapshots.set(currentId, this.snapshotWorkspace(paneWidth));
+      this.tabSnapshots.set(currentId, this.snapshotWorkspace(workspace));
+      void this.saveProjectWorkspaceUi(currentId, workspace.paneWidth, workspace.mindmapView);
     }
     this.openTabs.update((tabs) => tabs.includes(projectId) ? tabs : [...tabs, projectId]);
     const cached = this.tabSnapshots.get(projectId);
@@ -161,15 +190,40 @@ export class BattleplanStore {
       this.restoreWorkspace(cached);
       void this.refreshPendingChanges();
       this.resumeWatchForSelection();
-      return cached.paneWidth;
+      await this.persistOpenSession();
+      return { paneWidth: cached.paneWidth, mindmapView: cached.mindmapView };
     }
+    const persisted = await this.api.getProjectUiState(projectId);
+    const paneWidth = persisted?.pane_width ?? workspace.paneWidth;
+    const mindmapView = persisted
+      ? {
+        zoom: persisted.mindmap_zoom,
+        origin_x: persisted.mindmap_origin_x,
+        origin_y: persisted.mindmap_origin_y,
+      }
+      : null;
     await this.selectProject(projectId);
-    this.tabSnapshots.set(projectId, this.snapshotWorkspace(paneWidth));
-    return paneWidth;
+    this.tabSnapshots.set(projectId, this.snapshotWorkspace({ paneWidth, mindmapView }));
+    await this.persistOpenSession();
+    return { paneWidth, mindmapView };
   }
 
-  async switchProjectTab(projectId: string, paneWidth: number): Promise<number> {
-    return this.openProjectTab(projectId, paneWidth);
+  async switchProjectTab(projectId: string, workspace: ProjectWorkspaceSnapshot): Promise<ProjectTabRestore> {
+    return this.openProjectTab(projectId, workspace);
+  }
+
+  async saveProjectWorkspaceUi(
+    projectId: string,
+    paneWidth: number,
+    mindmapView: MindmapViewState | null,
+  ): Promise<void> {
+    if (!mindmapView) return;
+    const state: ProjectWorkspaceUiState = projectWorkspaceUiFromMindmap(paneWidth, mindmapView);
+    await this.api.saveProjectUiState(projectId, state);
+  }
+
+  private async persistOpenSession(): Promise<void> {
+    await this.preferences.saveOpenSession(this.openTabs(), this.projectId());
   }
 
   async selectProject(projectId: string): Promise<void> {
@@ -186,6 +240,7 @@ export class BattleplanStore {
       });
       this.openTabs.update((tabs) => tabs.includes(projectId) ? tabs : [...tabs, projectId]);
       this.continueProjectWatch(projectId);
+      await this.persistOpenSession();
     });
   }
 

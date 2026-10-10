@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { buildApplicationMenu, rebuildApplicationMenu, setExportProjectEnabled, setSaveEnabled } from './application-menu';
 import { readJsonFile } from './atomic-write';
 import { exportProject, importProject } from './battleplan-archive';
-import type { AppConfigDocument } from './document-types';
+import type { AppConfigDocument, AppWindowBounds } from './document-types';
 import { runAgentConnectionInMain } from './agent-connection';
 import { fetchAgentStatisticsLive } from './agent-statistics';
 import { FileRepository } from './file-repository';
@@ -34,6 +34,7 @@ const GITHUB_REPO = BATTLEPLAN_RELEASE_REPO.repo;
 let mainWindow: BrowserWindow | null = null;
 let repository: FileRepository | null = null;
 let pendingRelease: { version: string; asset: GithubReleaseAsset } | null = null;
+let windowStateSaveTimer: ReturnType<typeof setTimeout> | undefined;
 
 function dataRoot(): string {
   return path.join(app.getPath('userData'), 'projects');
@@ -44,10 +45,50 @@ function repo(): FileRepository {
   return repository;
 }
 
-function createWindow(): void {
+function normalizeWindowBounds(bounds: AppWindowBounds | undefined): Electron.Rectangle | undefined {
+  if (!bounds) return undefined;
+  const { x, y, width, height } = bounds;
+  if (![x, y, width, height].every((value) => Number.isFinite(value))) return undefined;
+  if (width < 960 || height < 640) return undefined;
+  return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
+}
+
+async function persistWindowState(window: BrowserWindow): Promise<void> {
+  const patch: Partial<AppConfigDocument> = {
+    window_maximized: window.isMaximized(),
+  };
+  if (!window.isMaximized()) {
+    patch.window_bounds = window.getBounds();
+  }
+  await repo().writeAppConfig(patch);
+}
+
+function scheduleWindowStateSave(window: BrowserWindow): void {
+  if (windowStateSaveTimer) clearTimeout(windowStateSaveTimer);
+  windowStateSaveTimer = setTimeout(() => {
+    void persistWindowState(window).catch((error) => console.warn('Could not save window state', error));
+  }, 400);
+}
+
+function attachWindowStatePersistence(window: BrowserWindow): void {
+  const saveNow = (): void => {
+    void persistWindowState(window).catch((error) => console.warn('Could not save window state', error));
+  };
+  window.on('resize', () => scheduleWindowStateSave(window));
+  window.on('move', () => scheduleWindowStateSave(window));
+  window.on('maximize', saveNow);
+  window.on('unmaximize', saveNow);
+  window.on('close', saveNow);
+}
+
+async function createWindow(): Promise<void> {
+  const config = await repo().readAppConfig();
+  const savedBounds = normalizeWindowBounds(config.window_bounds);
   mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 900,
+    width: savedBounds?.width ?? 1440,
+    height: savedBounds?.height ?? 900,
+    x: savedBounds?.x,
+    y: savedBounds?.y,
     minWidth: 960,
     minHeight: 640,
     webPreferences: {
@@ -57,6 +98,12 @@ function createWindow(): void {
       sandbox: false,
     },
   });
+
+  if (config.window_maximized) {
+    mainWindow.maximize();
+  }
+
+  attachWindowStatePersistence(mainWindow);
 
   const devUrl = process.env['BATTLEPLAN_DEV_SERVER_URL'];
   if (devUrl) {
@@ -107,6 +154,14 @@ function registerRepositoryHandlers(): void {
       await repo().saveAgentUsageLedger(
         projectId as string,
         ledger as Record<string, import('../src/app/core/models').AgentUsageLedger>,
+      );
+      return { ok: true };
+    },
+    'repo:getProjectUiState': (projectId) => repo().getProjectUiState(projectId as string),
+    'repo:saveProjectUiState': async (projectId, state) => {
+      await repo().saveProjectUiState(
+        projectId as string,
+        state as import('../src/app/core/project-ui-state').ProjectWorkspaceUiState,
       );
       return { ok: true };
     },
@@ -323,11 +378,11 @@ async function checkForUpdatesOnStartup(): Promise<void> {
 app.whenReady().then(async () => {
   registerRepositoryHandlers();
   buildApplicationMenu(() => mainWindow);
-  createWindow();
+  await createWindow();
   void checkForUpdatesOnStartup();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });
 });
 

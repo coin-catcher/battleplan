@@ -61,6 +61,16 @@ class MemoryRepository implements BattleplanRepository {
   ): Promise<void> {
     this.ledgers.set(projectId, ledger);
   }
+  ui = new Map<string, import('../core/project-ui-state').ProjectWorkspaceUiState>();
+  async getProjectUiState(projectId: string): Promise<import('../core/project-ui-state').ProjectWorkspaceUiState | null> {
+    return this.ui.get(projectId) ?? null;
+  }
+  async saveProjectUiState(
+    projectId: string,
+    state: import('../core/project-ui-state').ProjectWorkspaceUiState,
+  ): Promise<void> {
+    this.ui.set(projectId, state);
+  }
 }
 
 function cursor(): CursorClient & { prompts: string[] } {
