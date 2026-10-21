@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://battleplan.local/schemas/agent-connector.json",
+  "title": "ProjectAgentConnectors",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "connectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["connector_id", "kind", "name"],
+        "properties": {
+          "connector_id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["cursor", "hermes", "research_http", "custom"] },
+          "name": { "type": "string" },
+          "endpoint": { "type": "string" },
+          "max_in_progress": { "type": "integer", "minimum": 1 },
+          "healthy": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
