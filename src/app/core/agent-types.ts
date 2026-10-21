@@ -302,14 +302,20 @@ export function listAgentTypes(): AgentType[] {
   return [...AGENT_TYPES];
 }
 
+const CURSOR_AGENT_TYPE: AgentType = 'Cursor Agent';
+
+/** Cursor Agent may be configured under research or code library slots and bound on either task output type. */
 export function agentTypesForKind(kind: AgentKind): AgentType[] {
-  return listAgentTypes().filter((type) => AGENT_TYPE_REGISTRY[type].kind === kind);
+  const fromRegistry = listAgentTypes().filter((type) => AGENT_TYPE_REGISTRY[type].kind === kind);
+  if (kind === 'research' && !fromRegistry.includes(CURSOR_AGENT_TYPE)) {
+    return [...fromRegistry, CURSOR_AGENT_TYPE];
+  }
+  return fromRegistry;
 }
 
 /** Types offered in the agent-create flow (+ buttons on the mindmap toolbox). */
 export function agentTypesForCreateRole(role: 'research' | 'code'): AgentType[] {
-  if (role === 'code') return ['Cursor Agent'];
-  return agentTypesForKind('research');
+  return agentTypesForKind(role);
 }
 
 export function getAgentTypeDefinition(type: AgentType): AgentTypeDefinition {
