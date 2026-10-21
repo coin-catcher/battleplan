@@ -26,6 +26,11 @@ import { generateTasksSourceTaskId, linkCreatedTasksUnderParent, prepareGenerate
 import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
 import { MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL } from '../core/github-client';
+import {
+  cloneProjectTask,
+  coalesceCachedTaskStatus,
+  taskBackgroundPollActive,
+} from '../core/task-status-coalesce';
 import type { MindmapViewState, ProjectWorkspaceUiState } from '../core/project-ui-state';
 import type { MindmapLinkRef } from '../core/link-relocation';
 import { projectWorkspaceUiFromMindmap } from '../core/project-ui-state';
@@ -647,7 +652,7 @@ export class BattleplanStore {
     if (cached) {
       this.messages.set(cached.messages);
       this.artifacts.set(cached.artifacts);
-      this.replaceTask(cached.task);
+      this.applyCachedTaskSnapshot(taskId, cached.task);
     } else {
       try {
         if (kind === 'subproject' && existing?.subproject_id) {
@@ -1050,7 +1055,7 @@ export class BattleplanStore {
   }
 
   private continueTaskWatch(taskId: string): void {
-    const runId = unansweredRun(this.messages());
+    const runId = unansweredRunForTask(this.messages(), taskId);
     if (runId) void this.watchTask(taskId, runId);
   }
 
@@ -1373,7 +1378,7 @@ export class BattleplanStore {
     this.taskChatCache.set(result.task.task_id, {
       messages: result.messages,
       artifacts: result.artifacts ?? [],
-      task: result.task,
+      task: cloneProjectTask(result.task),
     });
   }
 
@@ -1381,7 +1386,22 @@ export class BattleplanStore {
     this.taskChatCache.set(taskId, {
       messages: page.messages,
       artifacts: page.artifacts ?? [],
-      task,
+      task: cloneProjectTask(task),
+    });
+  }
+
+  private applyCachedTaskSnapshot(taskId: string, cachedTask: ProjectTask): void {
+    const live = this.tasks().find((item) => item.task_id === taskId);
+    const subprojectAgentId = live?.subproject_id ? this.subprojectCursorAgentId(live.subproject_id) : undefined;
+    const pollActive = live
+      ? taskBackgroundPollActive(live, subprojectAgentId, this.doingBackgroundGeneration.has(taskId))
+      : this.doingBackgroundGeneration.has(taskId);
+    const merged = coalesceCachedTaskStatus(live, { ...cachedTask, task_id: taskId }, pollActive);
+    this.replaceTask(merged);
+    this.taskChatCache.set(taskId, {
+      messages: this.messages(),
+      artifacts: this.artifacts(),
+      task: cloneProjectTask(merged),
     });
   }
 
@@ -1490,13 +1510,15 @@ export class BattleplanStore {
   }
 
   private applyTaskConversation(result: { messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }): void {
-    const previous = this.tasks().find((item) => item.task_id === result.task.task_id)?.status;
-    this.cacheTaskConversation(result);
-    this.replaceTask(result.task);
-    if (previous !== result.task.status) {
+    const taskId = result.task.task_id;
+    const previous = this.tasks().find((item) => item.task_id === taskId)?.status;
+    const task = cloneProjectTask({ ...result.task, task_id: taskId });
+    this.cacheTaskConversation({ ...result, task });
+    this.replaceTask(task);
+    if (previous !== task.status) {
       this.syncDoingBackgroundWatches();
     }
-    if (this.watchingTaskChat(result.task.task_id, this.selection())) {
+    if (this.watchingTaskChat(taskId, this.selection())) {
       this.messages.set(result.messages);
       this.artifacts.set(result.artifacts ?? []);
     }
@@ -1565,7 +1587,15 @@ export class BattleplanStore {
   private patchTaskStatus(taskId: string, status: TaskStatus): void {
     const current = this.tasks().find((item) => item.task_id === taskId);
     if (!current || current.status === status) return;
-    this.replaceTask({ ...current, status, updated_at: new Date().toISOString() });
+    const patched = cloneProjectTask({ ...current, status, updated_at: new Date().toISOString() });
+    this.replaceTask(patched);
+    const cached = this.taskChatCache.get(taskId);
+    if (cached) {
+      this.taskChatCache.set(taskId, {
+        ...cached,
+        task: cloneProjectTask(patched),
+      });
+    }
   }
 
   private async run(work: () => Promise<void>): Promise<void> {
@@ -1602,6 +1632,11 @@ export class BattleplanStore {
 function unansweredRun(messages: ChatMessage[]): string | undefined {
   const answered = new Set(messages.filter((message) => message.role === 'assistant' && message.run_id).map((message) => message.run_id));
   return [...messages].reverse().find((message) => message.role === 'user' && message.run_id && !answered.has(message.run_id))?.run_id;
+}
+
+function unansweredRunForTask(messages: ChatMessage[], taskId: string): string | undefined {
+  const scoped = messages.filter((message) => message.scope === 'task' && message.task_id === taskId);
+  return unansweredRun(scoped);
 }
 
 function hasAssistant(messages: ChatMessage[], runId: string): boolean {
