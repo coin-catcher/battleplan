@@ -657,7 +657,7 @@
                 <ul class="graph-edge-list">
                   @for (edge of incomingGraphEdges(task.task_id); track edge.edge_id) {
                     <li>
-                      <span>{{ taskEdgeKindLabel(edge.kind) }} ← {{ taskTitle(edge.from_task_id) }}</span>
+                      <span>{{ taskEdgeKindLabel(edge.kind) }} ← {{ resolveTaskTitle(edge.from_task_id) }}</span>
                       @if (edge.break_condition) {
                         <span class="kanban-meta">break: {{ edge.break_condition }}</span>
                       }
@@ -671,7 +671,7 @@
                 <ul class="graph-edge-list">
                   @for (edge of childGraphEdges(task.task_id); track edge.edge_id) {
                     <li>
-                      <span>{{ taskEdgeKindLabel(edge.kind) }} → {{ taskTitle(edge.to_task_id) }}</span>
+                      <span>{{ taskEdgeKindLabel(edge.kind) }} → {{ resolveTaskTitle(edge.to_task_id) }}</span>
                       <button type="button" class="ghost" (click)="removeTaskGraphEdge(edge.edge_id)">Remove</button>
                     </li>
                   } @empty {
