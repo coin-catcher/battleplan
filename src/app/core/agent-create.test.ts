@@ -12,15 +12,15 @@ describe('agent create role filtering', () => {
     expect(defaultAgentTypeForRole('code')).toBe('Cursor Agent');
   });
 
-  it('excludes Cursor Agent from research role', () => {
+  it('includes Cursor Agent in research role', () => {
     const researchTypes = agentTypesForCreateRole('research');
-    expect(researchTypes).not.toContain('Cursor Agent');
+    expect(researchTypes).toContain('Cursor Agent');
     expect(researchTypes).toContain('OpenAI');
   });
 
-  it('rejects mismatched kind and type on draft create', () => {
+  it('allows research drafts with Cursor Agent and still blocks mismatched non-Cursor types', () => {
     expect(() => createAgentDraft({ agentId: 'x', role: 'research', type: 'Cursor Agent' }))
-      .toThrow(/not allowed/);
+      .not.toThrow();
     expect(() => createAgentDraft({ agentId: 'x', role: 'code', type: 'OpenAI' }))
       .toThrow(/not allowed/);
   });

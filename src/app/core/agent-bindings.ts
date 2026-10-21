@@ -1,4 +1,14 @@
-import type { AgentOptionValue, Project, ProjectAgent, ProjectTask } from './models';
+import { isAgentDraftId } from './agent-id';
+import type { AgentKind, AgentOptionValue, Project, ProjectAgent, ProjectTask } from './models';
+
+/** Agents available in task/project default dropdowns for a given output kind. */
+export function libraryAgentsForKind(agents: ProjectAgent[], kind: AgentKind): ProjectAgent[] {
+  return agents.filter((agent) => {
+    if (isAgentDraftId(agent.agent_id)) return false;
+    if (agent.type === 'Cursor Agent') return true;
+    return agent.kind === kind;
+  });
+}
 
 export function resolveResearchAgentId(task: ProjectTask, project: Project): string | undefined {
   return task.research_agent_id?.trim() || project.default_research_agent_id?.trim() || undefined;
