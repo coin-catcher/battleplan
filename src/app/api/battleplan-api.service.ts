@@ -109,11 +109,17 @@ export class BattleplanApi {
       map_y: typeof patch['map_y'] === 'number' ? patch['map_y'] : undefined,
       research_agent_id: typeof patch['research_agent_id'] === 'string' ? patch['research_agent_id'] : undefined,
       code_agent_id: typeof patch['code_agent_id'] === 'string' ? patch['code_agent_id'] : undefined,
+      brief: patch['brief'] as import('../core/task-brief').TaskBrief | undefined,
+      regenerate_brief: patch['regenerate_brief'] === true ? true : undefined,
     });
   }
 
   deleteTask(projectId: string, taskId: string): Promise<void> {
     return this.engine.deleteTask(projectId, taskId);
+  }
+
+  updateProjectTaskGraph(projectId: string, edges: import('../core/task-graph').TaskGraphEdge[]): Promise<ProjectTask[]> {
+    return this.engine.updateProjectTaskGraph(projectId, edges);
   }
 
   reorderTasks(projectId: string, taskIds: string[]): Promise<ProjectTask[]> {

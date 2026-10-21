@@ -54,6 +54,41 @@
       </section>
 
       <div class="map-frame">
+        <div class="project-view-toggle" role="tablist" aria-label="Project view">
+          <button
+            type="button"
+            role="tab"
+            [class.active]="projectViewMode() === 'mindmap'"
+            [attr.aria-selected]="projectViewMode() === 'mindmap'"
+            (click)="setProjectViewMode('mindmap')"
+          >Mindmap</button>
+          <button
+            type="button"
+            role="tab"
+            [class.active]="projectViewMode() === 'kanban'"
+            [attr.aria-selected]="projectViewMode() === 'kanban'"
+            (click)="setProjectViewMode('kanban')"
+          >Kanban</button>
+        </div>
+        @if (projectViewMode() === 'kanban') {
+          <div class="kanban-board" aria-label="Task kanban">
+            @for (column of kanbanBoard(); track column.status) {
+              <section class="kanban-column">
+                <h3>{{ column.status }}</h3>
+                @for (card of column.cards; track card.task_id) {
+                  <button type="button" class="kanban-card" (click)="openKanbanTask(card.task_id)">
+                    <strong>{{ card.title }}</strong>
+                    <span class="kanban-meta">{{ card.output_type }} · {{ card.connector_kind }}</span>
+                    <span class="kanban-meta">{{ card.agent_label }}</span>
+                    @if (card.lifecycle_phase) {
+                      <span class="kanban-meta">{{ card.lifecycle_phase }}</span>
+                    }
+                  </button>
+                }
+              </section>
+            }
+          </div>
+        } @else {
         <div class="zoom-controls">
           <button type="button" (click)="zoomBy(1.15)" aria-label="Zoom in">+</button>
           <button type="button" (click)="zoomBy(1 / 1.15)" aria-label="Zoom out">−</button>
@@ -258,6 +293,7 @@
             </div>
           </div>
         </div>
+        }
       </div>
     }
 
@@ -569,6 +605,25 @@
                   </label>
                 }
               </div>
+              <details class="editor-disclosure" open>
+                <summary>Task brief</summary>
+                <p class="eyebrow">Canonical task definition for agents (pstack-style). Defaults are generated from title and prompts; edit or regenerate anytime before Execute.</p>
+                <div class="composer-actions">
+                  <button type="button" class="ghost" (click)="regenerateTaskBrief()">Regenerate defaults</button>
+                </div>
+                @for (field of taskBriefFields; track field) {
+                  <label class="field">
+                    <span>{{ taskBriefLabel(field) }}</span>
+                    <textarea
+                      rows="3"
+                      [(ngModel)]="taskBriefForm[field]"
+                      [name]="'taskBrief-' + field + '-' + task.task_id"
+                      (focus)="onTaskFieldFocus()"
+                      (blur)="onEditorFieldBlur()"
+                    ></textarea>
+                  </label>
+                }
+              </details>
               <details class="editor-disclosure">
                 <summary>Data and Rules</summary>
                 <label class="field">
@@ -592,21 +647,72 @@
                   }
                 </div>
               }
-              <details class="editor-disclosure deps">
+              <details class="editor-disclosure deps" open>
                 <summary>Links and dependencies</summary>
-                <p class="eyebrow">Solid child links come from the mindmap. Check a sibling to depend on it (dashed arrow).</p>
-                @for (other of otherTasks(); track other.task_id) {
-                  <label>
-                    <input
-                      type="checkbox"
-                      [checked]="siblingDependencies.includes(other.task_id)"
-                      (change)="toggleSiblingDependency(other.task_id, $event)"
-                    />
-                    {{ other.title }}
+                <p class="eyebrow">
+                  Unified task graph for this node: parent→child hierarchy, execution order, fan-out (fork), fan-in (join), and loops (cycle with break condition).
+                  Mindmap drag still updates tree and ordering edges; all link types are managed here.
+                </p>
+                <p class="eyebrow">Blocked until these finish (incoming):</p>
+                <ul class="graph-edge-list">
+                  @for (edge of incomingGraphEdges(task.task_id); track edge.edge_id) {
+                    <li>
+                      <span>{{ taskEdgeKindLabel(edge.kind) }} ← {{ taskTitle(edge.from_task_id) }}</span>
+                      @if (edge.break_condition) {
+                        <span class="kanban-meta">break: {{ edge.break_condition }}</span>
+                      }
+                      <button type="button" class="ghost" (click)="removeTaskGraphEdge(edge.edge_id)">Remove</button>
+                    </li>
+                  } @empty {
+                    <li>No incoming links.</li>
+                  }
+                </ul>
+                <p class="eyebrow">Child tasks (parent → child tree links):</p>
+                <ul class="graph-edge-list">
+                  @for (edge of childGraphEdges(task.task_id); track edge.edge_id) {
+                    <li>
+                      <span>{{ taskEdgeKindLabel(edge.kind) }} → {{ taskTitle(edge.to_task_id) }}</span>
+                      <button type="button" class="ghost" (click)="removeTaskGraphEdge(edge.edge_id)">Remove</button>
+                    </li>
+                  } @empty {
+                    <li>No child links.</li>
+                  }
+                </ul>
+                <div class="split">
+                  <label class="field">
+                    <span>Link direction</span>
+                    <select [(ngModel)]="graphLinkDirection" [name]="'graphLinkDir-' + task.task_id">
+                      <option value="incoming">Other task must finish before this one</option>
+                      <option value="child">This task is parent of child task</option>
+                    </select>
                   </label>
-                } @empty {
-                  <p>No other tasks to link.</p>
+                  <label class="field">
+                    <span>Other task</span>
+                    <select [(ngModel)]="graphEdgeToTaskId" [name]="'graphEdgeTo-' + task.task_id">
+                      <option value="">Select task…</option>
+                      @for (other of otherTasks(); track other.task_id) {
+                        <option [value]="other.task_id">{{ other.title }}</option>
+                      }
+                    </select>
+                  </label>
+                </div>
+                @if (graphLinkDirection === 'incoming') {
+                  <label class="field">
+                    <span>Dependency kind</span>
+                    <select [(ngModel)]="graphEdgeKind" [name]="'graphEdgeKind-' + task.task_id">
+                      @for (kind of taskEdgeKinds; track kind) {
+                        <option [value]="kind">{{ taskEdgeKindLabel(kind) }}</option>
+                      }
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Break condition (required for cycle)</span>
+                    <input [(ngModel)]="graphEdgeBreakCondition" [name]="'graphEdgeBreak-' + task.task_id" placeholder="e.g. max_iterations:3, human:REVIEW" />
+                  </label>
                 }
+                <div class="composer-actions">
+                  <button type="button" class="ghost" [disabled]="!graphEdgeToTaskId" (click)="addTaskGraphEdge(task.task_id)">Add link</button>
+                </div>
               </details>
             </div>
             <div #chatTranscript class="chat-transcript-scroll transcript" aria-live="polite">

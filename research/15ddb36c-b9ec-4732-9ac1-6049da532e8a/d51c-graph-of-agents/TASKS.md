@@ -6,23 +6,18 @@ Ordered tasks to unify Battleplan’s canonical plan graph with Hermes, Cursor, 
 
 ---
 
-## Task 1 — Task brief editor and standing orders merge
+## Task 1 — Task brief editor and standing orders merge ✅ (foundation shipped)
 
 **Goal:** Humans can view and edit the pstack brief on a task; project DAR continues as standing orders.
 
-**Prompt:** Add a Brief section to the task editor (right panel) with nine fields matching `task-brief.ts`. On Execute, prepend `formatTaskBriefMarkdown(brief)` to the agent message when brief is complete. Show validation errors inline when Execute fails `assertTaskBriefReadyForRelease`.
+**Shipped:** Task editor **Task brief** section (nine fields), **Regenerate defaults** (`buildDefaultTaskBrief`), auto-brief on create/Generate Tasks, persist via `updateTask`, prepend brief on Execute (Cursor + research).
 
-**Steps:**
+**Follow-up prompt:** “Import brief from grill session” markdown sections; inline validation banner on Execute failure; extend `updateTask` patch for `node_kind`, `loop_mode`, `connector_kind` in UI.
 
-1. Extend `updateTask` patch in `local-engine.ts` for `brief`, `node_kind`, `loop_mode`, `connector_kind`.
-2. Task editor UI: collapsible Brief form bound to store.
-3. Optional: “Import brief from grill session” reads markdown sections.
+**Acceptance (remaining):**
 
-**Acceptance:**
-
-- Saving brief persists in `task_config.json`.
-- Partial brief blocks Execute with a clear message.
-- Tasks without brief behave as today.
+- Optional import from grilling output.
+- Editor fields for node kind / connector (when connector UI lands).
 
 ---
 

@@ -1,7 +1,7 @@
 import type { ProjectTask } from './models';
-import { assertAcyclicNormalLinks, normalChildIds } from './dependencies';
+import { normalChildIds } from './dependencies';
 
-export type MindmapLinkKind = 'child' | 'sibling' | 'project-root';
+export type MindmapLinkKind = 'child' | 'sibling' | 'project-root' | 'ordering' | 'fork' | 'join' | 'cycle';
 
 export interface MindmapLinkRef {
   kind: MindmapLinkKind;
@@ -54,9 +54,7 @@ function relocateProjectRootLink(
   if (dropNodeId === rootTaskId) {
     return cloneTasks(tasks);
   }
-  const next = attachChildToParent(tasks, dropNodeId, rootTaskId);
-  assertAcyclicNormalLinks(next);
-  return next;
+  return attachChildToParent(tasks, dropNodeId, rootTaskId);
 }
 
 function relocateChildLink(
@@ -89,7 +87,6 @@ function relocateChildLink(
   const nextParent = byId.get(dropNodeId);
   if (!nextParent) throw new Error('Unknown parent task.');
   nextParent.dependencies = [...new Set([...nextParent.dependencies, link.to])];
-  assertAcyclicNormalLinks(copy);
   return copy;
 }
 

@@ -47,7 +47,6 @@ import { normalizeRepoUrl } from './cursor-browser';
 import type { BattleplanRepository } from './repository';
 import { collectProjectDarSections, collectTaskDarSections, joinDarSections } from '../core/dar';
 import {
-  assertAcyclicNormalLinks,
   migrateLegacyDependencies,
   migrateMutualLinksToSiblingDependencies,
   normalChildIds,
@@ -61,8 +60,28 @@ import {
   generateTasksInstructionForProject,
 } from '../core/generate-tasks';
 import { defaultDarForOutputType, taskDar, taskInitialPrompt } from '../core/task-fields';
-import { assertTaskBriefReadyForRelease } from '../core/task-brief';
+import {
+  assertTaskBriefReadyForRelease,
+  formatTaskBriefMarkdown,
+  mergeTaskBriefWithDefaults,
+  type TaskBrief,
+  type TaskBriefBuildInput,
+} from '../core/task-brief';
 import { isDispatchableNodeKind } from '../core/task-node-kind';
+import { defaultConnectorForTask } from '../core/connector-defaults';
+import { applyLifecycleBriefDefaults } from '../core/task-lifecycle';
+import { autoDispatchBatch, graphEdgesForRun } from '../core/task-ready';
+import {
+  applyGraphEdgesToLegacyFields,
+  ensureProjectTaskGraph,
+  mergeLegacyTreeOrderingIntoGraph,
+  prerequisitesMet,
+  rebuildGraphEdgesFromLegacy,
+  seedProjectGraphDefaults,
+  validateTaskGraphEdges,
+} from '../core/task-graph';
+import { buildTaskHandoff } from '../core/task-handoff';
+import { normalParentIds } from '../core/dependencies';
 import type { LoopMode, TaskNodeKind } from '../core/task-node-kind';
 import type { TaskBrief } from '../core/task-brief';
 import { applyTaskStatusTransition, assertTaskTransition, type TaskTransitionTrigger } from '../core/task-state-machine';
@@ -106,6 +125,29 @@ interface NormalizedDraft {
   loop_mode?: LoopMode;
   brief?: TaskBrief;
   connector_kind?: TaskConnectorKind;
+  lifecycle_phase?: import('../core/models').LifecyclePhase;
+}
+
+function briefBuildInput(
+  task: ProjectTask,
+  project: Project,
+): TaskBriefBuildInput {
+  return {
+    title: task.title,
+    initialPrompt: taskInitialPrompt(task),
+    dar: taskDar(task),
+    outputType: task.output_type,
+    nodeKind: task.node_kind,
+    projectDar: project.dar,
+    repoUrl: project.repo_url,
+    lifecyclePhase: task.lifecycle_phase,
+  };
+}
+
+function completeBriefForTask(task: ProjectTask, project: Project, existing?: TaskBrief): TaskBrief {
+  const input = briefBuildInput(task, project);
+  const defaults = applyLifecycleBriefDefaults(input, task.lifecycle_phase);
+  return mergeTaskBriefWithDefaults(existing, defaults);
 }
 
 export class LocalEngine {
@@ -306,13 +348,40 @@ export class LocalEngine {
 
   async listTasks(projectId: string): Promise<ProjectTask[]> {
     await this.seedAgentLibraryForProject(projectId);
+    let project = await this.requireProject(projectId);
+    if (seedProjectGraphDefaults(project)) {
+      project.updated_at = this.now();
+      await this.repo.saveProject(project);
+    }
     const tasks = await this.repo.listTasks(projectId);
     let migrated = migrateLegacyDependencies(tasks);
     migrated = migrateMutualLinksToSiblingDependencies(tasks) || migrated;
     if (migrated) {
       await this.repo.saveTasks(tasks);
     }
+    if (!project.task_graph_edges?.length) {
+      project = await this.requireProject(projectId);
+      project.task_graph_edges = rebuildGraphEdgesFromLegacy(tasks);
+      project.updated_at = this.now();
+      await this.repo.saveProject(project);
+    }
     return tasks;
+  }
+
+  async updateProjectTaskGraph(projectId: string, edges: import('../core/task-graph').TaskGraphEdge[]): Promise<ProjectTask[]> {
+    const project = await this.requireProject(projectId);
+    const tasks = await this.repo.listTasks(projectId);
+    const taskIds = new Set(tasks.map((task) => task.task_id));
+    validateTaskGraphEdges(edges, taskIds);
+    project.task_graph_edges = edges;
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    const synced = applyGraphEdgesToLegacyFields(tasks, edges);
+    for (const task of synced) {
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
+    }
+    return synced;
   }
 
   async createTask(projectId: string, input: {
@@ -380,12 +449,14 @@ export class LocalEngine {
         parent.updated_at = timestamp;
       }
     }
-    assertAcyclicNormalLinks([...existing, task]);
     if (parentId) {
       const parent = existing.find((item) => item.task_id === parentId);
       if (parent) await this.repo.saveTask(parent);
     }
+    task.brief = completeBriefForTask(task, project);
+    task.connector_kind = task.connector_kind ?? defaultConnectorForTask(task, project);
     await this.repo.saveTask(task);
+    await this.persistGraphAfterTaskChange(projectId);
     const parent = parentId ? existing.find((item) => item.task_id === parentId) : undefined;
     await this.repo.saveMessage(this.taskNote(
       task,
@@ -404,35 +475,40 @@ export class LocalEngine {
       const dar = defaultDarForOutputType(draft.output_type);
       const initialPrompt = draft.prompt.trim();
       const taskId = this.newId();
+      const skeleton = {
+        task_id: taskId,
+        project_id: projectId,
+        title: draft.title,
+        prompt: dar,
+        dar: dar || undefined,
+        initial_prompt: initialPrompt || undefined,
+        dependencies: [] as string[],
+        status: 'TODO' as const,
+        output_type: draft.output_type,
+        order: existing.length + index,
+        research_agent_id: draft.output_type === 'research' ? project.default_research_agent_id : undefined,
+        code_agent_id: draft.output_type === 'code' ? project.default_code_agent_id : undefined,
+        node_kind: draft.node_kind,
+        loop_mode: draft.loop_mode,
+        connector_kind: draft.connector_kind,
+        backend_idempotency_key: taskId,
+        created_at: timestamp,
+        updated_at: timestamp,
+      };
       return {
-      task_id: taskId,
-      project_id: projectId,
-      title: draft.title,
-      prompt: dar,
-      dar: dar || undefined,
-      initial_prompt: initialPrompt || undefined,
-      dependencies: [],
-      status: 'TODO',
-      output_type: draft.output_type,
-      order: existing.length + index,
-      research_agent_id: draft.output_type === 'research' ? project.default_research_agent_id : undefined,
-      code_agent_id: draft.output_type === 'code' ? project.default_code_agent_id : undefined,
-      node_kind: draft.node_kind,
-      loop_mode: draft.loop_mode,
-      brief: draft.brief,
-      connector_kind: draft.connector_kind,
-      backend_idempotency_key: taskId,
-      created_at: timestamp,
-      updated_at: timestamp,
-    };
+        ...skeleton,
+        brief: completeBriefForTask({ ...skeleton, lifecycle_phase: draft.lifecycle_phase } as ProjectTask, project, draft.brief),
+        connector_kind: draft.connector_kind ?? defaultConnectorForTask({ ...skeleton, lifecycle_phase: draft.lifecycle_phase } as ProjectTask, project),
+        lifecycle_phase: draft.lifecycle_phase,
+      };
     });
     bindDependencies(existing, created, normalized);
     bindSequentialDraftLinks(existing, created, normalized);
     if (parentTaskId) {
       linkCreatedTasksUnderParent(existing, created, parentTaskId);
     }
-    assertAcyclicNormalLinks([...existing, ...created]);
     await this.repo.saveTasks([...existing, ...created]);
+    await this.persistGraphAfterTaskChange(projectId);
     return created;
   }
 
@@ -457,6 +533,7 @@ export class LocalEngine {
       await this.repo.saveTask(task);
       await this.repo.saveMessage(this.taskNote(task, 'Mindmap link updated.'));
     }
+    await this.persistGraphAfterTaskChange(projectId);
     return updated;
   }
 
@@ -473,8 +550,11 @@ export class LocalEngine {
     map_y?: number;
     research_agent_id?: string;
     code_agent_id?: string;
+    brief?: TaskBrief;
+    regenerate_brief?: boolean;
   }): Promise<ProjectTask> {
     const task = await this.requireTask(projectId, taskId);
+    const project = await this.requireProject(projectId);
     const changes: string[] = [];
     if (patch.title !== undefined) {
       const title = patch.title.trim();
@@ -520,17 +600,22 @@ export class LocalEngine {
       }
       task.output_type = patch.output_type;
     }
+    let graphStructureChanged = false;
     if (patch.dependencies !== undefined) {
       const nextDependencies = [...new Set(patch.dependencies)];
-      if (nextDependencies.join(',') !== task.dependencies.join(',')) changes.push('Dependencies updated.');
+      if (nextDependencies.join(',') !== task.dependencies.join(',')) {
+        changes.push('Dependencies updated.');
+        graphStructureChanged = true;
+      }
       task.dependencies = nextDependencies;
-      const tasks = (await this.repo.listTasks(projectId)).map((item) => item.task_id === task.task_id ? task : item);
-      assertAcyclicNormalLinks(tasks);
     }
     if (patch.sibling_dependencies !== undefined) {
       const next = [...new Set(patch.sibling_dependencies.filter((id) => id !== task.task_id))];
       const previous = task.sibling_dependencies ?? [];
-      if (next.join(',') !== previous.join(',')) changes.push('Sibling dependencies updated.');
+      if (next.join(',') !== previous.join(',')) {
+        changes.push('Graph links updated.');
+        graphStructureChanged = true;
+      }
       task.sibling_dependencies = next;
     }
     if (patch.status !== undefined) {
@@ -540,6 +625,9 @@ export class LocalEngine {
       if (patch.status === 'ABANDONED') {
         await this.cascadeAbandonChildren(projectId, task);
       }
+      if (patch.status === 'DONE') {
+        await this.autoDispatchReadyTasks(projectId);
+      }
     }
     if (patch.map_x !== undefined) task.map_x = patch.map_x;
     if (patch.map_y !== undefined) task.map_y = patch.map_y;
@@ -548,6 +636,13 @@ export class LocalEngine {
       if (next !== (task.research_agent_id ?? '')) changes.push('Research agent updated.');
       task.research_agent_id = next || undefined;
     }
+    if (patch.regenerate_brief) {
+      task.brief = completeBriefForTask(task, project);
+      changes.push('Task brief regenerated.');
+    } else if (patch.brief !== undefined) {
+      task.brief = completeBriefForTask(task, project, patch.brief);
+      changes.push('Task brief updated.');
+    }
     if (patch.code_agent_id !== undefined) {
       const next = patch.code_agent_id.trim();
       if (next !== (task.code_agent_id ?? '')) changes.push('Code agent updated.');
@@ -555,6 +650,7 @@ export class LocalEngine {
     }
     task.updated_at = this.now();
     await this.repo.saveTask(task);
+    if (graphStructureChanged) await this.persistGraphAfterTaskChange(projectId);
     if (changes.length > 0) await this.repo.saveMessage(this.taskNote(task, changes.join('\n')));
     return task;
   }
@@ -786,7 +882,7 @@ export class LocalEngine {
     if (!isDispatchableNodeKind(task.node_kind)) {
       throw new Error('Decision and fog nodes are completed in Battleplan, not dispatched to agents.');
     }
-    assertTaskBriefReadyForRelease(task.brief);
+    await this.ensureTaskBrief(task);
     if (task.cursor_agent_id) throw new Error('This task already has a Cursor agent.');
     const initial = taskInitialPrompt(task);
     if (!initial) throw new Error('Initial prompt is required.');
@@ -897,6 +993,18 @@ export class LocalEngine {
     else await this.repo.saveResearchOutput(mergedOutput as import('../core/models').TaskResearchOutput);
     await this.appendPendingChangesFromCommits(task.project_id, task, commits, pull.html_url);
     applyTaskStatusTransition(task, 'DONE', 'approve_merge');
+    const researchPath = task.output_type === 'research'
+      ? (mergedOutput as TaskResearchOutput).path
+      : undefined;
+    task.handoff = buildTaskHandoff({
+      summary: output.pr_message || task.title,
+      branch: mergedOutput.branch,
+      headSha: commits[0]?.sha,
+      artifacts: [researchPath ?? mergedOutput.pr_link].filter(Boolean) as string[],
+      memoryPointerIds: task.context_manifest?.memory_pointer_ids,
+      metadata: { pr_link: pull.html_url, output_type: task.output_type },
+      completedAt: this.now(),
+    });
     task.updated_at = this.now();
     await this.repo.saveTask(task);
     await this.record({
@@ -907,6 +1015,7 @@ export class LocalEngine {
       content: 'Approved. Merged pull request into the base branch.',
       intent: 'approve',
     });
+    await this.autoDispatchReadyTasks(task.project_id);
     return task;
   }
 
@@ -1382,13 +1491,11 @@ export class LocalEngine {
   }
 
   private async assertDependenciesDone(task: ProjectTask): Promise<void> {
+    const project = await this.requireProject(task.project_id);
     const tasks = await this.repo.listTasks(task.project_id);
-    const byId = new Map(tasks.map((item) => [item.task_id, item]));
-    for (const siblingId of siblingDependencyIds(task)) {
-      const other = byId.get(siblingId);
-      if (!other || other.status !== 'DONE') {
-        throw new Error('Sibling dependencies must be DONE before this task can start.');
-      }
+    const edges = ensureProjectTaskGraph(project, tasks);
+    if (!prerequisitesMet(task, tasks, edges, { includeTree: false })) {
+      throw new Error('Task graph prerequisites are not satisfied (ordering/fork/join/cycle upstream tasks must be DONE, or cycle break must apply).');
     }
   }
 
@@ -1452,6 +1559,12 @@ export class LocalEngine {
       lines.push('Implement the task in code on the agent branch.');
     }
     lines.push(`Task title: ${task.title}`);
+    if (task.brief) {
+      lines.push('Task brief:', formatTaskBriefMarkdown(task.brief));
+    }
+    const tasks = await this.repo.listTasks(task.project_id);
+    const upstream = this.upstreamHandoffMarkdown(task, tasks);
+    if (upstream) lines.push(upstream);
     const siblingIds = siblingDependencyIds(task);
     if (siblingIds.length > 0) {
       lines.push(`This task depends on these completed task ids: ${siblingIds.join(', ')}.`);
@@ -1530,14 +1643,16 @@ export class LocalEngine {
   ): Promise<ChatMessage> {
     this.markTaskDoingOnAgentChat(task);
     const dar = joinDarSections(await collectTaskDarSections(task, this.darLookup()));
+    const briefSection = task.brief ? formatTaskBriefMarkdown(task.brief) : '';
     const systemPrompt = joinDarSections([
       optionString(agent.options, 'system_prompt'),
       dar,
+      briefSection,
     ]);
     const prior = await this.repo.listTaskMessages(task.task_id);
     const turns = researchTurnsFromMessages(prior);
     const content = options?.isFirstExecute
-      ? joinDarSections([dar, userMessage])
+      ? joinDarSections([dar, briefSection, userMessage])
       : userMessage;
     turns.push({ role: 'user', content });
     const result = await sendResearchAgentChat(agent, turns, systemPrompt);
@@ -1667,6 +1782,58 @@ export class LocalEngine {
     return saved;
   }
 
+  private upstreamHandoffMarkdown(task: ProjectTask, tasks: ProjectTask[]): string {
+    const blocks: string[] = [];
+    for (const parentId of normalParentIds(task.task_id, tasks)) {
+      const parent = tasks.find((item) => item.task_id === parentId);
+      const handoff = parent?.handoff;
+      if (!handoff?.summary?.trim()) continue;
+      blocks.push([
+        `Upstream handoff from "${parent!.title}":`,
+        handoff.summary,
+        handoff.branch ? `branch: ${handoff.branch}` : '',
+        handoff.head_sha ? `head_sha: ${handoff.head_sha}` : '',
+        handoff.memory_pointer_ids.length ? `memory: ${handoff.memory_pointer_ids.join(', ')}` : '',
+      ].filter(Boolean).join('\n'));
+    }
+    return blocks.join('\n\n');
+  }
+
+  private async persistGraphAfterTaskChange(projectId: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    const tasks = await this.repo.listTasks(projectId);
+    project.task_graph_edges = mergeLegacyTreeOrderingIntoGraph(project.task_graph_edges, tasks);
+    validateTaskGraphEdges(project.task_graph_edges, new Set(tasks.map((task) => task.task_id)));
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+  }
+
+  private async autoDispatchReadyTasks(projectId: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    const tasks = await this.repo.listTasks(projectId);
+    const edges = graphEdgesForRun(project, tasks);
+    const batch = autoDispatchBatch(tasks, edges);
+    for (const candidate of batch) {
+      try {
+        await this.executeTask(candidate.task_id);
+      } catch {
+        // Task stays TODO when prerequisites or config block dispatch.
+      }
+    }
+  }
+
+  private async ensureTaskBrief(task: ProjectTask): Promise<void> {
+    const project = await this.requireProject(task.project_id);
+    const next = completeBriefForTask(task, project, task.brief);
+    assertTaskBriefReadyForRelease(next);
+    const unchanged = task.brief && JSON.stringify(task.brief) === JSON.stringify(next);
+    task.brief = next;
+    if (!unchanged) {
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
+    }
+  }
+
   private async requireProject(projectId: string): Promise<Project> {
     const project = await this.repo.getProject(projectId);
     if (!project) throw new Error('Project not found.');
@@ -1706,6 +1873,7 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
       loop_mode: item.loop_mode,
       brief: item.brief,
       connector_kind: item.connector_kind,
+      lifecycle_phase: item.lifecycle_phase,
     };
     if (types.length === 1) {
       normalized.push({ title, prompt, output_type: types[0], depends_on: depends, sequential_with: sequential, ...meta });

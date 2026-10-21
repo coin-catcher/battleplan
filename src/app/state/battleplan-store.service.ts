@@ -699,6 +699,7 @@ export class BattleplanStore {
         ? { x: project.map_x as number, y: project.map_y as number }
         : undefined,
       project.status,
+      project.task_graph_edges,
     );
     const source = layout.nodes.find((node) => node.id === input.sourceId);
     if (!source) return null;
@@ -766,6 +767,17 @@ export class BattleplanStore {
     });
   }
 
+  async updateProjectTaskGraph(edges: import('../core/task-graph').TaskGraphEdge[]): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    await this.run(async () => {
+      const tasks = await this.api.updateProjectTaskGraph(projectId, edges);
+      for (const task of tasks) this.replaceTask(task);
+      this.projects.set(await this.api.listProjects());
+      this.notice.set('Task graph updated.');
+    });
+  }
+
   async saveTask(patch: {
     title: string;
     dar: string;
@@ -775,6 +787,8 @@ export class BattleplanStore {
     sibling_dependencies: string[];
     research_agent_id?: string;
     code_agent_id?: string;
+    brief?: import('../core/task-brief').TaskBrief;
+    regenerate_brief?: boolean;
   }): Promise<void> {
     const task = this.selectedTask();
     if (!task) return;
