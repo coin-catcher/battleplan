@@ -33,6 +33,23 @@ Battleplan already orchestrates ideation (mindmap), task execution (Cursor + Age
 - Extended `ProjectTask`, `TaskDraft`, parse/create/execute paths
 - `docs/GRAPH_OF_AGENTS.md` — architecture index
 
+## Feature coverage (review feedback traceability)
+
+| Desired capability | TASKS.md | Foundation code today |
+|--------------------|----------|------------------------|
+| Mindmap + editable task graph, outputs along edges | Tasks 2, 8, 17 | `dependencies`, `sibling_dependencies`, `graph-delta.ts` |
+| Explicit memory in agent context | Tasks 9–10 | — |
+| Memory contents / relationships / metrics view | Task 10 | — |
+| Kanban (task, agent, status) | Task 11 | Status on `ProjectTask`; connector mapping in `agent-connector.ts` |
+| Config for agents + cloud resources | Tasks 4, 6, 13 | Agent Library in `project_config.json` |
+| Desktop (Windows, Linux, macOS) | Task 18 | Electron app (existing) |
+| Interactive grilling → task graph | Tasks 3, 14 | `node_kind` decision/fog; graph-delta model |
+| Multi-agent CI/CD (parallel code agents) | Tasks 15–16 | `sequential_with`, `docs/AGENT_BRANCH_AND_PRS.md` |
+| Hermes local + Cursor cloud in one graph | Tasks 5–7 | `connector_kind`, Hermes status map |
+| pstack brief + skill-stack ideas | Task 1 | `task-brief.ts`, optional on Execute |
+
+**Interview status:** Round 1 frontier questions are open in the Graph of Agents agent chat until we confirm the design tree; no further implementation beyond foundation until you confirm shared understanding.
+
 ## Skill-stack presets (recommended)
 
 | Use | Stack |
