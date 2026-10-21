@@ -68,6 +68,13 @@ import {
 } from './core/task-brief';
 import { applyLifecycleBriefDefaults } from './core/task-lifecycle';
 import { buildKanbanBoard } from './core/kanban-board';
+import {
+  edgeKey,
+  incomingEdges,
+  TASK_EDGE_KINDS,
+  type TaskEdgeKind,
+  type TaskGraphEdge,
+} from './core/task-graph';
 import { normalChildIds } from './core/dependencies';
 import { libraryAgentsForKind, taskResearchChatStarted } from './core/agent-bindings';
 import { BattleplanStore } from './state/battleplan-store.service';
@@ -127,7 +134,13 @@ export class AppComponent implements OnInit {
       ?? (project && Number.isFinite(project.map_x) && Number.isFinite(project.map_y)
         ? { x: project.map_x as number, y: project.map_y as number }
         : undefined);
-    return layoutMindmap(project?.title ?? 'Project', tasks, projectPin, project?.status);
+    return layoutMindmap(
+      project?.title ?? 'Project',
+      tasks,
+      projectPin,
+      project?.status,
+      project?.task_graph_edges,
+    );
   });
 
   apiKey = '';
@@ -162,6 +175,11 @@ export class AppComponent implements OnInit {
   taskBriefForm: TaskBrief = emptyTaskBrief();
   readonly taskBriefFields = TASK_BRIEF_FIELDS;
   readonly projectViewMode = signal<'mindmap' | 'kanban'>('mindmap');
+  graphEdgeToTaskId = '';
+  graphEdgeKind: TaskEdgeKind = 'ordering';
+  graphEdgeBreakCondition = '';
+  readonly taskEdgeKinds = TASK_EDGE_KINDS;
+
   readonly kanbanBoard = computed(() => {
     const project = this.store.project();
     if (!project) return [];
@@ -1916,6 +1934,43 @@ export class AppComponent implements OnInit {
 
   openKanbanTask(taskId: string): void {
     void this.store.openTask(taskId);
+  }
+
+  incomingGraphEdges(taskId: string): TaskGraphEdge[] {
+    const edges = this.store.project()?.task_graph_edges ?? [];
+    return incomingEdges(taskId, edges);
+  }
+
+  async addTaskGraphEdge(taskId: string): Promise<void> {
+    const to = this.graphEdgeToTaskId.trim();
+    if (!to || to === taskId) return;
+    const project = this.store.project();
+    if (!project) return;
+    const edges = [...(project.task_graph_edges ?? [])];
+    const kind = this.graphEdgeKind;
+    const key = edgeKey(to, taskId, kind);
+    if (edges.some((edge) => edge.edge_id === key)) return;
+    edges.push({
+      edge_id: key,
+      from_task_id: to,
+      to_task_id: taskId,
+      kind,
+      break_condition: this.graphEdgeBreakCondition.trim() || undefined,
+    });
+    await this.store.updateProjectTaskGraph(edges);
+    this.graphEdgeToTaskId = '';
+    this.graphEdgeBreakCondition = '';
+  }
+
+  taskTitle(taskId: string): string {
+    return this.store.tasks().find((item) => item.task_id === taskId)?.title ?? taskId;
+  }
+
+  async removeTaskGraphEdge(edgeId: string): Promise<void> {
+    const project = this.store.project();
+    if (!project) return;
+    const edges = (project.task_graph_edges ?? []).filter((edge) => edge.edge_id !== edgeId);
+    await this.store.updateProjectTaskGraph(edges);
   }
 
   taskBriefLabel(field: (typeof TASK_BRIEF_FIELDS)[number]): string {

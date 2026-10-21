@@ -53,6 +53,8 @@ export interface Project {
   default_hermes_connector_id?: string;
   /** Local Mnemosyne store path (hybrid memory v1). */
   mnemosyne_base_path?: string;
+  /** Unified task graph edges (tree, ordering, fork, join, cycle). */
+  task_graph_edges?: import('./task-graph').TaskGraphEdge[];
   created_at: string;
   updated_at: string;
 }

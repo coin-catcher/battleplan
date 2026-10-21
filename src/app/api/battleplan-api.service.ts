@@ -118,6 +118,10 @@ export class BattleplanApi {
     return this.engine.deleteTask(projectId, taskId);
   }
 
+  updateProjectTaskGraph(projectId: string, edges: import('../core/task-graph').TaskGraphEdge[]): Promise<ProjectTask[]> {
+    return this.engine.updateProjectTaskGraph(projectId, edges);
+  }
+
   reorderTasks(projectId: string, taskIds: string[]): Promise<ProjectTask[]> {
     return this.engine.reorderTasks(projectId, taskIds);
   }

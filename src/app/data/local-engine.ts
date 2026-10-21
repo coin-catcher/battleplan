@@ -47,7 +47,6 @@ import { normalizeRepoUrl } from './cursor-browser';
 import type { BattleplanRepository } from './repository';
 import { collectProjectDarSections, collectTaskDarSections, joinDarSections } from '../core/dar';
 import {
-  assertAcyclicNormalLinks,
   migrateLegacyDependencies,
   migrateMutualLinksToSiblingDependencies,
   normalChildIds,
@@ -71,7 +70,15 @@ import {
 import { isDispatchableNodeKind } from '../core/task-node-kind';
 import { defaultConnectorForTask } from '../core/connector-defaults';
 import { applyLifecycleBriefDefaults } from '../core/task-lifecycle';
-import { autoDispatchBatch } from '../core/task-ready';
+import { autoDispatchBatch, graphEdgesForRun } from '../core/task-ready';
+import {
+  applyGraphEdgesToLegacyFields,
+  ensureProjectTaskGraph,
+  prerequisitesMet,
+  rebuildGraphEdgesFromLegacy,
+  seedProjectGraphDefaults,
+  validateTaskGraphEdges,
+} from '../core/task-graph';
 import { buildTaskHandoff } from '../core/task-handoff';
 import { normalParentIds } from '../core/dependencies';
 import type { LoopMode, TaskNodeKind } from '../core/task-node-kind';
@@ -340,13 +347,40 @@ export class LocalEngine {
 
   async listTasks(projectId: string): Promise<ProjectTask[]> {
     await this.seedAgentLibraryForProject(projectId);
+    let project = await this.requireProject(projectId);
+    if (seedProjectGraphDefaults(project)) {
+      project.updated_at = this.now();
+      await this.repo.saveProject(project);
+    }
     const tasks = await this.repo.listTasks(projectId);
     let migrated = migrateLegacyDependencies(tasks);
     migrated = migrateMutualLinksToSiblingDependencies(tasks) || migrated;
     if (migrated) {
       await this.repo.saveTasks(tasks);
     }
+    if (!project.task_graph_edges?.length) {
+      project = await this.requireProject(projectId);
+      project.task_graph_edges = rebuildGraphEdgesFromLegacy(tasks);
+      project.updated_at = this.now();
+      await this.repo.saveProject(project);
+    }
     return tasks;
+  }
+
+  async updateProjectTaskGraph(projectId: string, edges: import('../core/task-graph').TaskGraphEdge[]): Promise<ProjectTask[]> {
+    const project = await this.requireProject(projectId);
+    const tasks = await this.repo.listTasks(projectId);
+    const taskIds = new Set(tasks.map((task) => task.task_id));
+    validateTaskGraphEdges(edges, taskIds);
+    project.task_graph_edges = edges;
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    const synced = applyGraphEdgesToLegacyFields(tasks, edges);
+    for (const task of synced) {
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
+    }
+    return synced;
   }
 
   async createTask(projectId: string, input: {
@@ -414,7 +448,6 @@ export class LocalEngine {
         parent.updated_at = timestamp;
       }
     }
-    assertAcyclicNormalLinks([...existing, task]);
     if (parentId) {
       const parent = existing.find((item) => item.task_id === parentId);
       if (parent) await this.repo.saveTask(parent);
@@ -422,6 +455,7 @@ export class LocalEngine {
     task.brief = completeBriefForTask(task, project);
     task.connector_kind = task.connector_kind ?? defaultConnectorForTask(task, project);
     await this.repo.saveTask(task);
+    await this.persistGraphAfterTaskChange(projectId);
     const parent = parentId ? existing.find((item) => item.task_id === parentId) : undefined;
     await this.repo.saveMessage(this.taskNote(
       task,
@@ -472,8 +506,8 @@ export class LocalEngine {
     if (parentTaskId) {
       linkCreatedTasksUnderParent(existing, created, parentTaskId);
     }
-    assertAcyclicNormalLinks([...existing, ...created]);
     await this.repo.saveTasks([...existing, ...created]);
+    await this.persistGraphAfterTaskChange(projectId);
     return created;
   }
 
@@ -498,6 +532,7 @@ export class LocalEngine {
       await this.repo.saveTask(task);
       await this.repo.saveMessage(this.taskNote(task, 'Mindmap link updated.'));
     }
+    await this.persistGraphAfterTaskChange(projectId);
     return updated;
   }
 
@@ -564,17 +599,22 @@ export class LocalEngine {
       }
       task.output_type = patch.output_type;
     }
+    let graphStructureChanged = false;
     if (patch.dependencies !== undefined) {
       const nextDependencies = [...new Set(patch.dependencies)];
-      if (nextDependencies.join(',') !== task.dependencies.join(',')) changes.push('Dependencies updated.');
+      if (nextDependencies.join(',') !== task.dependencies.join(',')) {
+        changes.push('Dependencies updated.');
+        graphStructureChanged = true;
+      }
       task.dependencies = nextDependencies;
-      const tasks = (await this.repo.listTasks(projectId)).map((item) => item.task_id === task.task_id ? task : item);
-      assertAcyclicNormalLinks(tasks);
     }
     if (patch.sibling_dependencies !== undefined) {
       const next = [...new Set(patch.sibling_dependencies.filter((id) => id !== task.task_id))];
       const previous = task.sibling_dependencies ?? [];
-      if (next.join(',') !== previous.join(',')) changes.push('Sibling dependencies updated.');
+      if (next.join(',') !== previous.join(',')) {
+        changes.push('Graph links updated.');
+        graphStructureChanged = true;
+      }
       task.sibling_dependencies = next;
     }
     if (patch.status !== undefined) {
@@ -597,7 +637,6 @@ export class LocalEngine {
     }
     if (patch.regenerate_brief) {
       task.brief = completeBriefForTask(task, project);
-    task.connector_kind = task.connector_kind ?? defaultConnectorForTask(task, project);
       changes.push('Task brief regenerated.');
     } else if (patch.brief !== undefined) {
       task.brief = completeBriefForTask(task, project, patch.brief);
@@ -610,6 +649,7 @@ export class LocalEngine {
     }
     task.updated_at = this.now();
     await this.repo.saveTask(task);
+    if (graphStructureChanged) await this.persistGraphAfterTaskChange(projectId);
     if (changes.length > 0) await this.repo.saveMessage(this.taskNote(task, changes.join('\n')));
     return task;
   }
@@ -1450,13 +1490,11 @@ export class LocalEngine {
   }
 
   private async assertDependenciesDone(task: ProjectTask): Promise<void> {
+    const project = await this.requireProject(task.project_id);
     const tasks = await this.repo.listTasks(task.project_id);
-    const byId = new Map(tasks.map((item) => [item.task_id, item]));
-    for (const siblingId of siblingDependencyIds(task)) {
-      const other = byId.get(siblingId);
-      if (!other || other.status !== 'DONE') {
-        throw new Error('Sibling dependencies must be DONE before this task can start.');
-      }
+    const edges = ensureProjectTaskGraph(project, tasks);
+    if (!prerequisitesMet(task, tasks, edges, { includeTree: false })) {
+      throw new Error('Task graph prerequisites are not satisfied (ordering/fork/join/cycle upstream tasks must be DONE, or cycle break must apply).');
     }
   }
 
@@ -1760,9 +1798,20 @@ export class LocalEngine {
     return blocks.join('\n\n');
   }
 
-  private async autoDispatchReadyTasks(projectId: string): Promise<void> {
+  private async persistGraphAfterTaskChange(projectId: string): Promise<void> {
+    const project = await this.requireProject(projectId);
     const tasks = await this.repo.listTasks(projectId);
-    const batch = autoDispatchBatch(tasks);
+    project.task_graph_edges = rebuildGraphEdgesFromLegacy(tasks);
+    validateTaskGraphEdges(project.task_graph_edges, new Set(tasks.map((task) => task.task_id)));
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+  }
+
+  private async autoDispatchReadyTasks(projectId: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    const tasks = await this.repo.listTasks(projectId);
+    const edges = graphEdgesForRun(project, tasks);
+    const batch = autoDispatchBatch(tasks, edges);
     for (const candidate of batch) {
       try {
         await this.executeTask(candidate.task_id);

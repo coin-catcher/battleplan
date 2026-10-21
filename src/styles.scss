@@ -322,6 +322,20 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   h3 { margin: 0; font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.85; }
 }
 
+.graph-edge-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
 .kanban-card {
   text-align: left;
   border: 1px solid var(--line);

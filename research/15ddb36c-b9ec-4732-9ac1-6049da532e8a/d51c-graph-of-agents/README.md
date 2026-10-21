@@ -63,6 +63,9 @@ Battleplan already orchestrates ideation (mindmap), task execution (Cursor + Age
 | 8 | Mindmap + kanban v1 (**kanban shipped** in sidebar toggle) |
 | R2 | Standard handoff schema; default connectors; **auto-dispatch** when parents DONE (not manual release) |
 | R2 Q4 | Lifecycle phases discover/architect/build/verify/ship — **Discover** may propose fan-in/out graphs freely |
+| R3 Q1 | BLOCKED tasks never auto-dispatch |
+| R3 Q2 | Unified `task_graph_edges` on project (tree, ordering, fork, join, cycle + break_condition); mindmap + task editor |
+| R3 Q3 | Default `mnemosyne/{project_id}` under project data dir |
 
 ## Skill-stack presets (recommended)
 
