@@ -67,7 +67,11 @@ import {
   type TaskBrief,
 } from './core/task-brief';
 import { applyLifecycleBriefDefaults } from './core/task-lifecycle';
-import { buildKanbanBoard } from './core/kanban-board';
+import {
+  buildKanbanBoard,
+  listKanbanScopeOptions,
+  type KanbanScopeId,
+} from './core/kanban-board';
 import {
   edgeKey,
   incomingEdges,
@@ -178,6 +182,8 @@ export class AppComponent implements OnInit {
   taskBriefForm: TaskBrief = emptyTaskBrief();
   readonly taskBriefFields = TASK_BRIEF_FIELDS;
   readonly projectViewMode = signal<'mindmap' | 'kanban'>('mindmap');
+  readonly kanbanScopeId = signal<KanbanScopeId>('main');
+  private kanbanScopeProjectId = '';
   graphEdgeToTaskId = '';
   graphEdgeKind: TaskEdgeKind = 'ordering';
   graphEdgeBreakCondition = '';
@@ -186,10 +192,12 @@ export class AppComponent implements OnInit {
   readonly taskEdgeKindLabel = taskEdgeKindLabel;
   private taskLinkSyncKey = '';
 
+  readonly kanbanScopeOptions = computed(() => listKanbanScopeOptions(this.store.tasks()));
+
   readonly kanbanBoard = computed(() => {
     const project = this.store.project();
     if (!project) return [];
-    return buildKanbanBoard(this.store.tasks(), project, this.store.agents());
+    return buildKanbanBoard(this.store.tasks(), project, this.store.agents(), this.kanbanScopeId());
   });
   subprojectInitialPrompt = '';
   outputType: OutputType = 'code';
@@ -392,6 +400,21 @@ export class AppComponent implements OnInit {
         projects,
         themeId: this.themeId(),
       });
+    });
+
+    effect(() => {
+      const projectId = this.store.projectId();
+      if (!projectId) return;
+      if (this.kanbanScopeProjectId === projectId) return;
+      this.kanbanScopeProjectId = projectId;
+      this.kanbanScopeId.set('main');
+    });
+
+    effect(() => {
+      const options = this.kanbanScopeOptions();
+      const current = this.kanbanScopeId();
+      if (options.some((option) => option.id === current)) return;
+      this.kanbanScopeId.set(options[0]?.id ?? 'main');
     });
     effect((onCleanup) => {
       if (!this.convertPanel()) return;
@@ -1938,6 +1961,10 @@ export class AppComponent implements OnInit {
 
   setProjectViewMode(mode: 'mindmap' | 'kanban'): void {
     this.projectViewMode.set(mode);
+  }
+
+  setKanbanScope(scopeId: KanbanScopeId): void {
+    this.kanbanScopeId.set(scopeId);
   }
 
   openKanbanTask(taskId: string): void {
