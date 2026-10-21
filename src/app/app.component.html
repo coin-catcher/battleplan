@@ -533,8 +533,8 @@
       }
       @case ('task') {
         @if (store.selectedTask(); as task) {
-          <section class="panel chat-layout">
-            <div class="chat-editor-chrome">
+          <section class="panel chat-layout task-page">
+            <div class="task-page-chrome">
               <div class="toolbar">
                 <button type="button" class="danger" [disabled]="store.busy()" (click)="deleteTask(task)">Delete</button>
                 <button type="button" class="accent" [disabled]="store.busy()" (click)="store.generateTasks()">Generate Tasks</button>
@@ -555,67 +555,134 @@
                   <a class="text-link" [href]="task.cursor_chat_link" target="_blank" rel="noopener">Open task agent</a>
                 }
               </div>
-              <header class="panel-head">
-                <div>
-                  <p class="eyebrow">{{ task.output_type }} task · {{ task.status }}</p>
-                  <h2>{{ task.title }}</h2>
+              <nav class="task-page-tabs" aria-label="Task sections">
+                <button type="button" class="task-tab" [class.active]="taskPageTab() === 'chat'" (click)="setTaskPageTab('chat')">Chat</button>
+                <button type="button" class="task-tab" [class.active]="taskPageTab() === 'details'" (click)="setTaskPageTab('details')">Task Details</button>
+                <button type="button" class="task-tab" [class.active]="taskPageTab() === 'graph'" (click)="setTaskPageTab('graph')">Graph</button>
+              </nav>
+            </div>
+
+            @if (taskPageTab() === 'chat') {
+              <div class="task-chat-panel">
+                <div class="task-meta-row">
+                  <label class="field task-meta-field grow">
+                    <span>Title</span>
+                    <input [(ngModel)]="taskTitle" [name]="'taskTitle-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" />
+                  </label>
+                  <label class="field task-meta-field">
+                    <span>Type</span>
+                    <select [(ngModel)]="outputType" name="outputType" (change)="onEditorFieldAutoSave()">
+                      <option value="code">code</option>
+                      <option value="research">research</option>
+                      <option value="subproject">subproject</option>
+                    </select>
+                  </label>
+                  <label class="field task-meta-field">
+                    <span>Status</span>
+                    <select [value]="task.status" (change)="onStatusChange(task.task_id, $event)">
+                      @for (status of statuses; track status) {
+                        <option [value]="status">{{ status }}</option>
+                      }
+                    </select>
+                  </label>
+                  @if (task.output_type === 'research') {
+                    <label class="field task-meta-field">
+                      <span>Agent</span>
+                      <select [(ngModel)]="taskResearchAgentId" [name]="'taskResearchAgent-' + task.task_id" (change)="onEditorFieldAutoSave()">
+                        <option value="">Project default</option>
+                        @for (agent of libraryAgents('research'); track agent.agent_id) {
+                          <option [value]="agent.agent_id">{{ agent.name }}</option>
+                        }
+                      </select>
+                    </label>
+                  }
+                  @if (task.output_type === 'code') {
+                    <label class="field task-meta-field">
+                      <span>Agent</span>
+                      <select [(ngModel)]="taskCodeAgentId" [name]="'taskCodeAgent-' + task.task_id" (change)="onEditorFieldAutoSave()">
+                        <option value="">Project default</option>
+                        @for (agent of libraryAgents('code'); track agent.agent_id) {
+                          <option [value]="agent.agent_id">{{ agent.name }}</option>
+                        }
+                      </select>
+                    </label>
+                  }
+                  @if (task.output_type === 'subproject') {
+                    <span class="task-meta-hint">Subproject (no agent)</span>
+                  }
                 </div>
-              </header>
-              <div class="config">
-                <label class="field">
-                  <span>Title</span>
-                  <input [(ngModel)]="taskTitle" [name]="'taskTitle-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" />
-                </label>
-                <label class="field">
-                  <span>Output</span>
-                  <select [(ngModel)]="outputType" name="outputType" (change)="onEditorFieldAutoSave()">
-                    <option value="code">code</option>
-                    <option value="research">research</option>
-                    <option value="subproject">subproject</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>Status</span>
-                  <select [value]="task.status" (change)="onStatusChange(task.task_id, $event)">
-                    @for (status of statuses; track status) {
-                      <option [value]="status">{{ status }}</option>
+                @if (!taskAgentStarted(task)) {
+                  <div class="task-pre-chat">
+                    <label class="field">
+                      <span>Initial Prompt</span>
+                      <textarea rows="3" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this task."></textarea>
+                    </label>
+                    <div class="composer-actions">
+                      @if (store.chatActionPending() === 'execute') {
+                        <span class="inline-spinner" aria-label="Executing task"></span>
+                      } @else {
+                        <button type="button" class="accent" [disabled]="chatActionsLocked() || !taskInitialPrompt.trim() || task.status === 'ABANDONED'" (click)="executeTask()">Execute</button>
+                      }
+                      @if (taskHasChildren(task.task_id)) {
+                        <button type="button" class="ghost" [disabled]="chatActionsLocked()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
+                      }
+                    </div>
+                  </div>
+                }
+                <div #chatTranscript class="chat-transcript-scroll transcript" aria-live="polite">
+                  @for (item of timeline(); track item.id) {
+                    @if (item.kind === 'message') {
+                      <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
+                        <p class="who">{{ speaker(item.message) }}</p>
+                        <markdown class="md chat-md" mermaid [data]="planMarkdown(item.message.content)"></markdown>
+                      </article>
+                    } @else {
+                      <article class="artifact">
+                        <header>{{ item.artifact.name }}</header>
+                        @if (markdownArtifact(item.artifact) && item.artifact.text) {
+                          <markdown class="md" mermaid [data]="planMarkdown(item.artifact.text)"></markdown>
+                        } @else if (item.artifact.text) {
+                          <pre>{{ item.artifact.text }}</pre>
+                        } @else if (item.artifact.content_type === 'image' && item.artifact.url) {
+                          <img [src]="item.artifact.url" [alt]="item.artifact.name" />
+                        } @else if (item.artifact.url) {
+                          <a class="text-link" [href]="item.artifact.url" target="_blank" rel="noopener">Download {{ item.artifact.name }}</a>
+                        }
+                      </article>
                     }
-                  </select>
-                </label>
-                @if (task.output_type === 'research') {
-                  <label class="field">
-                    <span>Research agent</span>
-                    <select [(ngModel)]="taskResearchAgentId" [name]="'taskResearchAgent-' + task.task_id" (change)="onEditorFieldAutoSave()">
-                      <option value="">Project default</option>
-                      @for (agent of libraryAgents('research'); track agent.agent_id) {
-                        <option [value]="agent.agent_id">{{ agent.name }}</option>
-                      }
-                    </select>
-                  </label>
-                }
-                @if (task.output_type === 'code') {
-                  <label class="field">
-                    <span>Code agent</span>
-                    <select [(ngModel)]="taskCodeAgentId" [name]="'taskCodeAgent-' + task.task_id" (change)="onEditorFieldAutoSave()">
-                      <option value="">Project default</option>
-                      @for (agent of libraryAgents('code'); track agent.agent_id) {
-                        <option [value]="agent.agent_id">{{ agent.name }}</option>
-                      }
-                    </select>
-                  </label>
-                }
-              </div>
-              <details class="editor-disclosure" open>
-                <summary>Task brief</summary>
-                <p class="eyebrow">Canonical task definition for agents (pstack-style). Defaults are generated from title and prompts; edit or regenerate anytime before Execute.</p>
-                <div class="composer-actions">
-                  <button type="button" class="ghost" (click)="regenerateTaskBrief()">Regenerate defaults</button>
+                  }
+                  @if (store.pendingReply()) {
+                    <p class="pending">Waiting for Cursor…</p>
+                  }
                 </div>
+                <div class="composer">
+                  <label class="sr-only" for="task-chat">Message</label>
+                  <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat." [disabled]="!taskAgentStarted(task)"></textarea>
+                  <div class="composer-actions">
+                    @if (store.chatActionPending() === 'send') {
+                      <span class="inline-spinner" aria-label="Sending message"></span>
+                    } @else {
+                      <button type="button" class="primary" [disabled]="chatActionsLocked() || !chatDraft.trim() || !taskAgentStarted(task)" (click)="sendChat()">Send</button>
+                    }
+                  </div>
+                </div>
+              </div>
+            }
+
+            @if (taskPageTab() === 'details') {
+              <div class="task-details-panel">
+                <header class="task-details-head">
+                  <div>
+                    <h2 class="task-details-title">{{ taskTitle }}</h2>
+                    <p class="eyebrow">Task brief · Context and Forbidden inherit to child tasks in agent prompts</p>
+                  </div>
+                  <button type="button" class="ghost" (click)="regenerateTaskBrief()">Regenerate defaults</button>
+                </header>
                 @for (field of taskBriefFields; track field) {
                   <label class="field">
                     <span>{{ taskBriefLabel(field) }}</span>
                     <textarea
-                      rows="3"
+                      [attr.rows]="field === 'context' || field === 'forbidden' ? 5 : 3"
                       [(ngModel)]="taskBriefForm[field]"
                       [name]="'taskBrief-' + field + '-' + task.task_id"
                       (focus)="onTaskFieldFocus()"
@@ -623,135 +690,139 @@
                     ></textarea>
                   </label>
                 }
-              </details>
-              <details class="editor-disclosure">
-                <summary>Data and Rules</summary>
-                <label class="field">
-                  <span class="sr-only">Data and Rules</span>
-                  <textarea rows="4" [(ngModel)]="taskDar" [name]="'taskDar-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Persistent context for this task. Prepended when the agent chat starts."></textarea>
-                </label>
-              </details>
-              @if (!taskAgentStarted(task)) {
-                <label class="field">
-                  <span>Initial Prompt</span>
-                  <textarea rows="4" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this task. Save and return anytime before starting the agent."></textarea>
-                </label>
-                <div class="composer-actions">
-                  @if (store.chatActionPending() === 'execute') {
-                    <span class="inline-spinner" aria-label="Executing task"></span>
-                  } @else {
-                    <button type="button" class="accent" [disabled]="chatActionsLocked() || !taskInitialPrompt.trim() || task.status === 'ABANDONED'" (click)="executeTask()">Execute</button>
-                  }
-                  @if (taskHasChildren(task.task_id)) {
-                    <button type="button" class="ghost" [disabled]="chatActionsLocked()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
-                  }
-                </div>
-              }
-              <details class="editor-disclosure deps" open>
-                <summary>Links and dependencies</summary>
-                <p class="eyebrow">
-                  Unified task graph for this node: parent→child hierarchy, execution order, fan-out (fork), fan-in (join), and loops (cycle with break condition).
-                  Mindmap drag still updates tree and ordering edges; all link types are managed here.
-                </p>
-                <p class="eyebrow">Blocked until these finish (incoming):</p>
-                <ul class="graph-edge-list">
-                  @for (edge of incomingGraphEdges(task.task_id); track edge.edge_id) {
-                    <li>
-                      <span>{{ taskEdgeKindLabel(edge.kind) }} ← {{ resolveTaskTitle(edge.from_task_id) }}</span>
-                      @if (edge.break_condition) {
-                        <span class="kanban-meta">break: {{ edge.break_condition }}</span>
-                      }
-                      <button type="button" class="ghost" (click)="removeTaskGraphEdge(edge.edge_id)">Remove</button>
-                    </li>
-                  } @empty {
-                    <li>No incoming links.</li>
-                  }
-                </ul>
-                <p class="eyebrow">Child tasks (parent → child tree links):</p>
-                <ul class="graph-edge-list">
-                  @for (edge of childGraphEdges(task.task_id); track edge.edge_id) {
-                    <li>
-                      <span>{{ taskEdgeKindLabel(edge.kind) }} → {{ resolveTaskTitle(edge.to_task_id) }}</span>
-                      <button type="button" class="ghost" (click)="removeTaskGraphEdge(edge.edge_id)">Remove</button>
-                    </li>
-                  } @empty {
-                    <li>No child links.</li>
-                  }
-                </ul>
-                <div class="split">
-                  <label class="field">
-                    <span>Link direction</span>
-                    <select [(ngModel)]="graphLinkDirection" [name]="'graphLinkDir-' + task.task_id">
-                      <option value="incoming">Other task must finish before this one</option>
-                      <option value="child">This task is parent of child task</option>
-                    </select>
-                  </label>
-                  <label class="field">
-                    <span>Other task</span>
-                    <select [(ngModel)]="graphEdgeToTaskId" [name]="'graphEdgeTo-' + task.task_id">
-                      <option value="">Select task…</option>
-                      @for (other of otherTasks(); track other.task_id) {
-                        <option [value]="other.task_id">{{ other.title }}</option>
-                      }
-                    </select>
-                  </label>
-                </div>
-                @if (graphLinkDirection === 'incoming') {
-                  <label class="field">
-                    <span>Dependency kind</span>
-                    <select [(ngModel)]="graphEdgeKind" [name]="'graphEdgeKind-' + task.task_id">
-                      @for (kind of taskEdgeKinds; track kind) {
-                        <option [value]="kind">{{ taskEdgeKindLabel(kind) }}</option>
-                      }
-                    </select>
-                  </label>
-                  <label class="field">
-                    <span>Break condition (required for cycle)</span>
-                    <input [(ngModel)]="graphEdgeBreakCondition" [name]="'graphEdgeBreak-' + task.task_id" placeholder="e.g. max_iterations:3, human:REVIEW" />
-                  </label>
-                }
-                <div class="composer-actions">
-                  <button type="button" class="ghost" [disabled]="!graphEdgeToTaskId" (click)="addTaskGraphEdge(task.task_id)">Add link</button>
-                </div>
-              </details>
-            </div>
-            <div #chatTranscript class="chat-transcript-scroll transcript" aria-live="polite">
-              @for (item of timeline(); track item.id) {
-                @if (item.kind === 'message') {
-                  <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
-                    <p class="who">{{ speaker(item.message) }}</p>
-                    <markdown class="md chat-md" mermaid [data]="planMarkdown(item.message.content)"></markdown>
-                  </article>
-                } @else {
-                  <article class="artifact">
-                    <header>{{ item.artifact.name }}</header>
-                    @if (markdownArtifact(item.artifact) && item.artifact.text) {
-                      <markdown class="md" mermaid [data]="planMarkdown(item.artifact.text)"></markdown>
-                    } @else if (item.artifact.text) {
-                      <pre>{{ item.artifact.text }}</pre>
-                    } @else if (item.artifact.content_type === 'image' && item.artifact.url) {
-                      <img [src]="item.artifact.url" [alt]="item.artifact.name" />
-                    } @else if (item.artifact.url) {
-                      <a class="text-link" [href]="item.artifact.url" target="_blank" rel="noopener">Download {{ item.artifact.name }}</a>
-                    }
-                  </article>
-                }
-              }
-              @if (store.pendingReply()) {
-                <p class="pending">Waiting for Cursor…</p>
-              }
-            </div>
-            <div class="composer">
-              <label class="sr-only" for="task-chat">Message</label>
-              <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat." [disabled]="!taskAgentStarted(task)"></textarea>
-              <div class="composer-actions">
-                @if (store.chatActionPending() === 'send') {
-                  <span class="inline-spinner" aria-label="Sending message"></span>
-                } @else {
-                  <button type="button" class="primary" [disabled]="chatActionsLocked() || !chatDraft.trim() || !taskAgentStarted(task)" (click)="sendChat()">Send</button>
-                }
               </div>
-            </div>
+            }
+
+            @if (taskPageTab() === 'graph') {
+              <div class="task-graph-panel">
+                <p class="eyebrow graph-panel-lead">Links for this task only. Mindmap drag still updates hierarchy and order.</p>
+                <div class="graph-segments">
+                  <section class="graph-segment graph-segment-hierarchy">
+                    <header>
+                      <h3>Hierarchy</h3>
+                      <p>Parent and child tasks in the tree</p>
+                    </header>
+                    <div class="graph-segment-body">
+                      <div class="graph-lane">
+                        <h4>Parent of this task</h4>
+                        <ul class="graph-edge-list">
+                          @for (edge of parentGraphEdges(task.task_id); track edge.edge_id) {
+                            <li>
+                              <span class="graph-edge-chip tree">{{ resolveTaskTitle(edge.from_task_id) }}</span>
+                              <button type="button" class="ghost" (click)="removeTaskGraphEdge(edge.edge_id)">Remove</button>
+                            </li>
+                          } @empty {
+                            <li class="graph-empty">No parent link</li>
+                          }
+                        </ul>
+                      </div>
+                      <div class="graph-lane">
+                        <h4>Child tasks</h4>
+                        <ul class="graph-edge-list">
+                          @for (edge of childGraphEdges(task.task_id); track edge.edge_id) {
+                            <li>
+                              <span class="graph-edge-chip tree">{{ resolveTaskTitle(edge.to_task_id) }}</span>
+                              <button type="button" class="ghost" (click)="removeTaskGraphEdge(edge.edge_id)">Remove</button>
+                            </li>
+                          } @empty {
+                            <li class="graph-empty">No children</li>
+                          }
+                        </ul>
+                        <label class="field">
+                          <span>Add child task</span>
+                          <select [(ngModel)]="graphHierarchyChildId" [name]="'graphHierarchyChild-' + task.task_id">
+                            <option value="">Select task…</option>
+                            @for (other of otherTasks(); track other.task_id) {
+                              <option [value]="other.task_id">{{ other.title }}</option>
+                            }
+                          </select>
+                        </label>
+                        <button type="button" class="ghost" [disabled]="!graphHierarchyChildId" (click)="addHierarchyChildLink(task.task_id)">Add child link</button>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="graph-segment graph-segment-order">
+                    <header>
+                      <h3>Run order</h3>
+                      <p>Other tasks that must finish before this one runs</p>
+                    </header>
+                    <div class="graph-segment-body">
+                      <ul class="graph-edge-list">
+                        @for (edge of orderingGraphEdges(task.task_id); track edge.edge_id) {
+                          <li>
+                            <span class="graph-edge-chip ordering">{{ resolveTaskTitle(edge.from_task_id) }}</span>
+                            <span class="graph-edge-dir">runs before this task</span>
+                            <button type="button" class="ghost" (click)="removeTaskGraphEdge(edge.edge_id)">Remove</button>
+                          </li>
+                        } @empty {
+                          <li class="graph-empty">No ordering prerequisites</li>
+                        }
+                      </ul>
+                      <label class="field">
+                        <span>Prerequisite task</span>
+                        <select [(ngModel)]="graphOrderFromId" [name]="'graphOrderFrom-' + task.task_id">
+                          <option value="">Select task…</option>
+                          @for (other of otherTasks(); track other.task_id) {
+                            <option [value]="other.task_id">{{ other.title }}</option>
+                          }
+                        </select>
+                      </label>
+                      <button type="button" class="ghost" [disabled]="!graphOrderFromId" (click)="addOrderingPrerequisite(task.task_id)">Add ordering link</button>
+                    </div>
+                  </section>
+
+                  <section class="graph-segment graph-segment-flow">
+                    <header>
+                      <h3>Fork, join, and loops</h3>
+                      <p>Parallel fan-out, fan-in, and cyclic retries</p>
+                    </header>
+                    <div class="graph-segment-body">
+                      <ul class="graph-edge-list">
+                        @for (edge of flowGraphEdges(task.task_id); track edge.edge_id) {
+                          <li>
+                            <span class="graph-edge-chip" [class]="edge.kind">{{ taskEdgeKindLabel(edge.kind) }}</span>
+                            <span class="graph-edge-dir">{{ resolveTaskTitle(edge.from_task_id) }} → this task</span>
+                            @if (edge.break_condition) {
+                              <span class="kanban-meta">break: {{ edge.break_condition }}</span>
+                            }
+                            <button type="button" class="ghost" (click)="removeTaskGraphEdge(edge.edge_id)">Remove</button>
+                          </li>
+                        } @empty {
+                          <li class="graph-empty">No fork, join, or cycle links</li>
+                        }
+                      </ul>
+                      <div class="split">
+                        <label class="field">
+                          <span>From task</span>
+                          <select [(ngModel)]="graphFlowFromId" [name]="'graphFlowFrom-' + task.task_id">
+                            <option value="">Select task…</option>
+                            @for (other of otherTasks(); track other.task_id) {
+                              <option [value]="other.task_id">{{ other.title }}</option>
+                            }
+                          </select>
+                        </label>
+                        <label class="field">
+                          <span>Link type</span>
+                          <select [(ngModel)]="graphFlowKind" [name]="'graphFlowKind-' + task.task_id">
+                            <option value="fork">Fork (fan-out)</option>
+                            <option value="join">Join (fan-in)</option>
+                            <option value="cycle">Cycle (loop)</option>
+                          </select>
+                        </label>
+                      </div>
+                      @if (graphFlowKind === 'cycle') {
+                        <label class="field">
+                          <span>Break condition</span>
+                          <input [(ngModel)]="graphFlowBreakCondition" [name]="'graphFlowBreak-' + task.task_id" placeholder="e.g. max_iterations:3, human:REVIEW" />
+                        </label>
+                      }
+                      <button type="button" class="ghost" [disabled]="!graphFlowFromId" (click)="addFlowGraphLink(task.task_id)">Add flow link</button>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            }
           </section>
         }
       }

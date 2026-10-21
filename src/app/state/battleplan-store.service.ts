@@ -781,7 +781,7 @@ export class BattleplanStore {
 
   async saveTask(patch: {
     title: string;
-    dar: string;
+    dar?: string;
     initial_prompt: string;
     output_type: OutputType;
     dependencies: string[];

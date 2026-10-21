@@ -1,6 +1,7 @@
 import { defaultOptionValues, getAgentTypeDefinition, mergeAgentOptions } from './agent-types';
 import type { AgentKind, AgentOptionValue, AgentType, OutputType, Project, ProjectAgent, ProjectTask } from './models';
-import { taskDar, taskInitialPrompt } from './task-fields';
+import { TASK_BRIEF_FIELDS, type TaskBrief } from './task-brief';
+import { taskInitialPrompt } from './task-fields';
 
 export interface ProjectEditorForm {
   title: string;
@@ -13,11 +14,20 @@ export interface ProjectEditorForm {
 
 export interface TaskEditorForm {
   title: string;
-  dar: string;
+  brief: TaskBrief;
   initial_prompt: string;
   output_type: OutputType;
   dependencies: string[];
   sibling_dependencies: string[];
+}
+
+function taskBriefDirty(form: TaskBrief, task: ProjectTask | null): boolean {
+  if (!task) return false;
+  for (const field of TASK_BRIEF_FIELDS) {
+    const saved = task.brief?.[field]?.trim() ?? '';
+    if (form[field].trim() !== saved) return true;
+  }
+  return false;
 }
 
 export interface AgentEditorForm {
@@ -55,7 +65,7 @@ export function taskEditorDirty(form: TaskEditorForm, task: ProjectTask | null):
   const initialDirty = !task.cursor_agent_id
     && form.initial_prompt.trim() !== taskInitialPrompt(task);
   return form.title !== task.title
-    || form.dar.trim() !== taskDar(task)
+    || taskBriefDirty(form.brief, task)
     || form.output_type !== task.output_type
     || initialDirty
     || deps.length !== saved.length

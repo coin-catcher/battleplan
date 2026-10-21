@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { agentCreateEditorDirty, agentEditorDirty, projectEditorDirty, taskEditorDirty } from './editor-dirty';
 import { defaultOptionValues } from './agent-types';
+import { emptyTaskBrief } from './task-brief';
 import type { Project, ProjectAgent, ProjectTask } from './models';
 
 const baseProject = (): Project => ({
@@ -77,11 +78,13 @@ describe('projectEditorDirty', () => {
 });
 
 describe('taskEditorDirty', () => {
-  it('detects dar, initial prompt, and dependency changes', () => {
-    const task = baseTask();
+  const brief = () => ({ ...emptyTaskBrief(), context: 'Rules' });
+
+  it('detects brief, initial prompt, and dependency changes', () => {
+    const task = { ...baseTask(), brief: brief() };
     expect(taskEditorDirty({
       title: 'Task',
-      dar: 'Rules',
+      brief: brief(),
       initial_prompt: 'Go',
       output_type: 'code',
       dependencies: ['t0'],
@@ -89,7 +92,7 @@ describe('taskEditorDirty', () => {
     }, task)).toBe(false);
     expect(taskEditorDirty({
       title: 'Task',
-      dar: 'Updated',
+      brief: { ...brief(), context: 'Updated' },
       initial_prompt: 'Go',
       output_type: 'code',
       dependencies: ['t0'],
@@ -97,7 +100,7 @@ describe('taskEditorDirty', () => {
     }, task)).toBe(true);
     expect(taskEditorDirty({
       title: 'Task',
-      dar: 'Rules',
+      brief: brief(),
       initial_prompt: 'Updated',
       output_type: 'code',
       dependencies: ['t0'],
@@ -105,7 +108,7 @@ describe('taskEditorDirty', () => {
     }, task)).toBe(true);
     expect(taskEditorDirty({
       title: 'Task',
-      dar: 'Rules',
+      brief: brief(),
       initial_prompt: 'Go',
       output_type: 'code',
       dependencies: [],
@@ -114,10 +117,10 @@ describe('taskEditorDirty', () => {
   });
 
   it('ignores initial prompt after the agent has started', () => {
-    const task = { ...baseTask(), cursor_agent_id: 'agent-1' };
+    const task = { ...baseTask(), brief: brief(), cursor_agent_id: 'agent-1' };
     expect(taskEditorDirty({
       title: 'Task',
-      dar: 'Rules',
+      brief: brief(),
       initial_prompt: 'Changed',
       output_type: 'code',
       dependencies: ['t0'],

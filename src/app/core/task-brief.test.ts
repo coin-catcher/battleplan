@@ -3,10 +3,12 @@ import {
   assertTaskBriefReadyForRelease,
   buildDefaultTaskBrief,
   emptyTaskBrief,
+  inheritedTaskPromptContext,
   mergeTaskBriefWithDefaults,
   normalizeTaskBrief,
   validateTaskBrief,
 } from './task-brief';
+import type { ProjectTask } from './models';
 
 describe('task-brief', () => {
   it('requires all fields when a brief is present', () => {
@@ -44,6 +46,25 @@ describe('task-brief', () => {
     const brief = normalizeTaskBrief({ goal: 'x', scope: 'y' });
     expect(brief?.goal).toBe('x');
     expect(brief?.scope).toBe('y');
+  });
+
+  it('combines brief context and forbidden for inherited prompts', () => {
+    const task = {
+      task_id: 't1',
+      project_id: 'p1',
+      title: 'T',
+      prompt: '',
+      output_type: 'code',
+      status: 'TODO',
+      dependencies: [],
+      order: 0,
+      created_at: '',
+      updated_at: '',
+      brief: { ...emptyTaskBrief(), context: 'Parent context', forbidden: 'No PRs' },
+    } satisfies ProjectTask;
+    expect(inheritedTaskPromptContext(task)).toContain('Parent context');
+    expect(inheritedTaskPromptContext(task)).toContain('Forbidden');
+    expect(inheritedTaskPromptContext({ ...task, brief: undefined, dar: 'Legacy rules' })).toBe('Legacy rules');
   });
 
   it('merge preserves edited fields', () => {
