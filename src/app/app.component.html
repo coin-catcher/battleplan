@@ -71,6 +71,21 @@
           >Kanban</button>
         </div>
         @if (projectViewMode() === 'kanban') {
+          @if (kanbanScopeOptions().length > 1) {
+            <div class="kanban-scope">
+              <label class="kanban-scope-label" for="kanban-scope-select">Show tasks for</label>
+              <select
+                id="kanban-scope-select"
+                class="kanban-scope-select"
+                [ngModel]="kanbanScopeId()"
+                (ngModelChange)="setKanbanScope($event)"
+              >
+                @for (option of kanbanScopeOptions(); track option.id) {
+                  <option [ngValue]="option.id">{{ option.label }}</option>
+                }
+              </select>
+            </div>
+          }
           <div class="kanban-board" aria-label="Task kanban">
             @for (column of kanbanBoard(); track column.status) {
               <section class="kanban-column">
@@ -89,6 +104,7 @@
             }
           </div>
         } @else {
+        <div class="map-viewport">
         <div class="zoom-controls">
           <button type="button" (click)="zoomBy(1.15)" aria-label="Zoom in">+</button>
           <button type="button" (click)="zoomBy(1 / 1.15)" aria-label="Zoom out">−</button>
@@ -292,6 +308,7 @@
           }
             </div>
           </div>
+        </div>
         </div>
         }
       </div>
