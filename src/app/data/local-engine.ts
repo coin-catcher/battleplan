@@ -930,32 +930,44 @@ export class LocalEngine {
     const codeAgent = findProjectAgent(agents, resolveCodeAgentId(active, project));
     const launch = cursorLaunchFromLibrary(codeAgent, project, this.cursorApiKey());
     const base = launch.startingRef?.trim() || project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
-    const run = await this.cursor.createRun(active.cursor_agent_id!, {
-      text: wrapAgentRunPrompt(feedbackPrompt(active, feedback), {
-        baseBranch: base,
-        agentBranch: output?.branch,
-      }),
-      mode: 'agent',
-      apiKey: launch.apiKey,
-    });
-    if (codeAgent) await this.bumpAgentUsage(active.project_id, codeAgent.agent_id);
-    active.latest_run_id = run.id;
-    active.updated_at = this.now();
-    await this.repo.saveTask(active);
-    return this.record({
-      scope: 'task',
-      project_id: active.project_id,
-      task_id: taskId,
-      role: 'user',
-      content: feedback,
-      run_id: run.id,
-      intent: 'feedback',
-    });
+    try {
+      const run = await this.cursor.createRun(active.cursor_agent_id!, {
+        text: wrapAgentRunPrompt(feedbackPrompt(active, feedback), {
+          baseBranch: base,
+          agentBranch: output?.branch,
+        }),
+        mode: 'agent',
+        apiKey: launch.apiKey,
+      });
+      if (codeAgent) await this.bumpAgentUsage(active.project_id, codeAgent.agent_id);
+      active.latest_run_id = run.id;
+      active.updated_at = this.now();
+      await this.repo.saveTask(active);
+      return this.record({
+        scope: 'task',
+        project_id: active.project_id,
+        task_id: taskId,
+        role: 'user',
+        content: feedback,
+        run_id: run.id,
+        intent: 'feedback',
+      });
+    } catch (error) {
+      if (active.status === 'DOING') {
+        applyTaskStatusTransition(active, 'REVIEW', 'manual');
+        active.updated_at = this.now();
+        await this.repo.saveTask(active);
+      }
+      throw error;
+    }
   }
 
   async prepareApprove(taskId: string): Promise<{ task: ProjectTask; message: ChatMessage }> {
     const task = await this.requireTaskById(taskId);
     if (task.status !== 'REVIEW') throw new Error('Only a task in REVIEW can be approved.');
+    applyTaskStatusTransition(task, 'DOING', 'approve_start');
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
     const output = task.output_type === 'code'
       ? await this.repo.getCodeOutput(taskId)
       : await this.repo.getResearchOutput(taskId);
@@ -1014,6 +1026,9 @@ export class LocalEngine {
           + 'Try Approve and merge again after the agent finishes.',
         );
       }
+      applyTaskStatusTransition(task, 'REVIEW', 'manual');
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
       throw error;
     }
     const mergedOutput = {
@@ -1718,30 +1733,39 @@ export class LocalEngine {
       ? joinDarSections([dar, briefSection, userMessage])
       : userMessage;
     turns.push({ role: 'user', content });
-    const result = await sendResearchAgentChat(agent, turns, systemPrompt);
-    await this.bumpAgentUsage(project.project_id, agent.agent_id, result.usage.totalTokens);
-    const userRecord = await this.record({
-      scope: 'task',
-      project_id: task.project_id,
-      task_id: task.task_id,
-      role: 'user',
-      content: userMessage,
-      intent,
-    });
-    await this.record({
-      scope: 'task',
-      project_id: task.project_id,
-      task_id: task.task_id,
-      role: 'assistant',
-      content: result.assistantText,
-      intent,
-    });
-    if (task.status === 'DOING') {
-      applyTaskStatusTransition(task, 'REVIEW', 'agent_finished');
+    try {
+      const result = await sendResearchAgentChat(agent, turns, systemPrompt);
+      await this.bumpAgentUsage(project.project_id, agent.agent_id, result.usage.totalTokens);
+      const userRecord = await this.record({
+        scope: 'task',
+        project_id: task.project_id,
+        task_id: task.task_id,
+        role: 'user',
+        content: userMessage,
+        intent,
+      });
+      await this.record({
+        scope: 'task',
+        project_id: task.project_id,
+        task_id: task.task_id,
+        role: 'assistant',
+        content: result.assistantText,
+        intent,
+      });
+      if (task.status === 'DOING') {
+        applyTaskStatusTransition(task, 'REVIEW', 'agent_finished');
+      }
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
+      return userRecord;
+    } catch (error) {
+      if (task.status === 'DOING') {
+        applyTaskStatusTransition(task, 'REVIEW', 'manual');
+        task.updated_at = this.now();
+        await this.repo.saveTask(task);
+      }
+      throw error;
     }
-    task.updated_at = this.now();
-    await this.repo.saveTask(task);
-    return userRecord;
   }
 
   private darLookup() {

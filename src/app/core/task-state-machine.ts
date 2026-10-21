@@ -5,13 +5,14 @@ export type TaskTransitionTrigger =
   | 'manual'
   | 'execute_or_send'
   | 'agent_finished'
+  | 'approve_start'
   | 'approve_merge';
 
 const AUTOMATIC_TRANSITIONS: Partial<Record<TaskStatus, Partial<Record<TaskStatus, TaskTransitionTrigger[]>>>> = {
   TODO: { DOING: ['execute_or_send'] },
   DOING: { REVIEW: ['agent_finished'] },
   REVIEW: {
-    DOING: ['execute_or_send'],
+    DOING: ['execute_or_send', 'approve_start'],
     DONE: ['approve_merge'],
   },
 };

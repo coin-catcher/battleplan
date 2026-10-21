@@ -833,17 +833,26 @@ export class BattleplanStore {
   async executeTask(): Promise<void> {
     const task = this.selectedTask();
     if (!task) return;
+    const taskId = task.task_id;
+    const statusBeforeExecute = task.status;
+    this.patchTaskStatus(taskId, 'DOING');
+    this.syncDoingBackgroundWatches();
     let runId: string | undefined;
     await this.run(async () => {
-      const sent = await this.api.executeTask(task.task_id);
+      const sent = await this.api.executeTask(taskId);
       runId = sent.run_id;
       this.rememberMessage(sent);
-      this.applyTaskConversation(await this.api.listTaskMessages(task.task_id));
+      this.applyTaskConversation(await this.api.listTaskMessages(taskId));
     });
-    if (runId && !this.error()) {
-      await this.syncTaskUserRun(task.task_id, runId);
-      void this.watchTask(task.task_id, runId);
-      this.ensureDoingBackgroundWatch(task.task_id);
+    if (this.error()) {
+      this.patchTaskStatus(taskId, statusBeforeExecute);
+      this.syncDoingBackgroundWatches();
+      return;
+    }
+    if (runId) {
+      await this.syncTaskUserRun(taskId, runId);
+      void this.watchTask(taskId, runId).finally(() => this.syncDoingBackgroundWatches());
+      this.ensureDoingBackgroundWatch(taskId);
     }
   }
 
@@ -906,10 +915,13 @@ export class BattleplanStore {
   async sendTaskMessage(message: string): Promise<void> {
     const task = this.selectedTask();
     if (!task) return;
+    const taskId = task.task_id;
+    this.patchTaskStatus(taskId, 'DOING');
+    this.syncDoingBackgroundWatches();
     let runId: string | undefined;
     let watchProjectId: string | undefined;
     await this.run(async () => {
-      const sent = await this.api.sendTaskMessage(task.task_id, message);
+      const sent = await this.api.sendTaskMessage(taskId, message);
       runId = sent.run_id;
       this.rememberMessage(sent);
       if (task.output_type === 'subproject' && task.subproject_id) {
@@ -917,19 +929,27 @@ export class BattleplanStore {
         await this.reloadTasks();
         this.applyConversation(await this.api.listProjectMessages(task.subproject_id));
       } else {
-        this.applyTaskConversation(await this.api.listTaskMessages(task.task_id));
+        this.applyTaskConversation(await this.api.listTaskMessages(taskId));
       }
     });
-    if (runId && !this.error()) {
+    if (this.error()) {
+      this.patchTaskStatus(taskId, 'REVIEW');
+      this.syncDoingBackgroundWatches();
+      return;
+    }
+    if (runId) {
       if (watchProjectId) {
         await this.syncProjectUserRun(watchProjectId, runId);
         void this.watchProject(watchProjectId, runId);
-        this.ensureDoingBackgroundWatch(task.task_id);
+        this.ensureDoingBackgroundWatch(taskId);
       } else {
-        await this.syncTaskUserRun(task.task_id, runId);
-        void this.watchTask(task.task_id, runId);
-        this.ensureDoingBackgroundWatch(task.task_id);
+        await this.syncTaskUserRun(taskId, runId);
+        void this.watchTask(taskId, runId).finally(() => this.syncDoingBackgroundWatches());
+        this.ensureDoingBackgroundWatch(taskId);
       }
+    } else {
+      // Synchronous agent replies (e.g. library research) finish in the same request.
+      this.syncDoingBackgroundWatches();
     }
   }
 
@@ -937,6 +957,8 @@ export class BattleplanStore {
     const task = this.selectedTask();
     if (!task) return;
     const taskId = task.task_id;
+    this.patchTaskStatus(taskId, 'DOING');
+    this.syncDoingBackgroundWatches();
     try {
       const prepared = await this.api.prepareApprove(taskId);
       this.replaceTask(prepared.task);
@@ -946,6 +968,8 @@ export class BattleplanStore {
       this.notice.set('Merging pull request in the background.');
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : 'Could not start merge.');
+      this.patchTaskStatus(taskId, 'REVIEW');
+      this.syncDoingBackgroundWatches();
       return;
     }
     this.ensureDoingBackgroundWatch(taskId);
@@ -1211,6 +1235,7 @@ export class BattleplanStore {
       this.replaceTask(merged);
       const refreshed = await this.api.listTaskMessages(taskId, { syncAgent: false });
       this.applyTaskConversation(refreshed);
+      await this.reloadTasks();
       await this.refreshPendingChanges();
       if (merged.status === 'DONE') {
         this.notice.set('Pull request merged. Task is DONE.');
@@ -1221,11 +1246,15 @@ export class BattleplanStore {
         const refreshed = await this.api.listTaskMessages(taskId);
         this.applyTaskConversation(refreshed);
         this.continueTaskWatch(taskId);
+        this.ensureDoingBackgroundWatch(taskId);
         this.notice.set('Merge conflict — the task agent is resolving it.');
       } else {
         this.error.set(message);
         const refreshed = await this.api.listTaskMessages(taskId, { syncAgent: false });
         this.applyTaskConversation(refreshed);
+        if (refreshed.task.status === 'REVIEW') {
+          this.patchTaskStatus(taskId, 'REVIEW');
+        }
       }
     } finally {
       this.syncDoingBackgroundWatches();
@@ -1315,8 +1344,7 @@ export class BattleplanStore {
         if (this.watchingTaskChat(taskId, this.selection())) this.applyConversation(page);
         const refreshed = await this.api.listTaskMessages(taskId);
         if (this.doingBackgroundGeneration.get(taskId) !== generation) return;
-        this.cacheTaskConversation(refreshed);
-        this.replaceTask(refreshed.task);
+        this.applyTaskConversation(refreshed);
         if (refreshed.task.status !== 'DOING') {
           this.stopDoingBackgroundWatch(taskId);
           return;
@@ -1462,8 +1490,12 @@ export class BattleplanStore {
   }
 
   private applyTaskConversation(result: { messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }): void {
+    const previous = this.tasks().find((item) => item.task_id === result.task.task_id)?.status;
     this.cacheTaskConversation(result);
     this.replaceTask(result.task);
+    if (previous !== result.task.status) {
+      this.syncDoingBackgroundWatches();
+    }
     if (this.watchingTaskChat(result.task.task_id, this.selection())) {
       this.messages.set(result.messages);
       this.artifacts.set(result.artifacts ?? []);
@@ -1527,6 +1559,13 @@ export class BattleplanStore {
       const next = exists ? tasks.map((item) => item.task_id === task.task_id ? task : item) : [...tasks, task];
       return next.sort((left, right) => left.order - right.order);
     });
+  }
+
+  /** Optimistic status for mindmap/kanban before async engine calls complete. */
+  private patchTaskStatus(taskId: string, status: TaskStatus): void {
+    const current = this.tasks().find((item) => item.task_id === taskId);
+    if (!current || current.status === status) return;
+    this.replaceTask({ ...current, status, updated_at: new Date().toISOString() });
   }
 
   private async run(work: () => Promise<void>): Promise<void> {
