@@ -28,6 +28,7 @@ describe('task-state-machine', () => {
     expect(() => assertTaskTransition('DOING', 'REVIEW', 'agent_finished')).not.toThrow();
     expect(() => assertTaskTransition('REVIEW', 'DOING', 'execute_or_send')).not.toThrow();
     expect(() => assertTaskTransition('REVIEW', 'DONE', 'approve_merge')).not.toThrow();
+    expect(() => assertTaskTransition('REVIEW', 'DOING', 'approve_start')).not.toThrow();
   });
 
   it('rejects automatic transitions that skip the workflow', () => {
