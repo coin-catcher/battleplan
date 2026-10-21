@@ -1,0 +1,60 @@
+# Local Hermes design tree (decision nodes)
+# status: open | settled | deferred
+# answer: filled after user confirms
+
+root:
+  title: Local Hermes in Docker with profile catalog
+  status: open
+  children:
+    v1_deliverable:
+      title: First shippable artifact scope
+      status: open
+      depends_on: []
+    hermes_distribution:
+      title: Which Hermes image/build to standardize on
+      status: open
+      depends_on: []
+    instance_topology:
+      title: One gateway vs many containers vs per-subproject
+      status: open
+      depends_on: []
+    catalog_ownership:
+      title: Where catalog files live and who is source of truth
+      status: open
+      depends_on: []
+    config_bundle:
+      title: What "common configuration" includes beyond Hermes profiles
+      status: open
+      depends_on: []
+    battleplan_integration_milestone:
+      title: Same milestone as connector/Electron or compose-first
+      status: open
+      depends_on: [v1_deliverable]
+    platform_matrix:
+      title: OS/Docker targets for v1
+      status: open
+      depends_on: [v1_deliverable]
+    secrets_and_setup:
+      title: How API keys and setup wizard run in team workflows
+      status: deferred
+      depends_on: [catalog_ownership, v1_deliverable]
+    workspace_mounts:
+      title: Binding Battleplan project dirs into Hermes kanban workers
+      status: deferred
+      depends_on: [instance_topology, battleplan_integration_milestone]
+    connector_contract:
+      title: Endpoint, auth, health URL for Battleplan HermesConnector
+      status: deferred
+      depends_on: [battleplan_integration_milestone, config_bundle]
+    electron_lifecycle:
+      title: Battleplan Electron start/stop/health (Task 18)
+      status: deferred
+      depends_on: [v1_deliverable, platform_matrix]
+    profile_sync_mechanism:
+      title: Copy vs symlink vs git submodule into ~/.hermes
+      status: deferred
+      depends_on: [catalog_ownership]
+    versioning_and_pins:
+      title: Image tag + profile catalog semver
+      status: deferred
+      depends_on: [hermes_distribution, catalog_ownership]

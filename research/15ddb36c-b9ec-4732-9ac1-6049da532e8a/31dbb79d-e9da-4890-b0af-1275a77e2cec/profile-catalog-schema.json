@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://battleplan.local/schemas/hermes-profile-catalog.json",
+  "title": "HermesProfileCatalog",
+  "description": "Draft: versioned catalog of Hermes profiles and shared config for Local Hermes. Materialized into the host Hermes data directory (~/.hermes) at container start or via sync script — not a replacement for Hermes on-disk layout.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["catalog_version", "hermes_image_pin", "profiles"],
+  "properties": {
+    "catalog_version": {
+      "type": "string",
+      "description": "Semver or date stamp for the catalog bundle"
+    },
+    "hermes_image_pin": {
+      "type": "string",
+      "description": "Docker image reference, e.g. nousresearch/hermes-agent:2026.8.x"
+    },
+    "shared_config": {
+      "type": "object",
+      "description": "Optional fragments merged into Hermes config.yaml at sync time",
+      "additionalProperties": true
+    },
+    "kanban_defaults": {
+      "type": "object",
+      "description": "Optional kanban section defaults (dispatch_in_gateway, board id, etc.)",
+      "additionalProperties": true
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["profile_id", "display_name"],
+        "additionalProperties": false,
+        "properties": {
+          "profile_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "description": "Hermes profile directory name under profiles/"
+          },
+          "display_name": { "type": "string" },
+          "description": { "type": "string" },
+          "role": {
+            "enum": ["orchestrator", "worker", "reviewer", "research", "code", "custom"],
+            "description": "Battleplan-facing role for UI and connector routing"
+          },
+          "source_path": {
+            "type": "string",
+            "description": "Path relative to catalog root containing SOUL.md, .env.template, config fragments"
+          },
+          "battleplan_connector_id": {
+            "type": "string",
+            "description": "Optional link to project connectors[].connector_id when kind=hermes"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Tags for matching tasks (shell, mcp, browser, kanban_orchestrator, …)"
+          },
+          "api_server_port": {
+            "type": "integer",
+            "minimum": 1024,
+            "maximum": 65535,
+            "description": "Per-profile API_SERVER_PORT when exposing /v1 externally (8642 default profile only otherwise)"
+          }
+        }
+      }
+    }
+  }
+}

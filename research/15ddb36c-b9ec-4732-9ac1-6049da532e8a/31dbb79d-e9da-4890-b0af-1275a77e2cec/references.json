@@ -1,0 +1,42 @@
+[
+  {
+    "title": "Hermes Agent — Docker user guide",
+    "url": "https://hermes-agent.nousresearch.com/docs/user-guide/docker",
+    "relevance": "Official image, ~/.hermes mount, gateway run, multi-profile in one container"
+  },
+  {
+    "title": "Hermes Agent — Kanban",
+    "url": "https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban",
+    "relevance": "Kanban DB, dispatcher, profile assignees, status lifecycle"
+  },
+  {
+    "title": "Hermes Agent — docker-compose.yml (upstream)",
+    "url": "https://github.com/NousResearch/hermes-agent/blob/main/docker-compose.yml",
+    "relevance": "HERMES_UID/GID, host networking, dashboard service"
+  },
+  {
+    "title": "Hermes Agent repository",
+    "url": "https://github.com/NousResearch/hermes-agent",
+    "relevance": "Source of profiles, gateway, kanban implementation"
+  },
+  {
+    "title": "Battleplan — Graph of Agents",
+    "url": "docs/GRAPH_OF_AGENTS.md",
+    "relevance": "Connector model, Hermes status mapping, idempotency key"
+  },
+  {
+    "title": "Battleplan — d51c Task 18 (Docker Hermes in Electron)",
+    "url": "research/15ddb36c-b9ec-4732-9ac1-6049da532e8a/d51c-graph-of-agents/TASKS.md",
+    "relevance": "Planned desktop lifecycle integration"
+  },
+  {
+    "title": "Battleplan — Agent Library catalog pattern",
+    "url": "research/15ddb36c-b9ec-4732-9ac1-6049da532e8a/86575162-d95e-486d-8db4-18858ab5a093/README.md",
+    "relevance": "YAML registry + persisted project catalog precedent"
+  },
+  {
+    "title": "Battleplan — LocalLLM health checks",
+    "url": "docs/LOCAL_LLM.md",
+    "relevance": "Electron main-process localhost health pattern"
+  }
+]
