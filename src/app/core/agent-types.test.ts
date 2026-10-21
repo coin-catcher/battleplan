@@ -17,12 +17,14 @@ import {
 describe('agent-types registry', () => {
   it('lists research and code types by kind', () => {
     expect(agentTypesForKind('research')).toContain('OpenAI');
+    expect(agentTypesForKind('research')).toContain('Cursor Agent');
     expect(agentTypesForKind('code')).toEqual(['Cursor Agent']);
   });
 
-  it('filters create-flow types by role', () => {
-    expect(agentTypesForCreateRole('code')).toEqual(['Cursor Agent']);
-    expect(agentTypesForCreateRole('research')).not.toContain('Cursor Agent');
+  it('offers Cursor Agent in both research and code create flows', () => {
+    expect(agentTypesForCreateRole('code')).toContain('Cursor Agent');
+    expect(agentTypesForCreateRole('research')).toContain('Cursor Agent');
+    expect(agentTypesForCreateRole('research')).toContain('OpenAI');
   });
 
   it('prepends common options before type-specific rows', () => {

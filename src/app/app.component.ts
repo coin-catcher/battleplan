@@ -60,7 +60,7 @@ import { MarkdownComponent } from 'ngx-markdown';
 import { editorPanelDirty } from './core/editor-dirty';
 import { taskDar, taskInitialPrompt } from './core/task-fields';
 import { normalChildIds } from './core/dependencies';
-import { taskResearchChatStarted } from './core/agent-bindings';
+import { libraryAgentsForKind, taskResearchChatStarted } from './core/agent-bindings';
 import { BattleplanStore } from './state/battleplan-store.service';
 
 @Component({
@@ -1033,7 +1033,7 @@ export class AppComponent implements OnInit {
   }
 
   libraryAgents(kind: AgentKind): ProjectAgent[] {
-    return this.store.agents().filter((agent) => agent.kind === kind && !isAgentDraftId(agent.agent_id));
+    return libraryAgentsForKind(this.store.agents(), kind);
   }
 
   subprojectAgentStarted(): boolean {
