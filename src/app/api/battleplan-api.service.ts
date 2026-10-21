@@ -213,7 +213,7 @@ export class BattleplanApi {
 
   relocateMindmapLink(
     projectId: string,
-    link: { kind: 'child' | 'sibling' | 'project-root'; from: string; to: string },
+    link: import('../core/link-relocation').MindmapLinkRef,
     end: 'from' | 'to',
     dropNodeId: string,
   ): Promise<ProjectTask[]> {

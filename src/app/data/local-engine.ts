@@ -83,7 +83,6 @@ import {
 import { buildTaskHandoff } from '../core/task-handoff';
 import { normalParentIds } from '../core/dependencies';
 import type { LoopMode, TaskNodeKind } from '../core/task-node-kind';
-import type { TaskBrief } from '../core/task-brief';
 import { applyTaskStatusTransition, assertTaskTransition, type TaskTransitionTrigger } from '../core/task-state-machine';
 import {
   cursorLaunchFromLibrary,
