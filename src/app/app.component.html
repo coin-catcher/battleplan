@@ -650,26 +650,44 @@
               <details class="editor-disclosure deps" open>
                 <summary>Links and dependencies</summary>
                 <p class="eyebrow">
-                  Task graph edges: <strong>from</strong> prerequisite → <strong>this task</strong>.
-                  Supports tree, ordering, fork, join, and cycle (cycle requires a break condition).
-                  Mindmap drag still edits tree/ordering; advanced edges are listed here.
+                  Unified task graph for this node: parent→child hierarchy, execution order, fan-out (fork), fan-in (join), and loops (cycle with break condition).
+                  Mindmap drag still updates tree and ordering edges; all link types are managed here.
                 </p>
+                <p class="eyebrow">Blocked until these finish (incoming):</p>
                 <ul class="graph-edge-list">
                   @for (edge of incomingGraphEdges(task.task_id); track edge.edge_id) {
                     <li>
-                      <span>{{ edge.kind }} ← {{ taskTitle(edge.from_task_id) }}</span>
+                      <span>{{ taskEdgeKindLabel(edge.kind) }} ← {{ taskTitle(edge.from_task_id) }}</span>
                       @if (edge.break_condition) {
                         <span class="kanban-meta">break: {{ edge.break_condition }}</span>
                       }
                       <button type="button" class="ghost" (click)="removeTaskGraphEdge(edge.edge_id)">Remove</button>
                     </li>
                   } @empty {
-                    <li>No incoming graph edges.</li>
+                    <li>No incoming links.</li>
+                  }
+                </ul>
+                <p class="eyebrow">Child tasks (parent → child tree links):</p>
+                <ul class="graph-edge-list">
+                  @for (edge of childGraphEdges(task.task_id); track edge.edge_id) {
+                    <li>
+                      <span>{{ taskEdgeKindLabel(edge.kind) }} → {{ taskTitle(edge.to_task_id) }}</span>
+                      <button type="button" class="ghost" (click)="removeTaskGraphEdge(edge.edge_id)">Remove</button>
+                    </li>
+                  } @empty {
+                    <li>No child links.</li>
                   }
                 </ul>
                 <div class="split">
                   <label class="field">
-                    <span>Prerequisite task</span>
+                    <span>Link direction</span>
+                    <select [(ngModel)]="graphLinkDirection" [name]="'graphLinkDir-' + task.task_id">
+                      <option value="incoming">Other task must finish before this one</option>
+                      <option value="child">This task is parent of child task</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Other task</span>
                     <select [(ngModel)]="graphEdgeToTaskId" [name]="'graphEdgeTo-' + task.task_id">
                       <option value="">Select task…</option>
                       @for (other of otherTasks(); track other.task_id) {
@@ -677,35 +695,24 @@
                       }
                     </select>
                   </label>
+                </div>
+                @if (graphLinkDirection === 'incoming') {
                   <label class="field">
-                    <span>Edge kind</span>
+                    <span>Dependency kind</span>
                     <select [(ngModel)]="graphEdgeKind" [name]="'graphEdgeKind-' + task.task_id">
                       @for (kind of taskEdgeKinds; track kind) {
-                        <option [value]="kind">{{ kind }}</option>
+                        <option [value]="kind">{{ taskEdgeKindLabel(kind) }}</option>
                       }
                     </select>
                   </label>
-                </div>
-                <label class="field">
-                  <span>Break condition (required for cycle)</span>
-                  <input [(ngModel)]="graphEdgeBreakCondition" [name]="'graphEdgeBreak-' + task.task_id" placeholder="e.g. max_iterations:3, human:REVIEW" />
-                </label>
-                <div class="composer-actions">
-                  <button type="button" class="ghost" [disabled]="!graphEdgeToTaskId" (click)="addTaskGraphEdge(task.task_id)">Add edge</button>
-                </div>
-                <p class="eyebrow">Quick ordering link (legacy checkbox → ordering edge on save):</p>
-                @for (other of otherTasks(); track other.task_id) {
-                  <label>
-                    <input
-                      type="checkbox"
-                      [checked]="siblingDependencies.includes(other.task_id)"
-                      (change)="toggleSiblingDependency(other.task_id, $event)"
-                    />
-                    {{ other.title }}
+                  <label class="field">
+                    <span>Break condition (required for cycle)</span>
+                    <input [(ngModel)]="graphEdgeBreakCondition" [name]="'graphEdgeBreak-' + task.task_id" placeholder="e.g. max_iterations:3, human:REVIEW" />
                   </label>
-                } @empty {
-                  <p>No other tasks to link.</p>
                 }
+                <div class="composer-actions">
+                  <button type="button" class="ghost" [disabled]="!graphEdgeToTaskId" (click)="addTaskGraphEdge(task.task_id)">Add link</button>
+                </div>
               </details>
             </div>
             <div #chatTranscript class="chat-transcript-scroll transcript" aria-live="polite">

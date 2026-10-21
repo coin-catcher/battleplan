@@ -19,7 +19,11 @@ Every task carries a **Task brief** on `ProjectTask` (pstack fields: **GOAL, SCO
 
 **Battleplan orchestrates** the lifecycle (design → build → deliver): atomic tasks with briefs appear on mindmap and kanban; agents report status; handoffs carry outputs across local and cloud backends. Skill stacks inform **procedure inside a task**, not a parallel graph owner—no black-box `orchestrate` / `wayfinder` map replacement.
 
-Generate Tasks JSON may include a nested `brief` object or extended fields (`node_kind`, `loop_mode`, `connector_kind`). See [GENERATE_TASKS.md](./GENERATE_TASKS.md).
+Generate Tasks JSON may include a nested `brief` object or extended fields (`node_kind`, `loop_mode`, `connector_kind`, `lifecycle_phase`). See [GENERATE_TASKS.md](./GENERATE_TASKS.md).
+
+## Task graph edges
+
+`Project.task_graph_edges` is the unified dependency model: **tree** (parent→child), **ordering**, **fork** (fan-out), **join** (fan-in), and **cycle** (requires `break_condition`). The task editor **Links and dependencies** panel is the canonical editor for all link types (incoming prerequisites, child tree links, fork/join/cycle). The mindmap renders the same edges; drag still updates tree/ordering, which re-sync without dropping fork/join/cycle. Manual **Execute** enforces non-tree upstream edges; **auto-dispatch** after DONE also requires tree parents complete and never dispatches **BLOCKED** tasks. Legacy `dependencies` / `sibling_dependencies` stay synced for compatibility.
 
 ## Graph-delta pipeline
 

@@ -74,6 +74,7 @@ import { autoDispatchBatch, graphEdgesForRun } from '../core/task-ready';
 import {
   applyGraphEdgesToLegacyFields,
   ensureProjectTaskGraph,
+  mergeLegacyTreeOrderingIntoGraph,
   prerequisitesMet,
   rebuildGraphEdgesFromLegacy,
   seedProjectGraphDefaults,
@@ -1801,7 +1802,7 @@ export class LocalEngine {
   private async persistGraphAfterTaskChange(projectId: string): Promise<void> {
     const project = await this.requireProject(projectId);
     const tasks = await this.repo.listTasks(projectId);
-    project.task_graph_edges = rebuildGraphEdgesFromLegacy(tasks);
+    project.task_graph_edges = mergeLegacyTreeOrderingIntoGraph(project.task_graph_edges, tasks);
     validateTaskGraphEdges(project.task_graph_edges, new Set(tasks.map((task) => task.task_id)));
     project.updated_at = this.now();
     await this.repo.saveProject(project);

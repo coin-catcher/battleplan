@@ -71,7 +71,10 @@ import { buildKanbanBoard } from './core/kanban-board';
 import {
   edgeKey,
   incomingEdges,
+  outgoingEdges,
+  taskEdgeKindLabel,
   TASK_EDGE_KINDS,
+  validateTaskGraphEdges,
   type TaskEdgeKind,
   type TaskGraphEdge,
 } from './core/task-graph';
@@ -178,7 +181,10 @@ export class AppComponent implements OnInit {
   graphEdgeToTaskId = '';
   graphEdgeKind: TaskEdgeKind = 'ordering';
   graphEdgeBreakCondition = '';
+  graphLinkDirection: 'incoming' | 'child' = 'incoming';
   readonly taskEdgeKinds = TASK_EDGE_KINDS;
+  readonly taskEdgeKindLabel = taskEdgeKindLabel;
+  private taskLinkSyncKey = '';
 
   readonly kanbanBoard = computed(() => {
     const project = this.store.project();
@@ -311,8 +317,16 @@ export class AppComponent implements OnInit {
         this.boundTaskFormId = '';
         return;
       }
-      if (this.boundTaskFormId === task.task_id) return;
+      const linkSyncKey = `${task.dependencies.join('|')}|${(task.sibling_dependencies ?? []).join('|')}`;
+      if (this.boundTaskFormId === task.task_id) {
+        if (this.taskLinkSyncKey === linkSyncKey) return;
+        this.taskLinkSyncKey = linkSyncKey;
+        this.dependencies = [...task.dependencies];
+        this.siblingDependencies = [...(task.sibling_dependencies ?? [])];
+        return;
+      }
       this.boundTaskFormId = task.task_id;
+      this.taskLinkSyncKey = linkSyncKey;
       this.taskTitle = task.title;
       this.taskDar = taskDar(task);
       this.taskInitialPrompt = taskInitialPrompt(task);
@@ -1853,14 +1867,6 @@ export class AppComponent implements OnInit {
     void this.store.openOutput(taskId, 'research');
   }
 
-  toggleSiblingDependency(taskId: string, event: Event): void {
-    const checked = (event.target as HTMLInputElement).checked;
-    this.siblingDependencies = checked
-      ? [...this.siblingDependencies, taskId]
-      : this.siblingDependencies.filter((id) => id !== taskId);
-    this.onEditorFieldAutoSave();
-  }
-
   async onProjectChange(event: Event): Promise<void> {
     const projectId = (event.target as HTMLSelectElement).value;
     if (!projectId || projectId === this.store.projectId()) return;
@@ -1941,22 +1947,44 @@ export class AppComponent implements OnInit {
     return incomingEdges(taskId, edges);
   }
 
+  outgoingGraphEdges(taskId: string): TaskGraphEdge[] {
+    const edges = this.store.project()?.task_graph_edges ?? [];
+    return outgoingEdges(taskId, edges);
+  }
+
+  childGraphEdges(taskId: string): TaskGraphEdge[] {
+    return this.outgoingGraphEdges(taskId).filter((edge) => edge.kind === 'tree');
+  }
+
   async addTaskGraphEdge(taskId: string): Promise<void> {
-    const to = this.graphEdgeToTaskId.trim();
-    if (!to || to === taskId) return;
+    const otherId = this.graphEdgeToTaskId.trim();
+    if (!otherId || otherId === taskId) return;
     const project = this.store.project();
     if (!project) return;
+    const tasks = this.store.tasks();
     const edges = [...(project.task_graph_edges ?? [])];
-    const kind = this.graphEdgeKind;
-    const key = edgeKey(to, taskId, kind);
+    const kind = this.graphLinkDirection === 'child' ? 'tree' : this.graphEdgeKind;
+    const from = this.graphLinkDirection === 'child' ? taskId : otherId;
+    const to = this.graphLinkDirection === 'child' ? otherId : taskId;
+    if (kind === 'cycle' && !this.graphEdgeBreakCondition.trim()) {
+      this.store.error.set('Cycle edges require a break condition.');
+      return;
+    }
+    const key = edgeKey(from, to, kind);
     if (edges.some((edge) => edge.edge_id === key)) return;
     edges.push({
       edge_id: key,
-      from_task_id: to,
-      to_task_id: taskId,
+      from_task_id: from,
+      to_task_id: to,
       kind,
       break_condition: this.graphEdgeBreakCondition.trim() || undefined,
     });
+    try {
+      validateTaskGraphEdges(edges, new Set(tasks.map((task) => task.task_id)));
+    } catch (error) {
+      this.store.error.set(error instanceof Error ? error.message : 'Invalid graph edge.');
+      return;
+    }
     await this.store.updateProjectTaskGraph(edges);
     this.graphEdgeToTaskId = '';
     this.graphEdgeBreakCondition = '';

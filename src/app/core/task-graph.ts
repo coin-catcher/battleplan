@@ -74,6 +74,43 @@ export function incomingEdges(taskId: string, edges: TaskGraphEdge[]): TaskGraph
   return edges.filter((edge) => edge.to_task_id === taskId);
 }
 
+export function outgoingEdges(taskId: string, edges: TaskGraphEdge[]): TaskGraphEdge[] {
+  return edges.filter((edge) => edge.from_task_id === taskId);
+}
+
+const ADVANCED_EDGE_KINDS = new Set<TaskEdgeKind>(['fork', 'join', 'cycle']);
+
+/** Re-sync tree/ordering from legacy task fields while keeping fork/join/cycle edges. */
+export function mergeLegacyTreeOrderingIntoGraph(
+  existing: TaskGraphEdge[] | undefined,
+  tasks: ProjectTask[],
+): TaskGraphEdge[] {
+  const legacy = rebuildGraphEdgesFromLegacy(tasks);
+  const legacyKeys = new Set(legacy.map((edge) => edge.edge_id));
+  const preserved = (existing ?? []).filter((edge) => {
+    if (!ADVANCED_EDGE_KINDS.has(edge.kind)) return false;
+    return !legacyKeys.has(edge.edge_id);
+  });
+  return [...legacy, ...preserved];
+}
+
+export function taskEdgeKindLabel(kind: TaskEdgeKind): string {
+  switch (kind) {
+    case 'tree':
+      return 'Parent → child';
+    case 'ordering':
+      return 'Order (before)';
+    case 'fork':
+      return 'Fork (fan-out)';
+    case 'join':
+      return 'Join (fan-in)';
+    case 'cycle':
+      return 'Cycle (loop)';
+    default:
+      return kind;
+  }
+}
+
 export function prerequisiteTaskIds(taskId: string, edges: TaskGraphEdge[]): string[] {
   return [...new Set(incomingEdges(taskId, edges).map((edge) => edge.from_task_id))];
 }

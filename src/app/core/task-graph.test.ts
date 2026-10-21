@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectTask } from './models';
 import {
+  mergeLegacyTreeOrderingIntoGraph,
   mnemosyneDefaultRelativePath,
   rebuildGraphEdgesFromLegacy,
   validateTaskGraphEdges,
@@ -41,5 +42,27 @@ describe('task-graph', () => {
 
   it('defaults mnemosyne path per project', () => {
     expect(mnemosyneDefaultRelativePath('abc')).toBe('mnemosyne/abc');
+  });
+
+  it('preserves fork/join/cycle edges when re-syncing legacy tree/ordering', () => {
+    const parent = task('p', { dependencies: ['c'] });
+    const child = task('c');
+    const cycle = {
+      edge_id: 'cycle:c->p',
+      from_task_id: 'c',
+      to_task_id: 'p',
+      kind: 'cycle' as const,
+      break_condition: 'human:REVIEW',
+    };
+    const fork = {
+      edge_id: 'fork:p->x',
+      from_task_id: 'p',
+      to_task_id: 'x',
+      kind: 'fork' as const,
+    };
+    const merged = mergeLegacyTreeOrderingIntoGraph([cycle, fork], [parent, child, task('x')]);
+    expect(merged.some((edge) => edge.kind === 'tree')).toBe(true);
+    expect(merged.some((edge) => edge.kind === 'cycle')).toBe(true);
+    expect(merged.some((edge) => edge.kind === 'fork')).toBe(true);
   });
 });
