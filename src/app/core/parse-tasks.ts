@@ -2,6 +2,7 @@ import type { ChatArtifact, TaskDraft, TaskConnectorKind } from './models';
 import { TASK_CONNECTOR_KINDS } from './models';
 import { taskBriefFromDraftRecord } from './task-brief';
 import { normalizeLoopMode, normalizeTaskNodeKind } from './task-node-kind';
+import { normalizeLifecyclePhase } from './task-lifecycle';
 
 export function parseGeneratedTaskListFromSources(text: string, artifacts: ChatArtifact[]): TaskDraft[] {
   const errors: string[] = [];
@@ -65,6 +66,7 @@ export function parseGeneratedTaskList(text: string): TaskDraft[] {
     const nodeKind = record['node_kind'] !== undefined ? normalizeTaskNodeKind(record['node_kind']) : undefined;
     const loopMode = normalizeLoopMode(record['loop_mode']);
     const connector = parseConnectorKind(record['connector_kind']);
+    const lifecyclePhase = normalizeLifecyclePhase(record['lifecycle_phase']);
     return {
       title,
       prompt,
@@ -75,6 +77,7 @@ export function parseGeneratedTaskList(text: string): TaskDraft[] {
       loop_mode: loopMode,
       brief,
       connector_kind: connector,
+      lifecycle_phase: lifecyclePhase,
     };
   });
 }

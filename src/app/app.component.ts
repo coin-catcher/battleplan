@@ -59,6 +59,25 @@ import {
 import { MarkdownComponent } from 'ngx-markdown';
 import { editorPanelDirty } from './core/editor-dirty';
 import { taskDar, taskInitialPrompt } from './core/task-fields';
+import {
+  buildDefaultTaskBrief,
+  emptyTaskBrief,
+  mergeTaskBriefWithDefaults,
+  TASK_BRIEF_FIELDS,
+  type TaskBrief,
+} from './core/task-brief';
+import { applyLifecycleBriefDefaults } from './core/task-lifecycle';
+import { buildKanbanBoard } from './core/kanban-board';
+import {
+  edgeKey,
+  incomingEdges,
+  outgoingEdges,
+  taskEdgeKindLabel,
+  TASK_EDGE_KINDS,
+  validateTaskGraphEdges,
+  type TaskEdgeKind,
+  type TaskGraphEdge,
+} from './core/task-graph';
 import { normalChildIds } from './core/dependencies';
 import { libraryAgentsForKind, taskResearchChatStarted } from './core/agent-bindings';
 import { BattleplanStore } from './state/battleplan-store.service';
@@ -118,7 +137,13 @@ export class AppComponent implements OnInit {
       ?? (project && Number.isFinite(project.map_x) && Number.isFinite(project.map_y)
         ? { x: project.map_x as number, y: project.map_y as number }
         : undefined);
-    return layoutMindmap(project?.title ?? 'Project', tasks, projectPin, project?.status);
+    return layoutMindmap(
+      project?.title ?? 'Project',
+      tasks,
+      projectPin,
+      project?.status,
+      project?.task_graph_edges,
+    );
   });
 
   apiKey = '';
@@ -150,6 +175,22 @@ export class AppComponent implements OnInit {
   taskTitle = '';
   taskDar = '';
   taskInitialPrompt = '';
+  taskBriefForm: TaskBrief = emptyTaskBrief();
+  readonly taskBriefFields = TASK_BRIEF_FIELDS;
+  readonly projectViewMode = signal<'mindmap' | 'kanban'>('mindmap');
+  graphEdgeToTaskId = '';
+  graphEdgeKind: TaskEdgeKind = 'ordering';
+  graphEdgeBreakCondition = '';
+  graphLinkDirection: 'incoming' | 'child' = 'incoming';
+  readonly taskEdgeKinds = TASK_EDGE_KINDS;
+  readonly taskEdgeKindLabel = taskEdgeKindLabel;
+  private taskLinkSyncKey = '';
+
+  readonly kanbanBoard = computed(() => {
+    const project = this.store.project();
+    if (!project) return [];
+    return buildKanbanBoard(this.store.tasks(), project, this.store.agents());
+  });
   subprojectInitialPrompt = '';
   outputType: OutputType = 'code';
   dependencies: string[] = [];
@@ -276,8 +317,16 @@ export class AppComponent implements OnInit {
         this.boundTaskFormId = '';
         return;
       }
-      if (this.boundTaskFormId === task.task_id) return;
+      const linkSyncKey = `${task.dependencies.join('|')}|${(task.sibling_dependencies ?? []).join('|')}`;
+      if (this.boundTaskFormId === task.task_id) {
+        if (this.taskLinkSyncKey === linkSyncKey) return;
+        this.taskLinkSyncKey = linkSyncKey;
+        this.dependencies = [...task.dependencies];
+        this.siblingDependencies = [...(task.sibling_dependencies ?? [])];
+        return;
+      }
       this.boundTaskFormId = task.task_id;
+      this.taskLinkSyncKey = linkSyncKey;
       this.taskTitle = task.title;
       this.taskDar = taskDar(task);
       this.taskInitialPrompt = taskInitialPrompt(task);
@@ -286,6 +335,21 @@ export class AppComponent implements OnInit {
       this.siblingDependencies = [...(task.sibling_dependencies ?? [])];
       this.taskResearchAgentId = task.research_agent_id ?? '';
       this.taskCodeAgentId = task.code_agent_id ?? '';
+      const project = this.store.project();
+      const briefInput = {
+        title: task.title,
+        initialPrompt: taskInitialPrompt(task),
+        dar: taskDar(task),
+        outputType: task.output_type,
+        nodeKind: task.node_kind,
+        projectDar: project?.dar,
+        repoUrl: project?.repo_url,
+        lifecyclePhase: task.lifecycle_phase,
+      };
+      this.taskBriefForm = mergeTaskBriefWithDefaults(
+        task.brief,
+        applyLifecycleBriefDefaults(briefInput, task.lifecycle_phase),
+      );
     });
 
     effect(() => {
@@ -559,6 +623,7 @@ export class AppComponent implements OnInit {
         sibling_dependencies: this.siblingDependencies,
         research_agent_id: this.taskResearchAgentId,
         code_agent_id: this.taskCodeAgentId,
+        brief: this.taskBriefForm,
       });
     } else if (selection.kind === 'agent' || selection.kind === 'agent-create') {
       await this.store.saveAgentFromEditor(this.agentEditorForm());
@@ -1802,14 +1867,6 @@ export class AppComponent implements OnInit {
     void this.store.openOutput(taskId, 'research');
   }
 
-  toggleSiblingDependency(taskId: string, event: Event): void {
-    const checked = (event.target as HTMLInputElement).checked;
-    this.siblingDependencies = checked
-      ? [...this.siblingDependencies, taskId]
-      : this.siblingDependencies.filter((id) => id !== taskId);
-    this.onEditorFieldAutoSave();
-  }
-
   async onProjectChange(event: Event): Promise<void> {
     const projectId = (event.target as HTMLSelectElement).value;
     if (!projectId || projectId === this.store.projectId()) return;
@@ -1858,7 +1915,94 @@ export class AppComponent implements OnInit {
       sibling_dependencies: this.siblingDependencies,
       research_agent_id: this.taskResearchAgentId,
       code_agent_id: this.taskCodeAgentId,
+      brief: this.taskBriefForm,
     });
+  }
+
+  regenerateTaskBrief(): void {
+    const project = this.store.project();
+    const task = this.store.selectedTask();
+    this.taskBriefForm = applyLifecycleBriefDefaults({
+      title: this.taskTitle,
+      initialPrompt: this.taskInitialPrompt,
+      dar: this.taskDar,
+      outputType: this.outputType,
+      projectDar: project?.dar,
+      repoUrl: project?.repo_url,
+      lifecyclePhase: task?.lifecycle_phase,
+    }, task?.lifecycle_phase);
+    void this.onEditorFieldAutoSave();
+  }
+
+  setProjectViewMode(mode: 'mindmap' | 'kanban'): void {
+    this.projectViewMode.set(mode);
+  }
+
+  openKanbanTask(taskId: string): void {
+    void this.store.openTask(taskId);
+  }
+
+  incomingGraphEdges(taskId: string): TaskGraphEdge[] {
+    const edges = this.store.project()?.task_graph_edges ?? [];
+    return incomingEdges(taskId, edges);
+  }
+
+  outgoingGraphEdges(taskId: string): TaskGraphEdge[] {
+    const edges = this.store.project()?.task_graph_edges ?? [];
+    return outgoingEdges(taskId, edges);
+  }
+
+  childGraphEdges(taskId: string): TaskGraphEdge[] {
+    return this.outgoingGraphEdges(taskId).filter((edge) => edge.kind === 'tree');
+  }
+
+  async addTaskGraphEdge(taskId: string): Promise<void> {
+    const otherId = this.graphEdgeToTaskId.trim();
+    if (!otherId || otherId === taskId) return;
+    const project = this.store.project();
+    if (!project) return;
+    const tasks = this.store.tasks();
+    const edges = [...(project.task_graph_edges ?? [])];
+    const kind = this.graphLinkDirection === 'child' ? 'tree' : this.graphEdgeKind;
+    const from = this.graphLinkDirection === 'child' ? taskId : otherId;
+    const to = this.graphLinkDirection === 'child' ? otherId : taskId;
+    if (kind === 'cycle' && !this.graphEdgeBreakCondition.trim()) {
+      this.store.error.set('Cycle edges require a break condition.');
+      return;
+    }
+    const key = edgeKey(from, to, kind);
+    if (edges.some((edge) => edge.edge_id === key)) return;
+    edges.push({
+      edge_id: key,
+      from_task_id: from,
+      to_task_id: to,
+      kind,
+      break_condition: this.graphEdgeBreakCondition.trim() || undefined,
+    });
+    try {
+      validateTaskGraphEdges(edges, new Set(tasks.map((task) => task.task_id)));
+    } catch (error) {
+      this.store.error.set(error instanceof Error ? error.message : 'Invalid graph edge.');
+      return;
+    }
+    await this.store.updateProjectTaskGraph(edges);
+    this.graphEdgeToTaskId = '';
+    this.graphEdgeBreakCondition = '';
+  }
+
+  taskTitle(taskId: string): string {
+    return this.store.tasks().find((item) => item.task_id === taskId)?.title ?? taskId;
+  }
+
+  async removeTaskGraphEdge(edgeId: string): Promise<void> {
+    const project = this.store.project();
+    if (!project) return;
+    const edges = (project.task_graph_edges ?? []).filter((edge) => edge.edge_id !== edgeId);
+    await this.store.updateProjectTaskGraph(edges);
+  }
+
+  taskBriefLabel(field: (typeof TASK_BRIEF_FIELDS)[number]): string {
+    return field.toUpperCase();
   }
 
   deleteTask(task: ProjectTask): void {

@@ -1,5 +1,6 @@
 import type { MindmapLinkKind } from './link-relocation';
 import type { ProjectTask, TaskStatus } from './models';
+import type { TaskGraphEdge } from './task-graph';
 import {
   depthByNormalLinks,
   normalChildIds,
@@ -177,6 +178,7 @@ export function layoutMindmap(
   tasks: ProjectTask[],
   projectPin?: { x: number; y: number },
   projectStatus?: TaskStatus,
+  graphEdges?: TaskGraphEdge[],
 ): MindmapLayout {
   const byId = new Map(tasks.map((task) => [task.task_id, task]));
   const depth = depthByNormalLinks(tasks);
@@ -284,18 +286,29 @@ export function layoutMindmap(
       if (target) edges.push(drawEdge('project-root', project, target, false));
     }
   }
-  for (const task of tasks) {
-    const parent = nodeById.get(task.task_id);
-    if (!parent) continue;
-    for (const childId of normalChildIds(task, byId)) {
-      const child = nodeById.get(childId);
-      if (!child || child.id === parent.id) continue;
-      edges.push(drawEdge('child', parent, child, false));
+  if (graphEdges?.length) {
+    for (const edge of graphEdges) {
+      const from = nodeById.get(edge.from_task_id);
+      const to = nodeById.get(edge.to_task_id);
+      if (!from || !to || from.id === to.id) continue;
+      const linkKind = mindmapKindForGraphEdge(edge.kind);
+      const dashed = edge.kind !== 'tree';
+      edges.push(drawEdge(linkKind, from, to, dashed));
     }
-    for (const siblingId of siblingDependencyIds(task)) {
-      const sibling = nodeById.get(siblingId);
-      if (!sibling || sibling.id === parent.id) continue;
-      edges.push(drawEdge('sibling', parent, sibling, true));
+  } else {
+    for (const task of tasks) {
+      const parent = nodeById.get(task.task_id);
+      if (!parent) continue;
+      for (const childId of normalChildIds(task, byId)) {
+        const child = nodeById.get(childId);
+        if (!child || child.id === parent.id) continue;
+        edges.push(drawEdge('child', parent, child, false));
+      }
+      for (const siblingId of siblingDependencyIds(task)) {
+        const sibling = nodeById.get(siblingId);
+        if (!sibling || sibling.id === parent.id) continue;
+        edges.push(drawEdge('sibling', parent, sibling, true));
+      }
     }
   }
   return {
@@ -324,6 +337,12 @@ function separateUnpinned(nodes: MindmapNode[], tasks: ProjectTask[]): void {
       }
     }
   }
+}
+
+function mindmapKindForGraphEdge(kind: TaskGraphEdge['kind']): MindmapLinkKind {
+  if (kind === 'tree') return 'child';
+  if (kind === 'fork' || kind === 'join' || kind === 'cycle' || kind === 'ordering') return kind;
+  return 'sibling';
 }
 
 function drawEdge(kind: MindmapLinkKind, from: MindmapNode, to: MindmapNode, dashed: boolean): MindmapEdge {

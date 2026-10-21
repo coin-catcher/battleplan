@@ -1,5 +1,6 @@
 import type { LoopMode, TaskNodeKind } from './task-node-kind';
 import type { TaskBrief } from './task-brief';
+import type { TaskHandoff } from './task-handoff';
 
 export const TASK_STATUSES = ['TODO', 'DOING', 'REVIEW', 'BLOCKED', 'DONE', 'ABANDONED'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
@@ -48,8 +49,23 @@ export interface Project {
   agent_library_version?: number;
   /** Graph-of-Agents schema generation (brief, connectors, graph-delta). */
   graph_of_agents_version?: number;
+  /** Default Hermes connector for subprojects in this project. */
+  default_hermes_connector_id?: string;
+  /** Local Mnemosyne store path (hybrid memory v1). */
+  mnemosyne_base_path?: string;
+  /** Unified task graph edges (tree, ordering, fork, join, cycle). */
+  task_graph_edges?: import('./task-graph').TaskGraphEdge[];
   created_at: string;
   updated_at: string;
+}
+
+export const LIFECYCLE_PHASES = ['discover', 'architect', 'build', 'verify', 'ship'] as const;
+export type LifecyclePhase = (typeof LIFECYCLE_PHASES)[number];
+
+export interface TaskContextManifest {
+  /** Repo paths, URLs, or mnemo:// pointers included in agent context. */
+  pointers: string[];
+  memory_pointer_ids?: string[];
 }
 
 export interface ProjectTask {
@@ -94,6 +110,12 @@ export interface ProjectTask {
   backend_idempotency_key?: string;
   /** Last observed external run id (Hermes card, Cursor agent id, …). */
   backend_run_id?: string;
+  /** Lifecycle phase template (not a mandatory global ordering). */
+  lifecycle_phase?: LifecyclePhase;
+  /** Last completion handoff for downstream tasks (local → cloud). */
+  handoff?: TaskHandoff;
+  /** Explicit context inclusion (git + Mnemosyne pointers). */
+  context_manifest?: TaskContextManifest;
   created_at: string;
   updated_at: string;
 }
@@ -154,6 +176,7 @@ export interface TaskDraft {
   loop_mode?: LoopMode;
   brief?: TaskBrief;
   connector_kind?: TaskConnectorKind;
+  lifecycle_phase?: LifecyclePhase;
 }
 
 /** Execution backend for released tasks (see agent-connector.ts). */
