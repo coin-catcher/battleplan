@@ -59,6 +59,13 @@ import {
 import { MarkdownComponent } from 'ngx-markdown';
 import { editorPanelDirty } from './core/editor-dirty';
 import { taskDar, taskInitialPrompt } from './core/task-fields';
+import {
+  buildDefaultTaskBrief,
+  emptyTaskBrief,
+  completeTaskBrief,
+  TASK_BRIEF_FIELDS,
+  type TaskBrief,
+} from './core/task-brief';
 import { normalChildIds } from './core/dependencies';
 import { libraryAgentsForKind, taskResearchChatStarted } from './core/agent-bindings';
 import { BattleplanStore } from './state/battleplan-store.service';
@@ -150,6 +157,8 @@ export class AppComponent implements OnInit {
   taskTitle = '';
   taskDar = '';
   taskInitialPrompt = '';
+  taskBriefForm: TaskBrief = emptyTaskBrief();
+  readonly taskBriefFields = TASK_BRIEF_FIELDS;
   subprojectInitialPrompt = '';
   outputType: OutputType = 'code';
   dependencies: string[] = [];
@@ -286,6 +295,16 @@ export class AppComponent implements OnInit {
       this.siblingDependencies = [...(task.sibling_dependencies ?? [])];
       this.taskResearchAgentId = task.research_agent_id ?? '';
       this.taskCodeAgentId = task.code_agent_id ?? '';
+      const project = this.store.project();
+      this.taskBriefForm = completeTaskBrief(task.brief, {
+        title: task.title,
+        initialPrompt: taskInitialPrompt(task),
+        dar: taskDar(task),
+        outputType: task.output_type,
+        nodeKind: task.node_kind,
+        projectDar: project?.dar,
+        repoUrl: project?.repo_url,
+      });
     });
 
     effect(() => {
@@ -559,6 +578,7 @@ export class AppComponent implements OnInit {
         sibling_dependencies: this.siblingDependencies,
         research_agent_id: this.taskResearchAgentId,
         code_agent_id: this.taskCodeAgentId,
+        brief: this.taskBriefForm,
       });
     } else if (selection.kind === 'agent' || selection.kind === 'agent-create') {
       await this.store.saveAgentFromEditor(this.agentEditorForm());
@@ -1858,7 +1878,25 @@ export class AppComponent implements OnInit {
       sibling_dependencies: this.siblingDependencies,
       research_agent_id: this.taskResearchAgentId,
       code_agent_id: this.taskCodeAgentId,
+      brief: this.taskBriefForm,
     });
+  }
+
+  regenerateTaskBrief(): void {
+    const project = this.store.project();
+    this.taskBriefForm = buildDefaultTaskBrief({
+      title: this.taskTitle,
+      initialPrompt: this.taskInitialPrompt,
+      dar: this.taskDar,
+      outputType: this.outputType,
+      projectDar: project?.dar,
+      repoUrl: project?.repo_url,
+    });
+    void this.onEditorFieldAutoSave();
+  }
+
+  taskBriefLabel(field: (typeof TASK_BRIEF_FIELDS)[number]): string {
+    return field.toUpperCase();
   }
 
   deleteTask(task: ProjectTask): void {

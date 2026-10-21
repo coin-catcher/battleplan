@@ -10,9 +10,9 @@ Battleplan already orchestrates ideation (mindmap), task execution (Cursor + Age
 
 1. **Battleplan owns the plan** — nodes, edges, briefs, context manifests, human decision/fog nodes.
 2. **Backends own execution** — Hermes, Cursor, research HTTP; status flows back via observations (WebSocket / poll).
-3. **Skills own procedure inside a node** — not which node runs when (except black-box graph-owning playbooks run as import-only nodes).
+3. **Battleplan orchestrates the lifecycle** — skill stacks (Pocock, Osmani, pstack) merge into a Battleplan-flavored define → architect → build → verify → ship flow; tasks are atomic brief-backed units on mindmap/kanban; agents report status; handoffs cross local/cloud boundaries. Skills inform **how** work runs inside a task, not a second graph owner.
 4. **Graph-delta pipeline** — every source (Generate Tasks, grill-me, Hermes decomposer, ticket imports) emits proposals; humans accept/reject before merge.
-5. **pstack brief** — canonical task fields; refuse release when brief is partial.
+5. **pstack brief** — required on every task; defaults generated at create; editable in task editor.
 6. **Multi-connector** — several Hermes installs + Cursor + research agents; Battleplan enforces release budgets.
 
 ## Deliverables in this folder
@@ -23,6 +23,7 @@ Battleplan already orchestrates ideation (mindmap), task execution (Cursor + Age
 | [task-brief-schema.json](./task-brief-schema.json) | JSON Schema for pstack brief on `ProjectTask` |
 | [connector-schema.json](./connector-schema.json) | JSON Schema for project-level connector registry (v2) |
 | [references.json](./references.json) | External links (Hermes, skill repos, Mnemosyne/Hindsight) |
+| [MEMORY_DESIGN_OPTIONS.md](./MEMORY_DESIGN_OPTIONS.md) | Pros/cons for memory v1 (Q2 open) |
 
 ## Code landed on branch `cursor/graph-of-agents-d51c` (foundation)
 
@@ -48,7 +49,18 @@ Battleplan already orchestrates ideation (mindmap), task execution (Cursor + Age
 | Hermes local + Cursor cloud in one graph | Tasks 5–7 | `connector_kind`, Hermes status map |
 | pstack brief + skill-stack ideas | Task 1 | `task-brief.ts`, optional on Execute |
 
-**Interview status:** Round 1 frontier questions are open in the Graph of Agents agent chat until we confirm the design tree; no further implementation beyond foundation until you confirm shared understanding.
+**Interview status:** Round 1 answers recorded (Q2 memory still open — see MEMORY_DESIGN_OPTIONS.md). Round 2 in agent chat.
+
+| # | Decision |
+|---|----------|
+| 1 | Battleplan canonical plan graph |
+| 2 | Memory: need record/recall/extrapolate — option study in progress |
+| 3 | Task brief required with generated defaults (**implemented**) |
+| 4 | Plain-text grilling + graph-delta import |
+| 5 | Default Hermes Docker per subproject |
+| 6 | Defer n8n |
+| 7 | Battleplan orchestrates; no black-box graph skills |
+| 8 | Mindmap + kanban before memory/inbox views |
 
 ## Skill-stack presets (recommended)
 

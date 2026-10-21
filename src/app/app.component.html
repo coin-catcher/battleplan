@@ -569,6 +569,25 @@
                   </label>
                 }
               </div>
+              <details class="editor-disclosure" open>
+                <summary>Task brief</summary>
+                <p class="eyebrow">Canonical task definition for agents (pstack-style). Defaults are generated from title and prompts; edit or regenerate anytime before Execute.</p>
+                <div class="composer-actions">
+                  <button type="button" class="ghost" (click)="regenerateTaskBrief()">Regenerate defaults</button>
+                </div>
+                @for (field of taskBriefFields; track field) {
+                  <label class="field">
+                    <span>{{ taskBriefLabel(field) }}</span>
+                    <textarea
+                      rows="3"
+                      [(ngModel)]="taskBriefForm[field]"
+                      [name]="'taskBrief-' + field + '-' + task.task_id"
+                      (focus)="onTaskFieldFocus()"
+                      (blur)="onEditorFieldBlur()"
+                    ></textarea>
+                  </label>
+                }
+              </details>
               <details class="editor-disclosure">
                 <summary>Data and Rules</summary>
                 <label class="field">

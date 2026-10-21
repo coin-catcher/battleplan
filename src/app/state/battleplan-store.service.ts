@@ -775,6 +775,8 @@ export class BattleplanStore {
     sibling_dependencies: string[];
     research_agent_id?: string;
     code_agent_id?: string;
+    brief?: import('../core/task-brief').TaskBrief;
+    regenerate_brief?: boolean;
   }): Promise<void> {
     const task = this.selectedTask();
     if (!task) return;

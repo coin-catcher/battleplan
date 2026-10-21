@@ -13,7 +13,11 @@ Battleplan is the **canonical plan graph** (mindmap): goals, dependencies, human
 
 ## Task brief (pstack)
 
-Optional `brief` on `ProjectTask` uses the pstack template: **GOAL, SCOPE, CONTEXT, ACCEPTANCE, VERIFY, TIMEBOX, FORBIDDEN, REPORT, STANDING**. If any brief field is set, **all** fields are required before **Execute** (`task-brief.ts`).
+Every task carries a **Task brief** on `ProjectTask` (pstack fields: **GOAL, SCOPE, CONTEXT, ACCEPTANCE, VERIFY, TIMEBOX, FORBIDDEN, REPORT, STANDING**). New tasks receive **auto-generated defaults** from title, prompts, and DAR (`buildDefaultTaskBrief`). The task editor exposes all fields with **Regenerate defaults**. Execute requires a complete brief and includes it in agent prompts (`task-brief.ts`, task panel).
+
+## Orchestration
+
+**Battleplan orchestrates** the lifecycle (design → build → deliver): atomic tasks with briefs appear on mindmap and kanban; agents report status; handoffs carry outputs across local and cloud backends. Skill stacks inform **procedure inside a task**, not a parallel graph owner—no black-box `orchestrate` / `wayfinder` map replacement.
 
 Generate Tasks JSON may include a nested `brief` object or extended fields (`node_kind`, `loop_mode`, `connector_kind`). See [GENERATE_TASKS.md](./GENERATE_TASKS.md).
 

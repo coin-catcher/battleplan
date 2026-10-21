@@ -25,7 +25,7 @@ Each element of the array:
 | `output_type` | `"code"` or `"research"` (or `both`-style values split into research + code tasks) |
 | `depends_on` | Titles of **parent** tasks in this same array (see linking below) |
 | `sequential_with` | Optional titles of other tasks in the batch that touch the same code and must run **sequentially** (sibling dependencies, not tree depth) |
-| `brief` | Optional pstack-style object (`goal`, `scope`, `context`, `acceptance`, `verify`, `timebox`, `forbidden`, `report`, `standing`). If present, **all** fields are required before Execute |
+| `brief` | Optional pstack-style object in JSON; omitted fields are filled from **`buildDefaultTaskBrief`** at create time. Every stored task has a complete brief before Execute |
 | `node_kind` | Optional `work`, `decision`, `gate`, or `fog` (decision/fog nodes are not dispatched to agents) |
 | `loop_mode` | Optional `HITL` or `AFK` (human-in-the-loop vs agent-alone) |
 | `connector_kind` | Optional `cursor`, `hermes`, `research_http`, or `custom` preferred backend |

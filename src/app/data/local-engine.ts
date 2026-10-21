@@ -61,7 +61,13 @@ import {
   generateTasksInstructionForProject,
 } from '../core/generate-tasks';
 import { defaultDarForOutputType, taskDar, taskInitialPrompt } from '../core/task-fields';
-import { assertTaskBriefReadyForRelease } from '../core/task-brief';
+import {
+  assertTaskBriefReadyForRelease,
+  completeTaskBrief,
+  formatTaskBriefMarkdown,
+  type TaskBrief,
+  type TaskBriefBuildInput,
+} from '../core/task-brief';
 import { isDispatchableNodeKind } from '../core/task-node-kind';
 import type { LoopMode, TaskNodeKind } from '../core/task-node-kind';
 import type { TaskBrief } from '../core/task-brief';
@@ -106,6 +112,21 @@ interface NormalizedDraft {
   loop_mode?: LoopMode;
   brief?: TaskBrief;
   connector_kind?: TaskConnectorKind;
+}
+
+function briefBuildInput(
+  task: ProjectTask,
+  project: Project,
+): TaskBriefBuildInput {
+  return {
+    title: task.title,
+    initialPrompt: taskInitialPrompt(task),
+    dar: taskDar(task),
+    outputType: task.output_type,
+    nodeKind: task.node_kind,
+    projectDar: project.dar,
+    repoUrl: project.repo_url,
+  };
 }
 
 export class LocalEngine {
@@ -385,6 +406,7 @@ export class LocalEngine {
       const parent = existing.find((item) => item.task_id === parentId);
       if (parent) await this.repo.saveTask(parent);
     }
+    task.brief = completeTaskBrief(undefined, briefBuildInput(task, project));
     await this.repo.saveTask(task);
     const parent = parentId ? existing.find((item) => item.task_id === parentId) : undefined;
     await this.repo.saveMessage(this.taskNote(
@@ -404,27 +426,30 @@ export class LocalEngine {
       const dar = defaultDarForOutputType(draft.output_type);
       const initialPrompt = draft.prompt.trim();
       const taskId = this.newId();
+      const skeleton = {
+        task_id: taskId,
+        project_id: projectId,
+        title: draft.title,
+        prompt: dar,
+        dar: dar || undefined,
+        initial_prompt: initialPrompt || undefined,
+        dependencies: [] as string[],
+        status: 'TODO' as const,
+        output_type: draft.output_type,
+        order: existing.length + index,
+        research_agent_id: draft.output_type === 'research' ? project.default_research_agent_id : undefined,
+        code_agent_id: draft.output_type === 'code' ? project.default_code_agent_id : undefined,
+        node_kind: draft.node_kind,
+        loop_mode: draft.loop_mode,
+        connector_kind: draft.connector_kind,
+        backend_idempotency_key: taskId,
+        created_at: timestamp,
+        updated_at: timestamp,
+      };
       return {
-      task_id: taskId,
-      project_id: projectId,
-      title: draft.title,
-      prompt: dar,
-      dar: dar || undefined,
-      initial_prompt: initialPrompt || undefined,
-      dependencies: [],
-      status: 'TODO',
-      output_type: draft.output_type,
-      order: existing.length + index,
-      research_agent_id: draft.output_type === 'research' ? project.default_research_agent_id : undefined,
-      code_agent_id: draft.output_type === 'code' ? project.default_code_agent_id : undefined,
-      node_kind: draft.node_kind,
-      loop_mode: draft.loop_mode,
-      brief: draft.brief,
-      connector_kind: draft.connector_kind,
-      backend_idempotency_key: taskId,
-      created_at: timestamp,
-      updated_at: timestamp,
-    };
+        ...skeleton,
+        brief: completeTaskBrief(draft.brief, briefBuildInput(skeleton as ProjectTask, project)),
+      };
     });
     bindDependencies(existing, created, normalized);
     bindSequentialDraftLinks(existing, created, normalized);
@@ -473,8 +498,11 @@ export class LocalEngine {
     map_y?: number;
     research_agent_id?: string;
     code_agent_id?: string;
+    brief?: TaskBrief;
+    regenerate_brief?: boolean;
   }): Promise<ProjectTask> {
     const task = await this.requireTask(projectId, taskId);
+    const project = await this.requireProject(projectId);
     const changes: string[] = [];
     if (patch.title !== undefined) {
       const title = patch.title.trim();
@@ -547,6 +575,13 @@ export class LocalEngine {
       const next = patch.research_agent_id.trim();
       if (next !== (task.research_agent_id ?? '')) changes.push('Research agent updated.');
       task.research_agent_id = next || undefined;
+    }
+    if (patch.regenerate_brief) {
+      task.brief = completeTaskBrief(undefined, briefBuildInput(task, project));
+      changes.push('Task brief regenerated.');
+    } else if (patch.brief !== undefined) {
+      task.brief = completeTaskBrief(patch.brief, briefBuildInput(task, project));
+      changes.push('Task brief updated.');
     }
     if (patch.code_agent_id !== undefined) {
       const next = patch.code_agent_id.trim();
@@ -786,7 +821,7 @@ export class LocalEngine {
     if (!isDispatchableNodeKind(task.node_kind)) {
       throw new Error('Decision and fog nodes are completed in Battleplan, not dispatched to agents.');
     }
-    assertTaskBriefReadyForRelease(task.brief);
+    await this.ensureTaskBrief(task);
     if (task.cursor_agent_id) throw new Error('This task already has a Cursor agent.');
     const initial = taskInitialPrompt(task);
     if (!initial) throw new Error('Initial prompt is required.');
@@ -1452,6 +1487,9 @@ export class LocalEngine {
       lines.push('Implement the task in code on the agent branch.');
     }
     lines.push(`Task title: ${task.title}`);
+    if (task.brief) {
+      lines.push('Task brief:', formatTaskBriefMarkdown(task.brief));
+    }
     const siblingIds = siblingDependencyIds(task);
     if (siblingIds.length > 0) {
       lines.push(`This task depends on these completed task ids: ${siblingIds.join(', ')}.`);
@@ -1530,14 +1568,16 @@ export class LocalEngine {
   ): Promise<ChatMessage> {
     this.markTaskDoingOnAgentChat(task);
     const dar = joinDarSections(await collectTaskDarSections(task, this.darLookup()));
+    const briefSection = task.brief ? formatTaskBriefMarkdown(task.brief) : '';
     const systemPrompt = joinDarSections([
       optionString(agent.options, 'system_prompt'),
       dar,
+      briefSection,
     ]);
     const prior = await this.repo.listTaskMessages(task.task_id);
     const turns = researchTurnsFromMessages(prior);
     const content = options?.isFirstExecute
-      ? joinDarSections([dar, userMessage])
+      ? joinDarSections([dar, briefSection, userMessage])
       : userMessage;
     turns.push({ role: 'user', content });
     const result = await sendResearchAgentChat(agent, turns, systemPrompt);
@@ -1665,6 +1705,18 @@ export class LocalEngine {
     const saved: ChatMessage = { ...message, message_id: this.newId(), created_at: this.now() };
     await this.repo.saveMessage(saved);
     return saved;
+  }
+
+  private async ensureTaskBrief(task: ProjectTask): Promise<void> {
+    const project = await this.requireProject(task.project_id);
+    const next = completeTaskBrief(task.brief, briefBuildInput(task, project));
+    assertTaskBriefReadyForRelease(next);
+    const unchanged = task.brief && JSON.stringify(task.brief) === JSON.stringify(next);
+    task.brief = next;
+    if (!unchanged) {
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
+    }
   }
 
   private async requireProject(projectId: string): Promise<Project> {
