@@ -54,6 +54,41 @@
       </section>
 
       <div class="map-frame">
+        <div class="project-view-toggle" role="tablist" aria-label="Project view">
+          <button
+            type="button"
+            role="tab"
+            [class.active]="projectViewMode() === 'mindmap'"
+            [attr.aria-selected]="projectViewMode() === 'mindmap'"
+            (click)="setProjectViewMode('mindmap')"
+          >Mindmap</button>
+          <button
+            type="button"
+            role="tab"
+            [class.active]="projectViewMode() === 'kanban'"
+            [attr.aria-selected]="projectViewMode() === 'kanban'"
+            (click)="setProjectViewMode('kanban')"
+          >Kanban</button>
+        </div>
+        @if (projectViewMode() === 'kanban') {
+          <div class="kanban-board" aria-label="Task kanban">
+            @for (column of kanbanBoard(); track column.status) {
+              <section class="kanban-column">
+                <h3>{{ column.status }}</h3>
+                @for (card of column.cards; track card.task_id) {
+                  <button type="button" class="kanban-card" (click)="openKanbanTask(card.task_id)">
+                    <strong>{{ card.title }}</strong>
+                    <span class="kanban-meta">{{ card.output_type }} · {{ card.connector_kind }}</span>
+                    <span class="kanban-meta">{{ card.agent_label }}</span>
+                    @if (card.lifecycle_phase) {
+                      <span class="kanban-meta">{{ card.lifecycle_phase }}</span>
+                    }
+                  </button>
+                }
+              </section>
+            }
+          </div>
+        } @else {
         <div class="zoom-controls">
           <button type="button" (click)="zoomBy(1.15)" aria-label="Zoom in">+</button>
           <button type="button" (click)="zoomBy(1 / 1.15)" aria-label="Zoom out">−</button>
@@ -258,6 +293,7 @@
             </div>
           </div>
         </div>
+        }
       </div>
     }
 

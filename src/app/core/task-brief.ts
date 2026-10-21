@@ -92,6 +92,7 @@ export interface TaskBriefBuildInput {
   nodeKind?: TaskNodeKind;
   projectDar?: string;
   repoUrl?: string;
+  lifecyclePhase?: import('./models').LifecyclePhase;
 }
 
 const DEFAULT_STANDING = [

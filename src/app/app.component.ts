@@ -62,10 +62,12 @@ import { taskDar, taskInitialPrompt } from './core/task-fields';
 import {
   buildDefaultTaskBrief,
   emptyTaskBrief,
-  completeTaskBrief,
+  mergeTaskBriefWithDefaults,
   TASK_BRIEF_FIELDS,
   type TaskBrief,
 } from './core/task-brief';
+import { applyLifecycleBriefDefaults } from './core/task-lifecycle';
+import { buildKanbanBoard } from './core/kanban-board';
 import { normalChildIds } from './core/dependencies';
 import { libraryAgentsForKind, taskResearchChatStarted } from './core/agent-bindings';
 import { BattleplanStore } from './state/battleplan-store.service';
@@ -159,6 +161,12 @@ export class AppComponent implements OnInit {
   taskInitialPrompt = '';
   taskBriefForm: TaskBrief = emptyTaskBrief();
   readonly taskBriefFields = TASK_BRIEF_FIELDS;
+  readonly projectViewMode = signal<'mindmap' | 'kanban'>('mindmap');
+  readonly kanbanBoard = computed(() => {
+    const project = this.store.project();
+    if (!project) return [];
+    return buildKanbanBoard(this.store.tasks(), project, this.store.agents());
+  });
   subprojectInitialPrompt = '';
   outputType: OutputType = 'code';
   dependencies: string[] = [];
@@ -296,7 +304,7 @@ export class AppComponent implements OnInit {
       this.taskResearchAgentId = task.research_agent_id ?? '';
       this.taskCodeAgentId = task.code_agent_id ?? '';
       const project = this.store.project();
-      this.taskBriefForm = completeTaskBrief(task.brief, {
+      const briefInput = {
         title: task.title,
         initialPrompt: taskInitialPrompt(task),
         dar: taskDar(task),
@@ -304,7 +312,12 @@ export class AppComponent implements OnInit {
         nodeKind: task.node_kind,
         projectDar: project?.dar,
         repoUrl: project?.repo_url,
-      });
+        lifecyclePhase: task.lifecycle_phase,
+      };
+      this.taskBriefForm = mergeTaskBriefWithDefaults(
+        task.brief,
+        applyLifecycleBriefDefaults(briefInput, task.lifecycle_phase),
+      );
     });
 
     effect(() => {
@@ -1884,15 +1897,25 @@ export class AppComponent implements OnInit {
 
   regenerateTaskBrief(): void {
     const project = this.store.project();
-    this.taskBriefForm = buildDefaultTaskBrief({
+    const task = this.store.selectedTask();
+    this.taskBriefForm = applyLifecycleBriefDefaults({
       title: this.taskTitle,
       initialPrompt: this.taskInitialPrompt,
       dar: this.taskDar,
       outputType: this.outputType,
       projectDar: project?.dar,
       repoUrl: project?.repo_url,
-    });
+      lifecyclePhase: task?.lifecycle_phase,
+    }, task?.lifecycle_phase);
     void this.onEditorFieldAutoSave();
+  }
+
+  setProjectViewMode(mode: 'mindmap' | 'kanban'): void {
+    this.projectViewMode.set(mode);
+  }
+
+  openKanbanTask(taskId: string): void {
+    void this.store.openTask(taskId);
   }
 
   taskBriefLabel(field: (typeof TASK_BRIEF_FIELDS)[number]): string {

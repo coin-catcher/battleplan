@@ -49,18 +49,20 @@ Battleplan already orchestrates ideation (mindmap), task execution (Cursor + Age
 | Hermes local + Cursor cloud in one graph | Tasks 5–7 | `connector_kind`, Hermes status map |
 | pstack brief + skill-stack ideas | Task 1 | `task-brief.ts`, optional on Execute |
 
-**Interview status:** Round 1 answers recorded (Q2 memory still open — see MEMORY_DESIGN_OPTIONS.md). Round 2 in agent chat.
+**Interview status:** Round 2 answers recorded. Memory: **hybrid + Mnemosyne first** (Q1). Discover phase may shape arbitrary graphs (not a serial lifecycle pipeline).
 
 | # | Decision |
 |---|----------|
 | 1 | Battleplan canonical plan graph |
-| 2 | Memory: need record/recall/extrapolate — option study in progress |
+| 2 | Hybrid memory: git canonical + Mnemosyne episodic via manifest pointers |
 | 3 | Task brief required with generated defaults (**implemented**) |
 | 4 | Plain-text grilling + graph-delta import |
 | 5 | Default Hermes Docker per subproject |
 | 6 | Defer n8n |
-| 7 | Battleplan orchestrates; no black-box graph skills |
-| 8 | Mindmap + kanban before memory/inbox views |
+| 7 | Battleplan orchestrates lifecycle; skill stacks inform brief templates / phases, not black-box graph owners |
+| 8 | Mindmap + kanban v1 (**kanban shipped** in sidebar toggle) |
+| R2 | Standard handoff schema; default connectors; **auto-dispatch** when parents DONE (not manual release) |
+| R2 Q4 | Lifecycle phases discover/architect/build/verify/ship — **Discover** may propose fan-in/out graphs freely |
 
 ## Skill-stack presets (recommended)
 

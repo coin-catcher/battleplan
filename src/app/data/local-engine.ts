@@ -63,12 +63,17 @@ import {
 import { defaultDarForOutputType, taskDar, taskInitialPrompt } from '../core/task-fields';
 import {
   assertTaskBriefReadyForRelease,
-  completeTaskBrief,
   formatTaskBriefMarkdown,
+  mergeTaskBriefWithDefaults,
   type TaskBrief,
   type TaskBriefBuildInput,
 } from '../core/task-brief';
 import { isDispatchableNodeKind } from '../core/task-node-kind';
+import { defaultConnectorForTask } from '../core/connector-defaults';
+import { applyLifecycleBriefDefaults } from '../core/task-lifecycle';
+import { autoDispatchBatch } from '../core/task-ready';
+import { buildTaskHandoff } from '../core/task-handoff';
+import { normalParentIds } from '../core/dependencies';
 import type { LoopMode, TaskNodeKind } from '../core/task-node-kind';
 import type { TaskBrief } from '../core/task-brief';
 import { applyTaskStatusTransition, assertTaskTransition, type TaskTransitionTrigger } from '../core/task-state-machine';
@@ -112,6 +117,7 @@ interface NormalizedDraft {
   loop_mode?: LoopMode;
   brief?: TaskBrief;
   connector_kind?: TaskConnectorKind;
+  lifecycle_phase?: import('../core/models').LifecyclePhase;
 }
 
 function briefBuildInput(
@@ -126,7 +132,14 @@ function briefBuildInput(
     nodeKind: task.node_kind,
     projectDar: project.dar,
     repoUrl: project.repo_url,
+    lifecyclePhase: task.lifecycle_phase,
   };
+}
+
+function completeBriefForTask(task: ProjectTask, project: Project, existing?: TaskBrief): TaskBrief {
+  const input = briefBuildInput(task, project);
+  const defaults = applyLifecycleBriefDefaults(input, task.lifecycle_phase);
+  return mergeTaskBriefWithDefaults(existing, defaults);
 }
 
 export class LocalEngine {
@@ -406,7 +419,8 @@ export class LocalEngine {
       const parent = existing.find((item) => item.task_id === parentId);
       if (parent) await this.repo.saveTask(parent);
     }
-    task.brief = completeTaskBrief(undefined, briefBuildInput(task, project));
+    task.brief = completeBriefForTask(task, project);
+    task.connector_kind = task.connector_kind ?? defaultConnectorForTask(task, project);
     await this.repo.saveTask(task);
     const parent = parentId ? existing.find((item) => item.task_id === parentId) : undefined;
     await this.repo.saveMessage(this.taskNote(
@@ -448,7 +462,9 @@ export class LocalEngine {
       };
       return {
         ...skeleton,
-        brief: completeTaskBrief(draft.brief, briefBuildInput(skeleton as ProjectTask, project)),
+        brief: completeBriefForTask({ ...skeleton, lifecycle_phase: draft.lifecycle_phase } as ProjectTask, project, draft.brief),
+        connector_kind: draft.connector_kind ?? defaultConnectorForTask({ ...skeleton, lifecycle_phase: draft.lifecycle_phase } as ProjectTask, project),
+        lifecycle_phase: draft.lifecycle_phase,
       };
     });
     bindDependencies(existing, created, normalized);
@@ -568,6 +584,9 @@ export class LocalEngine {
       if (patch.status === 'ABANDONED') {
         await this.cascadeAbandonChildren(projectId, task);
       }
+      if (patch.status === 'DONE') {
+        await this.autoDispatchReadyTasks(projectId);
+      }
     }
     if (patch.map_x !== undefined) task.map_x = patch.map_x;
     if (patch.map_y !== undefined) task.map_y = patch.map_y;
@@ -577,10 +596,11 @@ export class LocalEngine {
       task.research_agent_id = next || undefined;
     }
     if (patch.regenerate_brief) {
-      task.brief = completeTaskBrief(undefined, briefBuildInput(task, project));
+      task.brief = completeBriefForTask(task, project);
+    task.connector_kind = task.connector_kind ?? defaultConnectorForTask(task, project);
       changes.push('Task brief regenerated.');
     } else if (patch.brief !== undefined) {
-      task.brief = completeTaskBrief(patch.brief, briefBuildInput(task, project));
+      task.brief = completeBriefForTask(task, project, patch.brief);
       changes.push('Task brief updated.');
     }
     if (patch.code_agent_id !== undefined) {
@@ -932,6 +952,18 @@ export class LocalEngine {
     else await this.repo.saveResearchOutput(mergedOutput as import('../core/models').TaskResearchOutput);
     await this.appendPendingChangesFromCommits(task.project_id, task, commits, pull.html_url);
     applyTaskStatusTransition(task, 'DONE', 'approve_merge');
+    const researchPath = task.output_type === 'research'
+      ? (mergedOutput as TaskResearchOutput).path
+      : undefined;
+    task.handoff = buildTaskHandoff({
+      summary: output.pr_message || task.title,
+      branch: mergedOutput.branch,
+      headSha: commits[0]?.sha,
+      artifacts: [researchPath ?? mergedOutput.pr_link].filter(Boolean) as string[],
+      memoryPointerIds: task.context_manifest?.memory_pointer_ids,
+      metadata: { pr_link: pull.html_url, output_type: task.output_type },
+      completedAt: this.now(),
+    });
     task.updated_at = this.now();
     await this.repo.saveTask(task);
     await this.record({
@@ -942,6 +974,7 @@ export class LocalEngine {
       content: 'Approved. Merged pull request into the base branch.',
       intent: 'approve',
     });
+    await this.autoDispatchReadyTasks(task.project_id);
     return task;
   }
 
@@ -1490,6 +1523,9 @@ export class LocalEngine {
     if (task.brief) {
       lines.push('Task brief:', formatTaskBriefMarkdown(task.brief));
     }
+    const tasks = await this.repo.listTasks(task.project_id);
+    const upstream = this.upstreamHandoffMarkdown(task, tasks);
+    if (upstream) lines.push(upstream);
     const siblingIds = siblingDependencyIds(task);
     if (siblingIds.length > 0) {
       lines.push(`This task depends on these completed task ids: ${siblingIds.join(', ')}.`);
@@ -1707,9 +1743,38 @@ export class LocalEngine {
     return saved;
   }
 
+  private upstreamHandoffMarkdown(task: ProjectTask, tasks: ProjectTask[]): string {
+    const blocks: string[] = [];
+    for (const parentId of normalParentIds(task.task_id, tasks)) {
+      const parent = tasks.find((item) => item.task_id === parentId);
+      const handoff = parent?.handoff;
+      if (!handoff?.summary?.trim()) continue;
+      blocks.push([
+        `Upstream handoff from "${parent!.title}":`,
+        handoff.summary,
+        handoff.branch ? `branch: ${handoff.branch}` : '',
+        handoff.head_sha ? `head_sha: ${handoff.head_sha}` : '',
+        handoff.memory_pointer_ids.length ? `memory: ${handoff.memory_pointer_ids.join(', ')}` : '',
+      ].filter(Boolean).join('\n'));
+    }
+    return blocks.join('\n\n');
+  }
+
+  private async autoDispatchReadyTasks(projectId: string): Promise<void> {
+    const tasks = await this.repo.listTasks(projectId);
+    const batch = autoDispatchBatch(tasks);
+    for (const candidate of batch) {
+      try {
+        await this.executeTask(candidate.task_id);
+      } catch {
+        // Task stays TODO when prerequisites or config block dispatch.
+      }
+    }
+  }
+
   private async ensureTaskBrief(task: ProjectTask): Promise<void> {
     const project = await this.requireProject(task.project_id);
-    const next = completeTaskBrief(task.brief, briefBuildInput(task, project));
+    const next = completeBriefForTask(task, project, task.brief);
     assertTaskBriefReadyForRelease(next);
     const unchanged = task.brief && JSON.stringify(task.brief) === JSON.stringify(next);
     task.brief = next;
@@ -1758,6 +1823,7 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
       loop_mode: item.loop_mode,
       brief: item.brief,
       connector_kind: item.connector_kind,
+      lifecycle_phase: item.lifecycle_phase,
     };
     if (types.length === 1) {
       normalized.push({ title, prompt, output_type: types[0], depends_on: depends, sequential_with: sequential, ...meta });
