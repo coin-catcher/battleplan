@@ -1886,10 +1886,6 @@ export class AppComponent implements OnInit {
     this.convertHoldTimer = undefined;
   }
 
-  openResearch(taskId: string): void {
-    void this.store.openOutput(taskId, 'research');
-  }
-
   async onProjectChange(event: Event): Promise<void> {
     const projectId = (event.target as HTMLSelectElement).value;
     if (!projectId || projectId === this.store.projectId()) return;

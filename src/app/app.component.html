@@ -594,15 +594,14 @@
                     <path d="M14 11v6" />
                   </svg>
                 </button>
-                @if (task.output_type === 'research') {
-                  <button type="button" class="accent" [disabled]="store.busy()" (click)="store.generateTasks()">Generate Tasks</button>
-                }
-                @if (task.status === 'REVIEW') {
-                  <button type="button" class="accent" [disabled]="chatActionsLocked()" (click)="approveTask()">Approve and merge</button>
-                }
-                @if (store.researchOutput(task.task_id)) {
-                  <button type="button" class="ghost" (click)="openResearch(task.task_id)">Research output</button>
-                }
+                <div class="task-page-action-group">
+                  @if (task.output_type === 'research') {
+                    <button type="button" class="accent" [disabled]="store.busy()" (click)="store.generateTasks()">Generate Tasks</button>
+                  }
+                  @if (task.status === 'REVIEW') {
+                    <button type="button" class="accent" [disabled]="chatActionsLocked()" (click)="approveTask()">Approve</button>
+                  }
+                </div>
               </div>
             </header>
 

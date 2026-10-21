@@ -917,8 +917,15 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   justify-content: flex-end;
   gap: 8px;
   flex: none;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   padding-bottom: 6px;
+}
+
+.task-page-action-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .icon-btn {
