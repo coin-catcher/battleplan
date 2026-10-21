@@ -515,6 +515,16 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 }
 
 .map-node.code { border-radius: 16px; }
+.map-node.decision {
+  border-radius: 8px;
+  transform: rotate(45deg);
+  .map-label { transform: rotate(-45deg); }
+}
+.map-node.gate {
+  border-radius: 4px;
+  border-width: 3px;
+  border-style: double;
+}
 .map-node.cloud {
   border: 0;
   border-radius: 0;

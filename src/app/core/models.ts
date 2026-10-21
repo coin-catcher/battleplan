@@ -1,3 +1,6 @@
+import type { LoopMode, TaskNodeKind } from './task-node-kind';
+import type { TaskBrief } from './task-brief';
+
 export const TASK_STATUSES = ['TODO', 'DOING', 'REVIEW', 'BLOCKED', 'DONE', 'ABANDONED'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type OutputType = 'code' | 'research' | 'subproject';
@@ -43,6 +46,8 @@ export interface Project {
   default_code_agent_id?: string;
   /** One-time Agent Library migration marker. */
   agent_library_version?: number;
+  /** Graph-of-Agents schema generation (brief, connectors, graph-delta). */
+  graph_of_agents_version?: number;
   created_at: string;
   updated_at: string;
 }
@@ -77,6 +82,18 @@ export interface ProjectTask {
   research_agent_id?: string;
   /** Bound code agent from the project library (optional). */
   code_agent_id?: string;
+  /** Plan-graph node kind (decision/gate/fog stay Battleplan-local). */
+  node_kind?: TaskNodeKind;
+  /** Human-in-the-loop vs agent-alone (Matt wayfinder / grill sessions). */
+  loop_mode?: LoopMode;
+  /** pstack-style brief; when set, all fields are required before Execute. */
+  brief?: TaskBrief;
+  /** Preferred execution backend for this task (Cursor, Hermes, …). */
+  connector_kind?: TaskConnectorKind;
+  /** Idempotency key when released to Hermes or other backends (= task_id by default). */
+  backend_idempotency_key?: string;
+  /** Last observed external run id (Hermes card, Cursor agent id, …). */
+  backend_run_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -133,7 +150,15 @@ export interface TaskDraft {
   depends_on: string[];
   /** Titles of other tasks in this batch that must run sequentially (conflicting / high-overlap code). */
   sequential_with?: string[];
+  node_kind?: TaskNodeKind;
+  loop_mode?: LoopMode;
+  brief?: TaskBrief;
+  connector_kind?: TaskConnectorKind;
 }
+
+/** Execution backend for released tasks (see agent-connector.ts). */
+export const TASK_CONNECTOR_KINDS = ['cursor', 'hermes', 'research_http', 'custom'] as const;
+export type TaskConnectorKind = (typeof TASK_CONNECTOR_KINDS)[number];
 
 export type Selection =
   | { kind: 'empty' }

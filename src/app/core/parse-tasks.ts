@@ -1,4 +1,7 @@
-import type { ChatArtifact, TaskDraft } from './models';
+import type { ChatArtifact, TaskDraft, TaskConnectorKind } from './models';
+import { TASK_CONNECTOR_KINDS } from './models';
+import { taskBriefFromDraftRecord } from './task-brief';
+import { normalizeLoopMode, normalizeTaskNodeKind } from './task-node-kind';
 
 export function parseGeneratedTaskListFromSources(text: string, artifacts: ChatArtifact[]): TaskDraft[] {
   const errors: string[] = [];
@@ -58,14 +61,30 @@ export function parseGeneratedTaskList(text: string): TaskDraft[] {
     if (!Array.isArray(sequentialRaw) || sequentialRaw.some((entry) => typeof entry !== 'string')) {
       throw new Error(`Task ${index + 1} sequential_with must be an array of task titles.`);
     }
+    const brief = taskBriefFromDraftRecord(record);
+    const nodeKind = record['node_kind'] !== undefined ? normalizeTaskNodeKind(record['node_kind']) : undefined;
+    const loopMode = normalizeLoopMode(record['loop_mode']);
+    const connector = parseConnectorKind(record['connector_kind']);
     return {
       title,
       prompt,
       output_type: output.trim(),
       depends_on: depends.map((entry) => entry.trim()).filter(Boolean),
       sequential_with: sequentialRaw.map((entry) => entry.trim()).filter(Boolean),
+      node_kind: nodeKind,
+      loop_mode: loopMode,
+      brief,
+      connector_kind: connector,
     };
   });
+}
+
+function parseConnectorKind(value: unknown): TaskConnectorKind | undefined {
+  if (typeof value !== 'string') return undefined;
+  const token = value.trim().toLowerCase();
+  return (TASK_CONNECTOR_KINDS as readonly string[]).includes(token)
+    ? (token as TaskConnectorKind)
+    : undefined;
 }
 
 function requiredText(value: unknown, label: string): string {
