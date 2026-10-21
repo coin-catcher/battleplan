@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://battleplan.local/schemas/skills-catalog/v1.json",
+  "title": "BattlePlanSkillsCatalog",
+  "description": "Curated skills and architecture stacks exposed in BattlePlan UI and serialized on projects/tasks.",
+  "type": "object",
+  "required": ["version", "skills", "stacks"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "skills": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/CatalogSkill" }
+    },
+    "stacks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ArchitectureStackRef" }
+    }
+  },
+  "$defs": {
+    "CatalogSkill": {
+      "type": "object",
+      "required": ["id", "name", "tier", "categories", "source"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$"
+        },
+        "name": { "type": "string", "maxLength": 128 },
+        "description": { "type": "string", "maxLength": 1024 },
+        "tier": {
+          "type": "string",
+          "enum": ["featured", "recommended", "suggested", "experimental"]
+        },
+        "categories": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "requires_mcp_auth": { "type": "boolean", "default": false },
+        "cloud_agent_compatible": { "type": "boolean", "default": true },
+        "source": { "$ref": "#/$defs/SkillSource" },
+        "license_spdx": { "type": "string" },
+        "pinned_ref": {
+          "type": "string",
+          "description": "Git tag, commit SHA, or marketplace version"
+        }
+      }
+    },
+    "SkillSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "repository", "skill_path"],
+          "properties": {
+            "type": { "const": "git_path" },
+            "repository": { "type": "string", "format": "uri" },
+            "skill_path": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "repository", "plugin_name"],
+          "properties": {
+            "type": { "const": "plugin" },
+            "repository": { "type": "string", "format": "uri" },
+            "plugin_name": { "type": "string" },
+            "skill_path": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "invoke"],
+          "properties": {
+            "type": { "const": "product_builtin" },
+            "invoke": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "path"],
+          "properties": {
+            "type": { "const": "cursor_cloud_skill" },
+            "path": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "ArchitectureStackRef": {
+      "type": "object",
+      "required": ["id", "label"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "default_skill_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "ProjectSkillBinding": {
+      "type": "object",
+      "required": ["skill_id", "scope"],
+      "properties": {
+        "skill_id": { "type": "string" },
+        "scope": { "type": "string", "enum": ["project", "task"] },
+        "task_id": { "type": "string" },
+        "import_state": {
+          "type": "string",
+          "enum": ["selected", "imported", "failed", "removed"]
+        },
+        "repo_path": {
+          "type": "string",
+          "description": "Path under target repo, e.g. .cursor/skills/poteto-mode"
+        },
+        "pinned_ref": { "type": "string" },
+        "imported_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ProjectArchitectureBinding": {
+      "type": "object",
+      "required": ["stack_id"],
+      "properties": {
+        "stack_id": { "type": "string" },
+        "scope": { "type": "string", "enum": ["project", "task"] },
+        "task_id": { "type": "string" },
+        "overrides_dar": { "type": "string" }
+      }
+    }
+  }
+}
