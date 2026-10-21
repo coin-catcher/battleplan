@@ -1,4 +1,4 @@
-import type { OutputType } from './models';
+import type { OutputType, ProjectTask } from './models';
 import type { TaskNodeKind } from './task-node-kind';
 
 /** pstack-style task brief fields (Graph of Agents canonical task schema). */
@@ -190,6 +190,18 @@ export function taskBriefFromDraftRecord(record: Record<string, unknown>): TaskB
     }
   }
   return any ? normalizeTaskBrief(nested) : undefined;
+}
+
+/** Context + forbidden from the task brief, with legacy `dar` / `prompt` fallback. */
+export function inheritedTaskPromptContext(task: ProjectTask): string {
+  const brief = task.brief;
+  const parts: string[] = [];
+  if (brief?.context?.trim()) parts.push(brief.context.trim());
+  if (brief?.forbidden?.trim()) parts.push(`Forbidden:\n${brief.forbidden.trim()}`);
+  const combined = parts.join('\n\n');
+  if (combined) return combined;
+  const legacy = (task.dar ?? task.prompt ?? '').trim();
+  return legacy;
 }
 
 export function formatTaskBriefMarkdown(brief: TaskBrief): string {

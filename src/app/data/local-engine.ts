@@ -701,9 +701,9 @@ export class LocalEngine {
     return saved;
   }
 
-  async listProjectMessages(projectId: string): Promise<ConversationPage> {
+  async listProjectMessages(projectId: string, options?: { syncAgent?: boolean }): Promise<ConversationPage> {
     const project = await this.requireProject(projectId);
-    if (project.cursor_agent_id) {
+    if (options?.syncAgent !== false && project.cursor_agent_id) {
       await this.importFinishedRuns(project.cursor_agent_id, { scope: 'project', projectId });
       await this.syncArtifacts(project.cursor_agent_id, { scope: 'project', projectId });
     }
@@ -822,13 +822,18 @@ export class LocalEngine {
     });
   }
 
-  async listTaskMessages(taskId: string): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }> {
+  async listTaskMessages(
+    taskId: string,
+    options?: { syncAgent?: boolean },
+  ): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }> {
     const task = await this.requireTaskById(taskId);
-    if (task.cursor_agent_id) {
-      await this.importFinishedRuns(task.cursor_agent_id, { scope: 'task', projectId: task.project_id, taskId });
-      await this.syncArtifacts(task.cursor_agent_id, { scope: 'task', projectId: task.project_id, taskId });
+    if (options?.syncAgent !== false) {
+      if (task.cursor_agent_id) {
+        await this.importFinishedRuns(task.cursor_agent_id, { scope: 'task', projectId: task.project_id, taskId });
+        await this.syncArtifacts(task.cursor_agent_id, { scope: 'task', projectId: task.project_id, taskId });
+      }
+      await this.importReferencedRuns({ scope: 'task', projectId: task.project_id, taskId });
     }
-    await this.importReferencedRuns({ scope: 'task', projectId: task.project_id, taskId });
     const updated = await this.repo.getTask(taskId);
     return {
       messages: await this.repo.listTaskMessages(taskId),
@@ -925,32 +930,72 @@ export class LocalEngine {
     const codeAgent = findProjectAgent(agents, resolveCodeAgentId(active, project));
     const launch = cursorLaunchFromLibrary(codeAgent, project, this.cursorApiKey());
     const base = launch.startingRef?.trim() || project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
-    const run = await this.cursor.createRun(active.cursor_agent_id!, {
-      text: wrapAgentRunPrompt(feedbackPrompt(active, feedback), {
-        baseBranch: base,
-        agentBranch: output?.branch,
-      }),
-      mode: 'agent',
-      apiKey: launch.apiKey,
-    });
-    if (codeAgent) await this.bumpAgentUsage(active.project_id, codeAgent.agent_id);
-    active.latest_run_id = run.id;
-    active.updated_at = this.now();
-    await this.repo.saveTask(active);
-    return this.record({
-      scope: 'task',
-      project_id: active.project_id,
-      task_id: taskId,
-      role: 'user',
-      content: feedback,
-      run_id: run.id,
-      intent: 'feedback',
-    });
+    try {
+      const run = await this.cursor.createRun(active.cursor_agent_id!, {
+        text: wrapAgentRunPrompt(feedbackPrompt(active, feedback), {
+          baseBranch: base,
+          agentBranch: output?.branch,
+        }),
+        mode: 'agent',
+        apiKey: launch.apiKey,
+      });
+      if (codeAgent) await this.bumpAgentUsage(active.project_id, codeAgent.agent_id);
+      active.latest_run_id = run.id;
+      active.updated_at = this.now();
+      await this.repo.saveTask(active);
+      return this.record({
+        scope: 'task',
+        project_id: active.project_id,
+        task_id: taskId,
+        role: 'user',
+        content: feedback,
+        run_id: run.id,
+        intent: 'feedback',
+      });
+    } catch (error) {
+      if (active.status === 'DOING') {
+        applyTaskStatusTransition(active, 'REVIEW', 'manual');
+        active.updated_at = this.now();
+        await this.repo.saveTask(active);
+      }
+      throw error;
+    }
   }
 
-  async approve(taskId: string): Promise<ProjectTask> {
+  async prepareApprove(taskId: string): Promise<{ task: ProjectTask; message: ChatMessage }> {
     const task = await this.requireTaskById(taskId);
     if (task.status !== 'REVIEW') throw new Error('Only a task in REVIEW can be approved.');
+    applyTaskStatusTransition(task, 'DOING', 'approve_start');
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+    const output = task.output_type === 'code'
+      ? await this.repo.getCodeOutput(taskId)
+      : await this.repo.getResearchOutput(taskId);
+    if (!output) throw new Error('This task has no saved output to merge.');
+    applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
+    task.pending_action = 'merge';
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+    const message = await this.record({
+      scope: 'task',
+      project_id: task.project_id,
+      task_id: taskId,
+      role: 'user',
+      content: 'Approved. Merging pull request into the base branch.',
+      intent: 'approve',
+    });
+    return { task: await this.requireTaskById(taskId), message };
+  }
+
+  async executeApproveMerge(taskId: string): Promise<ProjectTask> {
+    let task = await this.requireTaskById(taskId);
+    if (task.status === 'REVIEW') {
+      await this.prepareApprove(taskId);
+      task = await this.requireTaskById(taskId);
+    }
+    if (task.status !== 'DOING' || task.pending_action !== 'merge') {
+      throw new Error('Task is not waiting to merge.');
+    }
     const output = task.output_type === 'code'
       ? await this.repo.getCodeOutput(taskId)
       : await this.repo.getResearchOutput(taskId);
@@ -981,6 +1026,9 @@ export class LocalEngine {
           + 'Try Approve and merge again after the agent finishes.',
         );
       }
+      applyTaskStatusTransition(task, 'REVIEW', 'manual');
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
       throw error;
     }
     const mergedOutput = {
@@ -1018,10 +1066,34 @@ export class LocalEngine {
     return task;
   }
 
-  async releaseProjectChanges(projectId: string): Promise<ChatMessage> {
+  async approve(taskId: string): Promise<ProjectTask> {
+    await this.prepareApprove(taskId);
+    return this.executeApproveMerge(taskId);
+  }
+
+  async prepareReleaseProjectChanges(projectId: string): Promise<Project> {
     const project = await this.requireProject(projectId);
     const pending = await this.repo.listPendingChanges(projectId);
     if (pending.length === 0) throw new Error('No pending changes to release.');
+    applyProjectStatusTransition(project, 'DOING', 'manual');
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    await this.record({
+      scope: 'project',
+      project_id: projectId,
+      role: 'change',
+      content: 'Releasing accumulated changes to main…',
+      intent: 'chat',
+    });
+    return this.requireProject(projectId);
+  }
+
+  async executeReleaseProjectChanges(projectId: string): Promise<ChatMessage> {
+    const project = await this.requireProject(projectId);
+    const pending = await this.repo.listPendingChanges(projectId);
+    if (pending.length === 0 && rootProjectStatus(project) !== 'DOING') {
+      throw new Error('No pending changes to release.');
+    }
     const token = requireProjectGithubPat(project);
     const { owner, repo } = repoSlugFromProject(project);
     const develop = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
@@ -1037,10 +1109,17 @@ export class LocalEngine {
     });
     await this.repo.savePendingChanges(projectId, []);
     const agentPrompt = wrapAgentRunPrompt(VERSION_BUMP_AGENT_MESSAGE, { baseBranch: develop });
-    applyProjectStatusTransition(project, 'DOING', 'manual');
+    if (rootProjectStatus(project) !== 'DOING') {
+      applyProjectStatusTransition(project, 'DOING', 'manual');
+    }
     project.updated_at = this.now();
     await this.repo.saveProject(project);
     return this.dispatchProject(projectId, agentPrompt, 'release_version_bump', VERSION_BUMP_AGENT_MESSAGE);
+  }
+
+  async releaseProjectChanges(projectId: string): Promise<ChatMessage> {
+    await this.prepareReleaseProjectChanges(projectId);
+    return this.executeReleaseProjectChanges(projectId);
   }
 
   async approveProjectRelease(projectId: string): Promise<Project> {
@@ -1654,30 +1733,39 @@ export class LocalEngine {
       ? joinDarSections([dar, briefSection, userMessage])
       : userMessage;
     turns.push({ role: 'user', content });
-    const result = await sendResearchAgentChat(agent, turns, systemPrompt);
-    await this.bumpAgentUsage(project.project_id, agent.agent_id, result.usage.totalTokens);
-    const userRecord = await this.record({
-      scope: 'task',
-      project_id: task.project_id,
-      task_id: task.task_id,
-      role: 'user',
-      content: userMessage,
-      intent,
-    });
-    await this.record({
-      scope: 'task',
-      project_id: task.project_id,
-      task_id: task.task_id,
-      role: 'assistant',
-      content: result.assistantText,
-      intent,
-    });
-    if (task.status === 'DOING') {
-      applyTaskStatusTransition(task, 'REVIEW', 'agent_finished');
+    try {
+      const result = await sendResearchAgentChat(agent, turns, systemPrompt);
+      await this.bumpAgentUsage(project.project_id, agent.agent_id, result.usage.totalTokens);
+      const userRecord = await this.record({
+        scope: 'task',
+        project_id: task.project_id,
+        task_id: task.task_id,
+        role: 'user',
+        content: userMessage,
+        intent,
+      });
+      await this.record({
+        scope: 'task',
+        project_id: task.project_id,
+        task_id: task.task_id,
+        role: 'assistant',
+        content: result.assistantText,
+        intent,
+      });
+      if (task.status === 'DOING') {
+        applyTaskStatusTransition(task, 'REVIEW', 'agent_finished');
+      }
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
+      return userRecord;
+    } catch (error) {
+      if (task.status === 'DOING') {
+        applyTaskStatusTransition(task, 'REVIEW', 'manual');
+        task.updated_at = this.now();
+        await this.repo.saveTask(task);
+      }
+      throw error;
     }
-    task.updated_at = this.now();
-    await this.repo.saveTask(task);
-    return userRecord;
   }
 
   private darLookup() {

@@ -67,7 +67,11 @@ import {
   type TaskBrief,
 } from './core/task-brief';
 import { applyLifecycleBriefDefaults } from './core/task-lifecycle';
-import { buildKanbanBoard } from './core/kanban-board';
+import {
+  buildKanbanBoard,
+  listKanbanScopeOptions,
+  type KanbanScopeId,
+} from './core/kanban-board';
 import {
   edgeKey,
   incomingEdges,
@@ -173,23 +177,28 @@ export class AppComponent implements OnInit {
   taskCodeAgentId = '';
   chatDraft = '';
   taskTitle = '';
-  taskDar = '';
   taskInitialPrompt = '';
+  readonly taskPageTab = signal<'chat' | 'details' | 'graph'>('chat');
   taskBriefForm: TaskBrief = emptyTaskBrief();
   readonly taskBriefFields = TASK_BRIEF_FIELDS;
   readonly projectViewMode = signal<'mindmap' | 'kanban'>('mindmap');
-  graphEdgeToTaskId = '';
-  graphEdgeKind: TaskEdgeKind = 'ordering';
-  graphEdgeBreakCondition = '';
-  graphLinkDirection: 'incoming' | 'child' = 'incoming';
+  readonly kanbanScopeId = signal<KanbanScopeId>('main');
+  private kanbanScopeProjectId = '';
+  graphHierarchyChildId = '';
+  graphOrderFromId = '';
+  graphFlowFromId = '';
+  graphFlowKind: TaskEdgeKind = 'fork';
+  graphFlowBreakCondition = '';
   readonly taskEdgeKinds = TASK_EDGE_KINDS;
   readonly taskEdgeKindLabel = taskEdgeKindLabel;
   private taskLinkSyncKey = '';
 
+  readonly kanbanScopeOptions = computed(() => listKanbanScopeOptions(this.store.tasks()));
+
   readonly kanbanBoard = computed(() => {
     const project = this.store.project();
     if (!project) return [];
-    return buildKanbanBoard(this.store.tasks(), project, this.store.agents());
+    return buildKanbanBoard(this.store.tasks(), project, this.store.agents(), this.kanbanScopeId());
   });
   subprojectInitialPrompt = '';
   outputType: OutputType = 'code';
@@ -327,8 +336,8 @@ export class AppComponent implements OnInit {
       }
       this.boundTaskFormId = task.task_id;
       this.taskLinkSyncKey = linkSyncKey;
+      this.taskPageTab.set('chat');
       this.taskTitle = task.title;
-      this.taskDar = taskDar(task);
       this.taskInitialPrompt = taskInitialPrompt(task);
       this.outputType = task.output_type;
       this.dependencies = [...task.dependencies];
@@ -392,6 +401,21 @@ export class AppComponent implements OnInit {
         projects,
         themeId: this.themeId(),
       });
+    });
+
+    effect(() => {
+      const projectId = this.store.projectId();
+      if (!projectId) return;
+      if (this.kanbanScopeProjectId === projectId) return;
+      this.kanbanScopeProjectId = projectId;
+      this.kanbanScopeId.set('main');
+    });
+
+    effect(() => {
+      const options = this.kanbanScopeOptions();
+      const current = this.kanbanScopeId();
+      if (options.some((option) => option.id === current)) return;
+      this.kanbanScopeId.set(options[0]?.id ?? 'main');
     });
     effect((onCleanup) => {
       if (!this.convertPanel()) return;
@@ -556,7 +580,7 @@ export class AppComponent implements OnInit {
       },
       {
         title: this.taskTitle,
-        dar: this.taskDar,
+        brief: this.taskBriefForm,
         initial_prompt: this.taskInitialPrompt,
         output_type: this.outputType,
         dependencies: this.dependencies,
@@ -616,7 +640,6 @@ export class AppComponent implements OnInit {
     } else if (selection.kind === 'task') {
       await this.store.saveTask({
         title: this.taskTitle,
-        dar: this.taskDar,
         initial_prompt: this.taskInitialPrompt,
         output_type: this.outputType,
         dependencies: this.dependencies,
@@ -1135,13 +1158,11 @@ export class AppComponent implements OnInit {
   }
 
   approveTask(): void {
-    this.store.chatActionPending.set('merge');
-    void this.store.approve().finally(() => this.store.chatActionPending.set(null));
+    void this.store.approve();
   }
 
   approveProjectRelease(): void {
-    this.store.chatActionPending.set('merge');
-    void this.store.approveProjectRelease().finally(() => this.store.chatActionPending.set(null));
+    void this.store.approveProjectRelease();
   }
 
   projectRootStatus(project: { status?: TaskStatus }): TaskStatus {
@@ -1155,6 +1176,10 @@ export class AppComponent implements OnInit {
 
   chatActionsLocked(): boolean {
     return this.store.chatActionPending() !== null || this.store.busy();
+  }
+
+  chatSendDisabled(): boolean {
+    return this.chatActionsLocked() || this.store.chatAgentSyncing();
   }
 
   deleteProject(): void {
@@ -1910,7 +1935,6 @@ export class AppComponent implements OnInit {
   async saveTask(): Promise<void> {
     await this.store.saveTask({
       title: this.taskTitle,
-      dar: this.taskDar,
       initial_prompt: this.taskInitialPrompt,
       output_type: this.outputType,
       dependencies: this.dependencies,
@@ -1927,7 +1951,7 @@ export class AppComponent implements OnInit {
     this.taskBriefForm = applyLifecycleBriefDefaults({
       title: this.taskTitle,
       initialPrompt: this.taskInitialPrompt,
-      dar: this.taskDar,
+      dar: task ? taskDar(task) : '',
       outputType: this.outputType,
       projectDar: project?.dar,
       repoUrl: project?.repo_url,
@@ -1938,6 +1962,10 @@ export class AppComponent implements OnInit {
 
   setProjectViewMode(mode: 'mindmap' | 'kanban'): void {
     this.projectViewMode.set(mode);
+  }
+
+  setKanbanScope(scopeId: KanbanScopeId): void {
+    this.kanbanScopeId.set(scopeId);
   }
 
   openKanbanTask(taskId: string): void {
@@ -1958,17 +1986,39 @@ export class AppComponent implements OnInit {
     return this.outgoingGraphEdges(taskId).filter((edge) => edge.kind === 'tree');
   }
 
-  async addTaskGraphEdge(taskId: string): Promise<void> {
-    const otherId = this.graphEdgeToTaskId.trim();
-    if (!otherId || otherId === taskId) return;
+  parentGraphEdges(taskId: string): TaskGraphEdge[] {
+    return this.incomingGraphEdges(taskId).filter((edge) => edge.kind === 'tree');
+  }
+
+  orderingGraphEdges(taskId: string): TaskGraphEdge[] {
+    return this.incomingGraphEdges(taskId).filter((edge) => edge.kind === 'ordering');
+  }
+
+  flowGraphEdges(taskId: string): TaskGraphEdge[] {
+    const kinds = new Set<TaskEdgeKind>(['fork', 'join', 'cycle']);
+    return [
+      ...this.incomingGraphEdges(taskId),
+      ...this.outgoingGraphEdges(taskId),
+    ].filter((edge) => kinds.has(edge.kind));
+  }
+
+  setTaskPageTab(tab: 'chat' | 'details' | 'graph'): void {
+    this.taskPageTab.set(tab);
+  }
+
+  private async pushTaskGraphEdge(
+    taskId: string,
+    from: string,
+    to: string,
+    kind: TaskEdgeKind,
+    breakCondition?: string,
+  ): Promise<void> {
+    if (!from || !to || from === to) return;
     const project = this.store.project();
     if (!project) return;
     const tasks = this.store.tasks();
     const edges = [...(project.task_graph_edges ?? [])];
-    const kind = this.graphLinkDirection === 'child' ? 'tree' : this.graphEdgeKind;
-    const from = this.graphLinkDirection === 'child' ? taskId : otherId;
-    const to = this.graphLinkDirection === 'child' ? otherId : taskId;
-    if (kind === 'cycle' && !this.graphEdgeBreakCondition.trim()) {
+    if (kind === 'cycle' && !breakCondition?.trim()) {
       this.store.error.set('Cycle edges require a break condition.');
       return;
     }
@@ -1979,7 +2029,7 @@ export class AppComponent implements OnInit {
       from_task_id: from,
       to_task_id: to,
       kind,
-      break_condition: this.graphEdgeBreakCondition.trim() || undefined,
+      break_condition: breakCondition?.trim() || undefined,
     });
     try {
       validateTaskGraphEdges(edges, new Set(tasks.map((task) => task.task_id)));
@@ -1988,8 +2038,31 @@ export class AppComponent implements OnInit {
       return;
     }
     await this.store.updateProjectTaskGraph(edges);
-    this.graphEdgeToTaskId = '';
-    this.graphEdgeBreakCondition = '';
+  }
+
+  async addHierarchyChildLink(taskId: string): Promise<void> {
+    const childId = this.graphHierarchyChildId.trim();
+    await this.pushTaskGraphEdge(taskId, taskId, childId, 'tree');
+    this.graphHierarchyChildId = '';
+  }
+
+  async addOrderingPrerequisite(taskId: string): Promise<void> {
+    const fromId = this.graphOrderFromId.trim();
+    await this.pushTaskGraphEdge(taskId, fromId, taskId, 'ordering');
+    this.graphOrderFromId = '';
+  }
+
+  async addFlowGraphLink(taskId: string): Promise<void> {
+    const fromId = this.graphFlowFromId.trim();
+    await this.pushTaskGraphEdge(
+      taskId,
+      fromId,
+      taskId,
+      this.graphFlowKind,
+      this.graphFlowBreakCondition,
+    );
+    this.graphFlowFromId = '';
+    this.graphFlowBreakCondition = '';
   }
 
   resolveTaskTitle(taskId: string): string {

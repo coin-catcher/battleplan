@@ -146,8 +146,8 @@ export class BattleplanApi {
     return this.engine.saveResearchOutput(taskId, output);
   }
 
-  listProjectMessages(projectId: string): Promise<ConversationPage> {
-    return this.engine.listProjectMessages(projectId);
+  listProjectMessages(projectId: string, options?: { syncAgent?: boolean }): Promise<ConversationPage> {
+    return this.engine.listProjectMessages(projectId, options);
   }
 
   listPendingChanges(projectId: string): Promise<PendingChange[]> {
@@ -195,8 +195,11 @@ export class BattleplanApi {
     return this.engine.noteTask(taskId, message);
   }
 
-  listTaskMessages(taskId: string): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ConversationPage['artifacts'] }> {
-    return this.engine.listTaskMessages(taskId);
+  listTaskMessages(
+    taskId: string,
+    options?: { syncAgent?: boolean },
+  ): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ConversationPage['artifacts'] }> {
+    return this.engine.listTaskMessages(taskId, options);
   }
 
   sendTaskMessage(taskId: string, message: string): Promise<ChatMessage> {
@@ -228,8 +231,24 @@ export class BattleplanApi {
     return this.engine.convertTask(projectId, taskId, to);
   }
 
+  prepareApprove(taskId: string): Promise<{ task: ProjectTask; message: ChatMessage }> {
+    return this.engine.prepareApprove(taskId);
+  }
+
+  executeApproveMerge(taskId: string): Promise<ProjectTask> {
+    return this.engine.executeApproveMerge(taskId);
+  }
+
   approve(taskId: string): Promise<ProjectTask> {
     return this.engine.approve(taskId);
+  }
+
+  prepareReleaseProjectChanges(projectId: string): Promise<Project> {
+    return this.engine.prepareReleaseProjectChanges(projectId);
+  }
+
+  executeReleaseProjectChanges(projectId: string): Promise<ChatMessage> {
+    return this.engine.executeReleaseProjectChanges(projectId);
   }
 
   releaseProjectChanges(projectId: string): Promise<ChatMessage> {
