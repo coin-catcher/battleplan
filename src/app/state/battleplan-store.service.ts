@@ -75,6 +75,7 @@ export class BattleplanStore {
   readonly busy = signal(false);
   readonly pendingReply = signal(false);
   readonly editorLoading = signal(false);
+  readonly chatAgentSyncing = signal(false);
   readonly chatActionPending = signal<'send' | 'execute' | 'merge' | null>(null);
   readonly pendingChanges = signal<PendingChange[]>([]);
   readonly agents = signal<ProjectAgent[]>([]);
@@ -113,12 +114,17 @@ export class BattleplanStore {
 
   private foregroundWatchGeneration = 0;
   private editorLoadGeneration = 0;
+  private panelRefreshGeneration = 0;
   private foregroundWatchTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly tabSnapshots = new Map<string, ProjectTabSnapshot>();
   private readonly taskChatCache = new Map<string, { messages: ChatMessage[]; artifacts: ChatArtifact[]; task: ProjectTask }>();
   private readonly doingBackgroundGeneration = new Map<string, number>();
   private readonly doingBackgroundTimer = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly doingBackgroundInflight = new Set<string>();
+  private projectBackgroundGeneration = 0;
+  private projectBackgroundActive = false;
+  private projectBackgroundTimer: ReturnType<typeof setTimeout> | undefined;
+  private projectBackgroundInflight = false;
 
   async loadProjects(): Promise<ProjectTabRestore | null> {
     let restored: ProjectTabRestore | null = null;
@@ -397,19 +403,21 @@ export class BattleplanStore {
   async releasePendingChanges(): Promise<void> {
     const projectId = this.projectId();
     if (!projectId) return;
-    let runId: string | undefined;
-    await this.run(async () => {
-      const message = await this.api.releaseProjectChanges(projectId);
-      runId = message.run_id ?? undefined;
-      this.pendingChanges.set([]);
-      const page = await this.api.listProjectMessages(projectId);
-      this.applyConversation(page);
-      this.notice.set('Released to main. Version bump agent started.');
-    });
-    if (runId && !this.error()) {
-      await this.syncProjectUserRun(projectId, runId);
-      void this.watchProject(projectId, runId);
+    try {
+      const project = await this.api.prepareReleaseProjectChanges(projectId);
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === project.project_id ? project : item
+      )));
+      const page = await this.api.listProjectMessages(projectId, { syncAgent: false });
+      if (this.projectId() === projectId && this.watchingProjectChat(projectId)) {
+        this.applyConversation(page);
+      }
+      this.notice.set('Release started. Merging to main in the background.');
+    } catch (error) {
+      this.error.set(error instanceof Error ? error.message : 'Could not start release.');
+      return;
     }
+    void this.finishReleaseProjectChanges(projectId);
   }
 
   async transitionProject(status: TaskStatus, manual: boolean): Promise<void> {
@@ -557,15 +565,18 @@ export class BattleplanStore {
   async openProjectChat(): Promise<void> {
     const projectId = this.projectId();
     if (!projectId) return;
-    await this.withEditorLoading(async () => {
-      this.stopWatch();
-      this.selection.set({ kind: 'project' });
-      await this.run(async () => {
-        this.applyConversation(await this.api.listProjectMessages(projectId));
-        await this.refreshPendingChanges();
-      });
-      this.continueProjectWatch(projectId);
-    });
+    this.stopWatch();
+    this.selection.set({ kind: 'project' });
+    const generation = ++this.panelRefreshGeneration;
+    try {
+      const page = await this.api.listProjectMessages(projectId, { syncAgent: false });
+      if (generation !== this.panelRefreshGeneration) return;
+      this.applyConversation(page);
+      await this.refreshPendingChanges();
+    } catch (error) {
+      this.error.set(error instanceof Error ? error.message : 'Could not load project chat.');
+    }
+    void this.syncProjectPanelAfterOpen(projectId, generation);
   }
 
   async sendProjectMessage(message: string): Promise<void> {
@@ -627,31 +638,33 @@ export class BattleplanStore {
   }
 
   async openTask(taskId: string): Promise<void> {
-    await this.withEditorLoading(async () => {
-      this.stopWatch();
-      const existing = this.tasks().find((item) => item.task_id === taskId);
-      const kind = existing?.output_type === 'subproject' ? 'subproject' : 'task';
-      this.selection.set({ kind, taskId });
-      const cached = this.taskChatCache.get(taskId);
-      if (cached) {
-        this.messages.set(cached.messages);
-        this.artifacts.set(cached.artifacts);
-        this.replaceTask(cached.task);
-      }
-      await this.run(async () => {
+    this.stopWatch();
+    const existing = this.tasks().find((item) => item.task_id === taskId);
+    const kind = existing?.output_type === 'subproject' ? 'subproject' : 'task';
+    this.selection.set({ kind, taskId });
+    const generation = ++this.panelRefreshGeneration;
+    const cached = this.taskChatCache.get(taskId);
+    if (cached) {
+      this.messages.set(cached.messages);
+      this.artifacts.set(cached.artifacts);
+      this.replaceTask(cached.task);
+    } else {
+      try {
         if (kind === 'subproject' && existing?.subproject_id) {
-          const page = await this.api.listProjectMessages(existing.subproject_id);
+          const page = await this.api.listProjectMessages(existing.subproject_id, { syncAgent: false });
+          if (generation !== this.panelRefreshGeneration) return;
           this.cacheSubprojectTaskChat(taskId, page, existing);
           this.applyConversation(page);
-          return;
+        } else {
+          const result = await this.api.listTaskMessages(taskId, { syncAgent: false });
+          if (generation !== this.panelRefreshGeneration) return;
+          this.applyTaskConversation(result);
         }
-        const result = await this.api.listTaskMessages(taskId);
-        this.applyTaskConversation(result);
-        await this.refreshOutput(result.task);
-      });
-      if (kind === 'task') this.continueTaskWatch(taskId);
-      else if (existing?.subproject_id) this.continueProjectWatch(existing.subproject_id);
-    });
+      } catch (error) {
+        this.error.set(error instanceof Error ? error.message : 'Could not load task chat.');
+      }
+    }
+    void this.syncTaskPanelAfterOpen(taskId, kind, existing, generation);
   }
 
   async convertTask(taskId: string, to: 'code' | 'subproject'): Promise<void> {
@@ -946,32 +959,21 @@ export class BattleplanStore {
     const taskId = task.task_id;
     this.patchTaskStatus(taskId, 'DOING');
     this.syncDoingBackgroundWatches();
-    await this.run(async () => {
-      try {
-        const merged = await this.api.approve(taskId);
-        this.replaceTask(merged);
-        const refreshed = await this.api.listTaskMessages(taskId);
-        this.applyTaskConversation(refreshed);
-        await this.reloadTasks();
-        await this.refreshPendingChanges();
-        this.notice.set('Pull request merged. Task is DONE.');
-      } catch (error) {
-        const message = error instanceof Error ? error.message : '';
-        if (message.includes(MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL)) {
-          const refreshed = await this.api.listTaskMessages(taskId);
-          this.applyTaskConversation(refreshed);
-        }
-        throw error;
-      }
-    });
-    const err = this.error();
-    if (err?.includes(MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL)) {
-      this.continueTaskWatch(taskId);
-      this.ensureDoingBackgroundWatch(taskId);
-    } else if (err) {
+    try {
+      const prepared = await this.api.prepareApprove(taskId);
+      this.replaceTask(prepared.task);
+      this.rememberMessage(prepared.message);
+      const local = await this.api.listTaskMessages(taskId, { syncAgent: false });
+      this.applyTaskConversation(local);
+      this.notice.set('Merging pull request in the background.');
+    } catch (error) {
+      this.error.set(error instanceof Error ? error.message : 'Could not start merge.');
       this.patchTaskStatus(taskId, 'REVIEW');
+      this.syncDoingBackgroundWatches();
+      return;
     }
-    this.syncDoingBackgroundWatches();
+    this.ensureDoingBackgroundWatch(taskId);
+    void this.finishApproveMerge(taskId);
   }
 
   async move(taskId: string, direction: -1 | 1): Promise<void> {
@@ -1106,6 +1108,188 @@ export class BattleplanStore {
     for (const taskId of [...this.doingBackgroundGeneration.keys()]) {
       if (!wanted.has(taskId)) this.stopDoingBackgroundWatch(taskId);
     }
+    this.syncProjectBackgroundWatch();
+  }
+
+  private syncProjectBackgroundWatch(): void {
+    const project = this.project();
+    const root = project && !project.parent_task_id && !project.parent_project_id ? project : null;
+    const needsWatch = Boolean(root && (root.status ?? 'TODO') === 'DOING' && root.cursor_agent_id);
+    if (needsWatch && root) {
+      this.ensureProjectBackgroundWatch(root.project_id);
+    } else {
+      this.stopProjectBackgroundWatch();
+    }
+  }
+
+  private ensureProjectBackgroundWatch(projectId: string): void {
+    if (this.projectBackgroundActive) return;
+    this.projectBackgroundActive = true;
+    const generation = ++this.projectBackgroundGeneration;
+    this.scheduleProjectBackgroundTick(projectId, generation, 0);
+  }
+
+  private stopProjectBackgroundWatch(): void {
+    if (!this.projectBackgroundActive && !this.projectBackgroundTimer) return;
+    this.projectBackgroundActive = false;
+    this.projectBackgroundGeneration += 1;
+    if (this.projectBackgroundTimer) clearTimeout(this.projectBackgroundTimer);
+    this.projectBackgroundTimer = undefined;
+    this.projectBackgroundInflight = false;
+  }
+
+  private scheduleProjectBackgroundTick(projectId: string, generation: number, attempt: number): void {
+    if (this.projectBackgroundGeneration !== generation) return;
+    if (attempt >= POLL_ATTEMPTS) return;
+    this.projectBackgroundTimer = setTimeout(() => {
+      void this.runProjectBackgroundTick(projectId, generation, attempt);
+    }, attempt === 0 ? 0 : POLL_INTERVAL_MS);
+  }
+
+  private async runProjectBackgroundTick(projectId: string, generation: number, attempt: number): Promise<void> {
+    if (this.projectBackgroundGeneration !== generation || this.projectBackgroundInflight) {
+      this.scheduleProjectBackgroundTick(projectId, generation, attempt + 1);
+      return;
+    }
+    this.projectBackgroundInflight = true;
+    try {
+      const page = await this.api.listProjectMessages(projectId);
+      if (this.projectBackgroundGeneration !== generation) return;
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === page.project?.project_id && page.project ? page.project : item
+      )));
+      if (this.watchingProjectChat(projectId)) this.applyConversation(page);
+      const project = this.projects().find((item) => item.project_id === projectId);
+      const status = project?.status ?? 'TODO';
+      if (status !== 'DOING') {
+        this.stopProjectBackgroundWatch();
+        return;
+      }
+    } catch {
+      // Keep polling through transient failures.
+    } finally {
+      this.projectBackgroundInflight = false;
+    }
+    if (this.projectBackgroundGeneration === generation) {
+      this.scheduleProjectBackgroundTick(projectId, generation, attempt + 1);
+    }
+  }
+
+  private async syncTaskPanelAfterOpen(
+    taskId: string,
+    kind: 'task' | 'subproject',
+    existing: ProjectTask | undefined,
+    generation: number,
+  ): Promise<void> {
+    if (generation !== this.panelRefreshGeneration) return;
+    this.chatAgentSyncing.set(true);
+    try {
+      if (kind === 'subproject' && existing?.subproject_id) {
+        const page = await this.api.listProjectMessages(existing.subproject_id);
+        if (generation !== this.panelRefreshGeneration) return;
+        const freshTask = this.tasks().find((item) => item.task_id === taskId) ?? existing;
+        this.cacheSubprojectTaskChat(taskId, page, freshTask);
+        this.applyConversation(page);
+        this.continueProjectWatch(existing.subproject_id);
+      } else {
+        const result = await this.api.listTaskMessages(taskId);
+        if (generation !== this.panelRefreshGeneration) return;
+        this.applyTaskConversation(result);
+        await this.refreshOutput(result.task);
+        this.continueTaskWatch(taskId);
+      }
+    } catch (error) {
+      if (generation === this.panelRefreshGeneration) {
+        this.error.set(error instanceof Error ? error.message : 'Could not sync task chat.');
+      }
+    } finally {
+      if (generation === this.panelRefreshGeneration) {
+        this.chatAgentSyncing.set(false);
+      }
+    }
+  }
+
+  private async syncProjectPanelAfterOpen(projectId: string, generation: number): Promise<void> {
+    if (generation !== this.panelRefreshGeneration) return;
+    this.chatAgentSyncing.set(true);
+    try {
+      const page = await this.api.listProjectMessages(projectId);
+      if (generation !== this.panelRefreshGeneration) return;
+      this.applyConversation(page);
+      await this.refreshPendingChanges();
+      this.continueProjectWatch(projectId);
+    } catch (error) {
+      if (generation === this.panelRefreshGeneration) {
+        this.error.set(error instanceof Error ? error.message : 'Could not sync project chat.');
+      }
+    } finally {
+      if (generation === this.panelRefreshGeneration) {
+        this.chatAgentSyncing.set(false);
+      }
+    }
+  }
+
+  private async finishApproveMerge(taskId: string): Promise<void> {
+    try {
+      const merged = await this.api.executeApproveMerge(taskId);
+      this.replaceTask(merged);
+      const refreshed = await this.api.listTaskMessages(taskId, { syncAgent: false });
+      this.applyTaskConversation(refreshed);
+      await this.reloadTasks();
+      await this.refreshPendingChanges();
+      if (merged.status === 'DONE') {
+        this.notice.set('Pull request merged. Task is DONE.');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Merge failed.';
+      if (message.includes(MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL)) {
+        const refreshed = await this.api.listTaskMessages(taskId);
+        this.applyTaskConversation(refreshed);
+        this.continueTaskWatch(taskId);
+        this.ensureDoingBackgroundWatch(taskId);
+        this.notice.set('Merge conflict — the task agent is resolving it.');
+      } else {
+        this.error.set(message);
+        const refreshed = await this.api.listTaskMessages(taskId, { syncAgent: false });
+        this.applyTaskConversation(refreshed);
+        if (refreshed.task.status === 'REVIEW') {
+          this.patchTaskStatus(taskId, 'REVIEW');
+        }
+      }
+    } finally {
+      this.syncDoingBackgroundWatches();
+    }
+  }
+
+  private async finishReleaseProjectChanges(projectId: string): Promise<void> {
+    let runId: string | undefined;
+    try {
+      const message = await this.api.executeReleaseProjectChanges(projectId);
+      runId = message.run_id ?? undefined;
+      this.pendingChanges.set([]);
+      const page = await this.api.listProjectMessages(projectId, { syncAgent: false });
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === page.project?.project_id && page.project ? page.project : item
+      )));
+      if (this.watchingProjectChat(projectId)) this.applyConversation(page);
+      this.notice.set('Released to main. Version bump agent started.');
+    } catch (error) {
+      this.error.set(error instanceof Error ? error.message : 'Release failed.');
+      try {
+        const page = await this.api.listProjectMessages(projectId, { syncAgent: false });
+        this.applyConversation(page);
+      } catch {
+        // ignore secondary failure
+      }
+      return;
+    }
+    if (runId) {
+      if (this.watchingProjectChat(projectId)) {
+        await this.syncProjectUserRun(projectId, runId);
+        void this.watchProject(projectId, runId);
+      }
+    }
+    this.syncProjectBackgroundWatch();
   }
 
   private ensureDoingBackgroundWatch(taskId: string): void {
