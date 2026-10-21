@@ -96,7 +96,7 @@
             </button>
           </div>
         </nav>
-        <div #mapStage class="map-stage" aria-label="Project mindmap" (pointerdown)="onStagePointerDown($event)">
+        <div #mapStage class="map-stage" aria-label="Project mindmap" (scroll)="onMapStageScroll()" (pointerdown)="onStagePointerDown($event)">
           <div class="map-scaler" [style.width.px]="map().width * zoom()" [style.height.px]="map().height * zoom()">
             <div class="map-canvas" [style.width.px]="map().width" [style.height.px]="map().height" [style.transform]="'scale(' + zoom() + ')'">
           <svg [attr.viewBox]="'0 0 ' + map().width + ' ' + map().height" [attr.width]="map().width" [attr.height]="map().height">
@@ -199,8 +199,10 @@
             <div
               class="map-node"
               [class.circle]="node.shape === 'project' || node.shape === 'subproject'"
-              [class.cloud]="node.shape === 'research'"
+              [class.cloud]="node.shape === 'research' || node.shape === 'fog'"
               [class.code]="node.shape === 'code'"
+              [class.decision]="node.shape === 'decision'"
+              [class.gate]="node.shape === 'gate'"
               [class.active]="isMapSelected(node)"
               [class.group-selected]="isMapGroupSelected(node)"
               [class.editing]="editingNodeId() === node.id"

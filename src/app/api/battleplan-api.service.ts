@@ -16,6 +16,7 @@ import type {
 } from '../core/models';
 import { BrowserCursor } from '../data/cursor-browser';
 import { CursorKey } from '../data/cursor-key.service';
+import type { ProjectWorkspaceUiState } from '../core/project-ui-state';
 import { createBattleplanRepository } from '../data/repository-factory';
 import { LocalEngine } from '../data/local-engine';
 
@@ -235,6 +236,14 @@ export class BattleplanApi {
 
   getAgentUsageLedger(projectId: string): Promise<Record<string, import('../core/models').AgentUsageLedger>> {
     return this.repository.getAgentUsageLedger(projectId);
+  }
+
+  getProjectUiState(projectId: string): Promise<ProjectWorkspaceUiState | null> {
+    return this.repository.getProjectUiState(projectId);
+  }
+
+  saveProjectUiState(projectId: string, state: ProjectWorkspaceUiState): Promise<void> {
+    return this.repository.saveProjectUiState(projectId, state);
   }
 }
 

@@ -50,6 +50,12 @@ import {
   type WorldRect,
 } from './core/mindmap';
 import { linkKey, type MindmapLinkRef } from './core/link-relocation';
+import {
+  clampMindmapZoom,
+  mindmapScrollFromView,
+  mindmapViewFromScroll,
+  type MindmapViewState,
+} from './core/project-ui-state';
 import { MarkdownComponent } from 'ngx-markdown';
 import { editorPanelDirty } from './core/editor-dirty';
 import { taskDar, taskInitialPrompt } from './core/task-fields';
@@ -190,7 +196,9 @@ export class AppComponent implements OnInit {
   readonly agentTestSuccess = signal(false);
   private agentTestFadeTimer: ReturnType<typeof setTimeout> | undefined;
 
-  private centeredProject = '';
+  private mapViewProjectId = '';
+  private pendingMapView: MindmapViewState | null | undefined;
+  private uiPersistTimer: ReturnType<typeof setTimeout> | undefined;
   private titleSignature = '';
   private boundTaskFormId = '';
   private boundAgentFormId = '';
@@ -246,17 +254,19 @@ export class AppComponent implements OnInit {
     effect(() => {
       const projectId = this.store.project()?.project_id;
       const stage = this.mapStage()?.nativeElement;
-      if (!projectId || !stage || this.centeredProject === projectId) return;
-      const center = (): void => {
-        if (this.centeredProject === projectId) return;
+      if (!projectId || !stage || this.mapViewProjectId === projectId) return;
+      const view = this.pendingMapView;
+      this.pendingMapView = undefined;
+      const apply = (): void => {
+        if (this.mapViewProjectId === projectId) return;
         if (stage.clientWidth === 0) {
-          requestAnimationFrame(center);
+          requestAnimationFrame(apply);
           return;
         }
-        this.centeredProject = projectId;
-        this.centerMap();
+        this.mapViewProjectId = projectId;
+        this.applyMindmapView(view ?? null);
       };
-      requestAnimationFrame(center);
+      requestAnimationFrame(apply);
     });
 
     effect(() => {
@@ -376,7 +386,14 @@ export class AppComponent implements OnInit {
     this.paneWidth.set(this.preferences.paneWidth());
     this.autoSaveEnabled.set(this.preferences.autoSave());
     applyTheme(this.themeId(), !this.desktop);
-    if (this.cursorKey.ready()) await this.store.loadProjects();
+    if (this.cursorKey.ready()) {
+      const restored = await this.store.loadProjects();
+      if (restored) {
+        this.pendingMapView = restored.mindmapView;
+        this.mapViewProjectId = '';
+        this.paneWidth.set(restored.paneWidth);
+      }
+    }
     electronBridge()?.on('update:available', (payload) => {
       const info = payload as { version?: string; releaseNotes?: string | null };
       const version = info.version ?? 'new';
@@ -400,6 +417,11 @@ export class AppComponent implements OnInit {
       const info = payload as { upToDate?: boolean; current?: string };
       if (info.upToDate) this.zone.run(() => this.store.notice.set(`Battleplan ${info.current ?? ''} is up to date.`));
     });
+  }
+
+  @HostListener('window:beforeunload')
+  onBeforeUnload(): void {
+    void this.flushProjectUiPersist();
   }
 
   @HostListener('document:keydown', ['$event'])
@@ -618,8 +640,14 @@ export class AppComponent implements OnInit {
 
   async activateProjectTab(projectId: string): Promise<void> {
     if (projectId === this.store.projectId()) return;
-    const nextWidth = await this.store.switchProjectTab(projectId, this.paneWidth());
-    this.paneWidth.set(nextWidth);
+    await this.flushProjectUiPersist();
+    const restored = await this.store.switchProjectTab(projectId, {
+      paneWidth: this.paneWidth(),
+      mindmapView: this.captureMindmapView(),
+    });
+    this.pendingMapView = restored.mindmapView;
+    this.mapViewProjectId = '';
+    this.paneWidth.set(restored.paneWidth);
   }
 
   releasePendingChanges(): void {
@@ -635,12 +663,51 @@ export class AppComponent implements OnInit {
       this.paneWidth.set(next);
     };
     const up = () => {
-      void this.preferences.savePaneWidth(this.paneWidth());
+      this.scheduleProjectUiPersist();
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+  }
+
+  onMapStageScroll(): void {
+    this.scheduleProjectUiPersist();
+  }
+
+  private captureMindmapView(): MindmapViewState | null {
+    const stage = this.mapStage()?.nativeElement;
+    if (!stage) return null;
+    return mindmapViewFromScroll(stage.scrollLeft, stage.scrollTop, this.zoom());
+  }
+
+  private applyMindmapView(view: MindmapViewState | null): void {
+    const stage = this.mapStage()?.nativeElement;
+    if (!stage) return;
+    if (!view) {
+      this.centerMap();
+      return;
+    }
+    const scroll = mindmapScrollFromView(view);
+    this.zoom.set(scroll.zoom);
+    queueMicrotask(() => {
+      stage.scrollLeft = scroll.scrollLeft;
+      stage.scrollTop = scroll.scrollTop;
+    });
+  }
+
+  private scheduleProjectUiPersist(): void {
+    if (this.uiPersistTimer) clearTimeout(this.uiPersistTimer);
+    this.uiPersistTimer = setTimeout(() => {
+      void this.flushProjectUiPersist();
+    }, 400);
+  }
+
+  private async flushProjectUiPersist(): Promise<void> {
+    const projectId = this.store.projectId();
+    const mindmapView = this.captureMindmapView();
+    if (!projectId || !mindmapView) return;
+    await this.store.saveProjectWorkspaceUi(projectId, this.paneWidth(), mindmapView);
   }
 
   private centerMap(): void {
@@ -650,6 +717,7 @@ export class AppComponent implements OnInit {
     const zoom = this.zoom();
     stage.scrollLeft = project.x * zoom - stage.clientWidth / 2;
     stage.scrollTop = project.y * zoom - stage.clientHeight / 2;
+    this.scheduleProjectUiPersist();
   }
 
   private zoomAt(offsetX: number, offsetY: number, factor: number): void {
@@ -658,6 +726,7 @@ export class AppComponent implements OnInit {
     const next = clampZoom(previous * factor);
     if (!stage || next === previous) {
       this.zoom.set(next);
+      this.scheduleProjectUiPersist();
       return;
     }
     const worldX = (stage.scrollLeft + offsetX) / previous;
@@ -666,6 +735,7 @@ export class AppComponent implements OnInit {
     queueMicrotask(() => {
       stage.scrollLeft = worldX * next - offsetX;
       stage.scrollTop = worldY * next - offsetY;
+      this.scheduleProjectUiPersist();
     });
   }
 
@@ -1799,6 +1869,6 @@ export class AppComponent implements OnInit {
 }
 
 function clampZoom(value: number): number {
-  return Math.min(2.4, Math.max(0.45, value));
+  return clampMindmapZoom(value);
 }
 

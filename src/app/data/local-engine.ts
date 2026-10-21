@@ -8,6 +8,7 @@ import type {
   ProjectAgent,
   ProjectTask,
   TaskCodeOutput,
+  TaskConnectorKind,
   TaskDraft,
   TaskResearchOutput,
   TaskStatus,
@@ -60,6 +61,10 @@ import {
   generateTasksInstructionForProject,
 } from '../core/generate-tasks';
 import { defaultDarForOutputType, taskDar, taskInitialPrompt } from '../core/task-fields';
+import { assertTaskBriefReadyForRelease } from '../core/task-brief';
+import { isDispatchableNodeKind } from '../core/task-node-kind';
+import type { LoopMode, TaskNodeKind } from '../core/task-node-kind';
+import type { TaskBrief } from '../core/task-brief';
 import { applyTaskStatusTransition, assertTaskTransition, type TaskTransitionTrigger } from '../core/task-state-machine';
 import {
   cursorLaunchFromLibrary,
@@ -97,6 +102,10 @@ interface NormalizedDraft {
   output_type: OutputType;
   depends_on: string[];
   sequential_with: string[];
+  node_kind?: TaskNodeKind;
+  loop_mode?: LoopMode;
+  brief?: TaskBrief;
+  connector_kind?: TaskConnectorKind;
 }
 
 export class LocalEngine {
@@ -394,8 +403,9 @@ export class LocalEngine {
     const created: ProjectTask[] = normalized.map((draft, index) => {
       const dar = defaultDarForOutputType(draft.output_type);
       const initialPrompt = draft.prompt.trim();
+      const taskId = this.newId();
       return {
-      task_id: this.newId(),
+      task_id: taskId,
       project_id: projectId,
       title: draft.title,
       prompt: dar,
@@ -407,6 +417,11 @@ export class LocalEngine {
       order: existing.length + index,
       research_agent_id: draft.output_type === 'research' ? project.default_research_agent_id : undefined,
       code_agent_id: draft.output_type === 'code' ? project.default_code_agent_id : undefined,
+      node_kind: draft.node_kind,
+      loop_mode: draft.loop_mode,
+      brief: draft.brief,
+      connector_kind: draft.connector_kind,
+      backend_idempotency_key: taskId,
       created_at: timestamp,
       updated_at: timestamp,
     };
@@ -768,6 +783,10 @@ export class LocalEngine {
     if (task.output_type === 'subproject') {
       throw new Error('Open the subproject and use Execute there.');
     }
+    if (!isDispatchableNodeKind(task.node_kind)) {
+      throw new Error('Decision and fog nodes are completed in Battleplan, not dispatched to agents.');
+    }
+    assertTaskBriefReadyForRelease(task.brief);
     if (task.cursor_agent_id) throw new Error('This task already has a Cursor agent.');
     const initial = taskInitialPrompt(task);
     if (!initial) throw new Error('Initial prompt is required.');
@@ -1682,8 +1701,14 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
     const types = outputTypesOf(item.output_type, index + 1);
     const depends = item.depends_on ?? [];
     const sequential = item.sequential_with ?? [];
+    const meta = {
+      node_kind: item.node_kind,
+      loop_mode: item.loop_mode,
+      brief: item.brief,
+      connector_kind: item.connector_kind,
+    };
     if (types.length === 1) {
-      normalized.push({ title, prompt, output_type: types[0], depends_on: depends, sequential_with: sequential });
+      normalized.push({ title, prompt, output_type: types[0], depends_on: depends, sequential_with: sequential, ...meta });
       return;
     }
     normalized.push({
@@ -1692,6 +1717,7 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
       output_type: 'research',
       depends_on: depends,
       sequential_with: [],
+      ...meta,
     });
     normalized.push({
       title: `${title} (code)`,
@@ -1699,6 +1725,7 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
       output_type: 'code',
       depends_on: [...depends, `${title} (research)`],
       sequential_with: sequential,
+      ...meta,
     });
   });
   return normalized;

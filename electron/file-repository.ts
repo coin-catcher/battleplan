@@ -13,7 +13,8 @@ import type {
 } from '../src/app/core/models';
 import type { BattleplanRepository } from '../src/app/data/repository';
 import { readJsonFile, writeFileAtomic } from './atomic-write';
-import type { AppConfigDocument, ProjectDocument, StoredArtifact, TaskDocument } from './document-types';
+import { normalizeProjectWorkspaceUiState, type ProjectWorkspaceUiState } from '../src/app/core/project-ui-state';
+import type { AppConfigDocument, ProjectDocument, ProjectUiState, StoredArtifact, TaskDocument } from './document-types';
 import { DEFAULT_APP_CONFIG } from './document-types';
 
 const PROJECT_FILE = 'project_config.json';
@@ -47,6 +48,7 @@ export class FileRepository implements BattleplanRepository {
       pending_changes: doc?.pending_changes,
       agents: doc?.agents ?? [],
       agent_usage_ledger: doc?.agent_usage_ledger,
+      ui: doc?.ui,
     };
     await this.writeProjectDocument(project.project_id, next);
   }
@@ -165,6 +167,24 @@ export class FileRepository implements BattleplanRepository {
   async saveAgentUsageLedger(projectId: string, ledger: Record<string, AgentUsageLedger>): Promise<void> {
     const doc = await this.requireProjectDocument(projectId);
     await this.writeProjectDocument(projectId, { ...doc, agent_usage_ledger: ledger });
+  }
+
+  async getProjectUiState(projectId: string): Promise<ProjectWorkspaceUiState | null> {
+    const doc = await this.readProjectDocument(projectId);
+    return normalizeProjectWorkspaceUiState(doc?.ui ?? null);
+  }
+
+  async saveProjectUiState(projectId: string, state: ProjectWorkspaceUiState): Promise<void> {
+    const normalized = normalizeProjectWorkspaceUiState(state);
+    if (!normalized) return;
+    const doc = await this.requireProjectDocument(projectId);
+    const ui: ProjectUiState = {
+      pane_width: normalized.pane_width,
+      mindmap_zoom: normalized.mindmap_zoom,
+      mindmap_origin_x: normalized.mindmap_origin_x,
+      mindmap_origin_y: normalized.mindmap_origin_y,
+    };
+    await this.writeProjectDocument(projectId, { ...doc, ui });
   }
 
   async listTaskMessages(taskId: string): Promise<ChatMessage[]> {

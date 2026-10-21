@@ -39,6 +39,7 @@ describe('THEME_AGENT_UI', () => {
       expect(contrastRatio(ui.toolboxAddForeground, ui.toolboxAddBackground)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(ui.connectionOkForeground, ui.connectionOkBackground)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(ui.connectionErrorForeground, ui.connectionErrorBackground)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(ui.toolboxForeground, ui.toolboxBackground)).toBeGreaterThanOrEqual(4.5);
     }
   });
 });

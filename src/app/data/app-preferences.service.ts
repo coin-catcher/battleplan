@@ -3,6 +3,13 @@ import type { ThemeId } from '../core/themes';
 import { THEMES } from '../core/themes';
 import { electronBridge, isElectronApp } from './electron-bridge';
 
+export interface AppWindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface AppPreferencesDocument {
   current_project_id: string | null;
   cursor_api_key: string;
@@ -10,6 +17,9 @@ export interface AppPreferencesDocument {
   theme: ThemeId;
   pane_width: number;
   auto_save: boolean;
+  open_project_ids: string[];
+  window_maximized: boolean;
+  window_bounds: AppWindowBounds | null;
 }
 
 const CURSOR_KEY = 'battleplan-cursor-api-key';
@@ -18,6 +28,7 @@ const THEME_KEY = 'battleplan-theme';
 const PANE_KEY = 'battleplan-pane-width';
 const CURRENT_PROJECT_KEY = 'battleplan-current-project';
 const AUTO_SAVE_KEY = 'battleplan-auto-save';
+const OPEN_PROJECTS_KEY = 'battleplan-open-project-ids';
 
 @Injectable({ providedIn: 'root' })
 export class AppPreferences {
@@ -29,6 +40,9 @@ export class AppPreferences {
     theme: 'harbor',
     pane_width: 420,
     auto_save: false,
+    open_project_ids: [],
+    window_maximized: false,
+    window_bounds: null,
   };
 
   async restore(): Promise<void> {
@@ -41,6 +55,9 @@ export class AppPreferences {
         theme: normalizeTheme(config.theme),
         pane_width: normalizePaneWidth(config.pane_width),
         auto_save: Boolean(config.auto_save),
+        open_project_ids: normalizeOpenProjectIds(config.open_project_ids),
+        window_maximized: Boolean(config.window_maximized),
+        window_bounds: normalizeWindowBounds(config.window_bounds),
       };
     } else {
       this.cached = {
@@ -50,6 +67,9 @@ export class AppPreferences {
         theme: normalizeTheme(localStorage.getItem(THEME_KEY)),
         pane_width: normalizePaneWidth(Number(localStorage.getItem(PANE_KEY))),
         auto_save: localStorage.getItem(AUTO_SAVE_KEY) === '1',
+        open_project_ids: normalizeOpenProjectIds(readJsonArray(localStorage.getItem(OPEN_PROJECTS_KEY))),
+        window_maximized: false,
+        window_bounds: null,
       };
     }
     this.ready.set(this.cached.cursor_api_key.trim().length > 0);
@@ -125,6 +145,17 @@ export class AppPreferences {
     await this.persist({ auto_save: enabled });
   }
 
+  openProjectIds(): string[] {
+    return [...this.cached.open_project_ids];
+  }
+
+  async saveOpenSession(openProjectIds: string[], currentProjectId: string | null): Promise<void> {
+    const open_project_ids = normalizeOpenProjectIds(openProjectIds);
+    this.cached.open_project_ids = open_project_ids;
+    this.cached.current_project_id = currentProjectId;
+    await this.persist({ open_project_ids, current_project_id: currentProjectId });
+  }
+
   private async persist(patch: Partial<AppPreferencesDocument>): Promise<void> {
     if (isElectronApp()) {
       await electronBridge()!.invoke('config:write', patch);
@@ -148,7 +179,36 @@ export class AppPreferences {
       if (patch.auto_save) localStorage.setItem(AUTO_SAVE_KEY, '1');
       else localStorage.removeItem(AUTO_SAVE_KEY);
     }
+    if (patch.open_project_ids !== undefined) {
+      localStorage.setItem(OPEN_PROJECTS_KEY, JSON.stringify(patch.open_project_ids));
+    }
   }
+}
+
+function readJsonArray(raw: string | null): unknown {
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeOpenProjectIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
+
+function normalizeWindowBounds(value: Partial<AppWindowBounds> | null | undefined): AppWindowBounds | null {
+  if (!value) return null;
+  const { x, y, width, height } = value;
+  if (![x, y, width, height].every((entry) => Number.isFinite(Number(entry)))) return null;
+  return {
+    x: Math.round(Number(x)),
+    y: Math.round(Number(y)),
+    width: Math.round(Number(width)),
+    height: Math.round(Number(height)),
+  };
 }
 
 function normalizeTheme(value: string | null | undefined): ThemeId {
