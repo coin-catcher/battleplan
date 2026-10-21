@@ -27,6 +27,7 @@ import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
 import { MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL } from '../core/github-client';
 import type { MindmapViewState, ProjectWorkspaceUiState } from '../core/project-ui-state';
+import type { MindmapLinkRef } from '../core/link-relocation';
 import { projectWorkspaceUiFromMindmap } from '../core/project-ui-state';
 import { doingBackgroundWatchTaskIds, taskNeedsDoingBackgroundPoll } from './doing-background-watch';
 
@@ -834,7 +835,7 @@ export class BattleplanStore {
   }
 
   async relocateMindmapLink(
-    link: { kind: 'child' | 'sibling' | 'project-root'; from: string; to: string },
+    link: MindmapLinkRef,
     end: 'from' | 'to',
     dropNodeId: string,
   ): Promise<void> {

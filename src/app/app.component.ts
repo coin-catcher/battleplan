@@ -943,7 +943,9 @@ export class AppComponent implements OnInit {
       const anchorId = end === 'from' ? link.to : link.from;
       const originalEndId = end === 'from' ? link.from : link.to;
       if (target && target.id !== originalEndId && (target.id !== anchorId || target.id === 'project')) {
-        void this.store.relocateMindmapLink(link, end, target.id);
+        if (link.kind === 'child' || link.kind === 'sibling' || link.kind === 'project-root') {
+          void this.store.relocateMindmapLink(link, end, target.id);
+        }
       }
     };
     window.addEventListener('pointermove', move);
@@ -1990,7 +1992,7 @@ export class AppComponent implements OnInit {
     this.graphEdgeBreakCondition = '';
   }
 
-  taskTitle(taskId: string): string {
+  resolveTaskTitle(taskId: string): string {
     return this.store.tasks().find((item) => item.task_id === taskId)?.title ?? taskId;
   }
 
