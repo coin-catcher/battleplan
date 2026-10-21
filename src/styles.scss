@@ -864,35 +864,88 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .panel.task-page {
   gap: 12px;
+  padding-top: 0;
 }
 
-.task-page-chrome {
+.task-page-header {
   flex: none;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 -22px;
+  padding: 8px 22px 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
 }
 
 .task-page-tabs {
   display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
 }
 
-.task-tab {
+.task-page-tab {
+  flex: none;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: var(--field-bg);
+  color: var(--muted);
+  padding: 8px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.25;
+  font-size: 0.9rem;
+}
+
+.task-page-tab.active {
+  background: var(--panel);
+  color: var(--ink);
+  font-weight: 600;
+  margin-bottom: -1px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--panel);
+}
+
+.task-page-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: none;
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--field-bg);
-  color: var(--ink);
-  border-radius: 999px;
-  padding: 6px 14px;
-  font-size: 0.85rem;
   cursor: pointer;
 }
 
-.task-tab.active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, var(--field-bg));
-  color: var(--accent);
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.icon-btn-danger {
+  color: #c0392b;
+  border-color: color-mix(in srgb, #c0392b 35%, var(--line));
+}
+
+.icon-btn-danger:not(:disabled):hover {
+  background: color-mix(in srgb, #c0392b 10%, var(--field-bg));
 }
 
 .task-chat-panel {

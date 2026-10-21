@@ -1886,10 +1886,6 @@ export class AppComponent implements OnInit {
     this.convertHoldTimer = undefined;
   }
 
-  openCode(taskId: string): void {
-    void this.store.openOutput(taskId, 'code');
-  }
-
   openResearch(taskId: string): void {
     void this.store.openOutput(taskId, 'research');
   }
