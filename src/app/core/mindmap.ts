@@ -7,7 +7,7 @@ import {
   siblingDependencyIds,
 } from './dependencies';
 
-export type MindmapShape = 'project' | 'code' | 'research' | 'subproject';
+export type MindmapShape = 'project' | 'code' | 'research' | 'subproject' | 'decision' | 'gate' | 'fog';
 
 export interface MindmapNode {
   id: string;
@@ -242,11 +242,17 @@ export function layoutMindmap(
     const radius = 200 + depthOf(task.task_id) * 150;
     const angle = angleOf.get(task.task_id) ?? 0;
     const pinned = Number.isFinite(task.map_x) && Number.isFinite(task.map_y);
-    const shape: MindmapShape = task.output_type === 'research'
-      ? 'research'
-      : task.output_type === 'subproject'
-        ? 'subproject'
-        : 'code';
+    const shape: MindmapShape = task.node_kind === 'decision'
+      ? 'decision'
+      : task.node_kind === 'gate'
+        ? 'gate'
+        : task.node_kind === 'fog'
+          ? 'fog'
+          : task.output_type === 'research'
+            ? 'research'
+            : task.output_type === 'subproject'
+              ? 'subproject'
+              : 'code';
     const research = shape === 'research';
     nodes.push({
       id: task.task_id,

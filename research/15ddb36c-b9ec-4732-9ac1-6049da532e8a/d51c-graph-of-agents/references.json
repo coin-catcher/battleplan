@@ -1,0 +1,27 @@
+[
+  {
+    "title": "Matt Pocock agent-skills",
+    "url": "https://github.com/mattpocock/skills",
+    "relevance": "grill-me, to-tickets, implement-spec; harness-neutral graph artifacts"
+  },
+  {
+    "title": "Addy Osmani agent-skills",
+    "url": "https://github.com/addyosmani/agent-skills",
+    "relevance": "Lifecycle gates define/plan/build/verify/review/ship"
+  },
+  {
+    "title": "Lauren Tan pstack",
+    "url": "https://github.com/cursor/plugins/tree/main/pstack",
+    "relevance": "brief template, orchestrate, verification ledger"
+  },
+  {
+    "title": "Battleplan Graph of Agents doc",
+    "url": "docs/GRAPH_OF_AGENTS.md",
+    "relevance": "In-repo architecture index"
+  },
+  {
+    "title": "Battleplan agent PR policy",
+    "url": "docs/AGENT_BRANCH_AND_PRS.md",
+    "relevance": "Standing orders overlay for skill stacks that open PRs"
+  }
+]
