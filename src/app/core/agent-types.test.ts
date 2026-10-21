@@ -17,6 +17,7 @@ import {
 describe('agent-types registry', () => {
   it('lists research and code types by kind', () => {
     expect(agentTypesForKind('research')).toContain('OpenAI');
+    expect(agentTypesForKind('research')).toContain('Cursor Agent');
     expect(agentTypesForKind('code')).toEqual(['Cursor Agent']);
   });
 
