@@ -88,7 +88,6 @@ import {
   mergeLegacyTreeOrderingIntoGraph,
   rebuildGraphEdgesFromLegacy,
   prerequisitesMet,
-  rebuildGraphEdgesFromLegacy,
   seedProjectGraphDefaults,
   validateTaskGraphEdges,
 } from '../core/task-graph';
