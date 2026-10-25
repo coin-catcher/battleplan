@@ -23,7 +23,7 @@ import { isAgentDraftId, newDraftAgentId } from '../core/agent-id';
 import type { AgentEditorSaveInput } from '../api/battleplan-api.service';
 import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
 import { generateTasksSourceTaskId, linkCreatedTasksUnderParent, prepareGeneratedDrafts } from '../core/generate-task-links';
-import { parseGeneratedTaskListFromSources } from '../core/parse-tasks';
+import { parseGeneratedTasksFromSources } from '../core/parse-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
 import { MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL } from '../core/github-client';
 import {
@@ -630,10 +630,10 @@ export class BattleplanStore {
       return;
     }
     await this.run(async () => {
-      let drafts = parseGeneratedTaskListFromSources(reply.content, this.artifacts());
+      let parsed = parseGeneratedTasksFromSources(reply.content, this.artifacts());
       const sourceTask = taskId ? this.tasks().find((item) => item.task_id === taskId) : undefined;
-      drafts = prepareGeneratedDrafts(drafts, sourceTask);
-      await this.api.createTasks(projectId, drafts, taskId);
+      const drafts = prepareGeneratedDrafts(parsed.tasks, sourceTask);
+      await this.api.createTasks(projectId, drafts, taskId, parsed.edges);
       await this.reloadTasks();
       const note = `Created ${drafts.length} task${drafts.length === 1 ? '' : 's'} from this conversation.`;
       const saved = taskId ? await this.api.noteTask(taskId, note) : await this.api.noteProject(projectId, note);

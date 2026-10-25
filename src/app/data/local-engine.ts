@@ -53,6 +53,11 @@ import {
   siblingDependencyIds,
 } from '../core/dependencies';
 import { availableDescendants, independentBatch } from '../core/execute-children';
+import {
+  buildGraphEdgesFromDrafts,
+  mergeAdvancedEdgesIntoProject,
+  type GeneratedTaskEdgeDraft,
+} from '../core/generate-task-graph';
 import { bindSequentialDraftLinks, linkCreatedTasksUnderParent } from '../core/generate-task-links';
 import { applyLinkRelocation, type MindmapLinkRef } from '../core/link-relocation';
 import {
@@ -75,6 +80,7 @@ import {
   applyGraphEdgesToLegacyFields,
   ensureProjectTaskGraph,
   mergeLegacyTreeOrderingIntoGraph,
+  rebuildGraphEdgesFromLegacy,
   prerequisitesMet,
   rebuildGraphEdgesFromLegacy,
   seedProjectGraphDefaults,
@@ -464,7 +470,12 @@ export class LocalEngine {
     return task;
   }
 
-  async createTasks(projectId: string, drafts: TaskDraft[], parentTaskId?: string): Promise<ProjectTask[]> {
+  async createTasks(
+    projectId: string,
+    drafts: TaskDraft[],
+    parentTaskId?: string,
+    graphEdgeDrafts?: GeneratedTaskEdgeDraft[],
+  ): Promise<ProjectTask[]> {
     await this.requireProject(projectId);
     const normalized = normalizeDrafts(drafts);
     const existing = await this.repo.listTasks(projectId);
@@ -506,8 +517,20 @@ export class LocalEngine {
     if (parentTaskId) {
       linkCreatedTasksUnderParent(existing, created, parentTaskId);
     }
-    await this.repo.saveTasks([...existing, ...created]);
-    await this.persistGraphAfterTaskChange(projectId);
+    const allTasks = [...existing, ...created];
+    await this.repo.saveTasks(allTasks);
+    const legacyEdges = rebuildGraphEdgesFromLegacy(allTasks);
+    const advancedEdges = graphEdgeDrafts?.length
+      ? buildGraphEdgesFromDrafts(existing, created, graphEdgeDrafts)
+      : [];
+    project.task_graph_edges = mergeAdvancedEdgesIntoProject(
+      project.task_graph_edges,
+      legacyEdges,
+      advancedEdges,
+    );
+    validateTaskGraphEdges(project.task_graph_edges, new Set(allTasks.map((task) => task.task_id)));
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
     return created;
   }
 

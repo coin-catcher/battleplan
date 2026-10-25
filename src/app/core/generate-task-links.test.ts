@@ -24,14 +24,14 @@ describe('linkCreatedTasksUnderParent', () => {
 });
 
 describe('bindSequentialDraftLinks', () => {
-  it('creates mutual sibling_dependencies for sequential_with pairs', () => {
+  it('creates one-way ordering for sequential_with (later waits for earlier)', () => {
     const a = task({ task_id: 'a', title: 'A', order: 0 });
     const b = task({ task_id: 'b', title: 'B', order: 1 });
     bindSequentialDraftLinks([], [a, b], [
       { sequential_with: ['B'] },
       { sequential_with: ['A'] },
     ]);
-    expect(a.sibling_dependencies).toEqual(['b']);
+    expect(a.sibling_dependencies ?? []).toEqual([]);
     expect(b.sibling_dependencies).toEqual(['a']);
   });
 });

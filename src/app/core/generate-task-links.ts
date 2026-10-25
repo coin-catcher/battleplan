@@ -48,12 +48,18 @@ export function bindSequentialDraftLinks(
     set.add(rightId);
     pairs.set(leftId, set);
   };
+  const indexById = new Map(created.map((task, index) => [task.task_id, index]));
   created.forEach((task, index) => {
     for (const title of drafts[index]?.sequential_with ?? []) {
       const matches = titles.get(title.trim()) ?? [];
       if (matches.length !== 1) continue;
-      addPair(task.task_id, matches[0]);
-      addPair(matches[0], task.task_id);
+      const otherId = matches[0];
+      const otherIndex = indexById.get(otherId);
+      if (otherIndex === undefined || otherIndex === index) continue;
+      // Later tasks in the batch wait for earlier ones (one-way ordering avoids graph cycles).
+      if (index > otherIndex) {
+        addPair(task.task_id, otherId);
+      }
     }
   });
   for (const task of created) {

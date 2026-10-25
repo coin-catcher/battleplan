@@ -8,7 +8,16 @@ import {
   siblingDependencyIds,
 } from './dependencies';
 
-export type MindmapShape = 'project' | 'code' | 'research' | 'subproject' | 'decision' | 'gate' | 'fog';
+export type MindmapShape =
+  | 'project'
+  | 'code'
+  | 'research'
+  | 'subproject'
+  | 'decision'
+  | 'gate'
+  | 'fog'
+  | 'brainstorm'
+  | 'architect';
 
 export interface MindmapNode {
   id: string;
@@ -248,13 +257,15 @@ export function layoutMindmap(
       ? 'decision'
       : task.node_kind === 'gate'
         ? 'gate'
-        : task.node_kind === 'fog'
-          ? 'fog'
-          : task.output_type === 'research'
-            ? 'research'
-            : task.output_type === 'subproject'
-              ? 'subproject'
-              : 'code';
+        : task.node_kind === 'fog' || task.node_kind === 'brainstorm'
+          ? 'brainstorm'
+          : task.node_kind === 'architect'
+            ? 'architect'
+            : task.output_type === 'research'
+              ? 'research'
+              : task.output_type === 'subproject'
+                ? 'subproject'
+                : 'code';
     const research = shape === 'research';
     nodes.push({
       id: task.task_id,
