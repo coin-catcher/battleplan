@@ -9,26 +9,41 @@
    - **Project chat**: sends a generate instruction to the project’s Cursor agent (`LocalEngine.generateTasks`).
    - **Task chat**: sends a task-specific message to that task’s agent (or the project agent if the task has not started its own) via `LocalEngine.generateTaskTasks`.
 3. **Cursor** runs with `intent: 'generate_tasks'`. The app waits for the run to finish and reloads messages/artifacts.
-4. **Parse** — `parseGeneratedTaskListFromSources()` reads a JSON array from the assistant reply or a `.json` artifact (`parse-tasks.ts`).
+4. **Parse** — `parseGeneratedTasksFromSources()` reads `{ "tasks": [...], "edges": [...] }` (or a bare task array) from the assistant reply or a `.json` artifact (`parse-tasks.ts`).
 5. **Anchor (task scope only)** — when Generate Tasks is invoked from a task panel, Battleplan passes that task’s id into `createTasks()`. Drafts with empty `depends_on` get the source task title as a fallback; any generated task still without a tree parent is linked under the **source task id** (`linkCreatedTasksUnderParent()` in `generate-task-links.ts`).
 6. **Create** — `LocalEngine.createTasks()` normalizes drafts, creates `ProjectTask` rows, wires the mindmap graph (`bindDependencies()`), and applies **`sequential_with`** as mutual `sibling_dependencies` so conflicting code tasks do not execute in parallel (`bindSequentialDraftLinks()`).
 7. **UI** — tasks reload; new nodes appear on the left-hand mindmap.
 
 ## JSON shape the agent must return
 
-Each element of the array:
+Preferred top-level object:
+
+```json
+{ "tasks": [ ... ], "edges": [ ... ] }
+```
+
+Each task object:
 
 | Field | Meaning |
 |--------|---------|
 | `title` | Short label on the mindmap |
 | `prompt` | Becomes the task **initial prompt** (what Execute sends to the agent) |
-| `output_type` | `"code"` or `"research"` (or `both`-style values split into research + code tasks) |
-| `depends_on` | Titles of **parent** tasks in this same array (see linking below) |
-| `sequential_with` | Optional titles of other tasks in the batch that touch the same code and must run **sequentially** (sibling dependencies, not tree depth) |
-| `brief` | Optional pstack-style object in JSON; omitted fields are filled from **`buildDefaultTaskBrief`** at create time. Every stored task has a complete brief before Execute |
-| `node_kind` | Optional `work`, `decision`, `gate`, or `fog` (decision/fog nodes are not dispatched to agents) |
-| `loop_mode` | Optional `HITL` or `AFK` (human-in-the-loop vs agent-alone) |
-| `connector_kind` | Optional `cursor`, `hermes`, `research_http`, or `custom` preferred backend |
+| `task_kind` | Workflow stencil: `brainstorming`, `research`, `critiquing`, `code`, or `architect` (maps to mindmap shape + `output_type` / `node_kind`) |
+| `output_type` | `"code"` or `"research"` when not using `task_kind` |
+| `depends_on` | Titles of **parent** tasks in this batch (tree links) |
+| `sequential_with` | Titles that must not run in parallel; later tasks in the batch wait for earlier ones |
+| `brief` | **Required** pstack object (`goal`, `scope`, `context`, `acceptance`, `verify`, `timebox`, `forbidden`, `report`, `standing`). Omitted fields are filled from **`buildDefaultTaskBrief`** at create time |
+| `node_kind` | Optional override: `work`, `decision`, `gate`, `fog`, `brainstorm`, `architect` |
+| `loop_mode` | Optional `HITL` or `AFK` |
+| `connector_kind` | Optional execution backend |
+
+Optional `edges` array (graph links beyond tree/ordering):
+
+| Field | Meaning |
+|--------|---------|
+| `from`, `to` | Task titles |
+| `kind` | `tree`, `ordering`, `fork`, `join`, or `cycle` (`fan-out`, `fan-in`, `loop` aliases) |
+| `break_condition` | **Required** on every `cycle` / loop edge (e.g. `human:REVIEW`) |
 
 See [GRAPH_OF_AGENTS.md](./GRAPH_OF_AGENTS.md).
 

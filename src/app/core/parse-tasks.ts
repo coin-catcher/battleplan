@@ -1,21 +1,29 @@
 import type { ChatArtifact, TaskDraft, TaskConnectorKind } from './models';
 import { TASK_CONNECTOR_KINDS } from './models';
+import { parseGeneratedEdgeList, type GeneratedTaskEdgeDraft } from './generate-task-graph';
 import { taskBriefFromDraftRecord } from './task-brief';
 import { normalizeLoopMode, normalizeTaskNodeKind } from './task-node-kind';
 import { normalizeLifecyclePhase } from './task-lifecycle';
+import { resolveDraftFieldsFromWorkflow } from './workflow-task-kind';
 
-export function parseGeneratedTaskListFromSources(text: string, artifacts: ChatArtifact[]): TaskDraft[] {
+export interface ParsedGeneratedTasks {
+  tasks: TaskDraft[];
+  edges: GeneratedTaskEdgeDraft[];
+}
+
+export function parseGeneratedTasksFromSources(text: string, artifacts: ChatArtifact[]): ParsedGeneratedTasks {
   const errors: string[] = [];
   try {
-    return parseGeneratedTaskList(text);
+    return parseGeneratedTasksPayload(text);
   } catch (error) {
     errors.push(error instanceof Error ? error.message : 'Could not parse agent text.');
   }
   for (const artifact of artifacts) {
     if (artifact.content_type !== 'text' || !artifact.text?.trim()) continue;
-    if (!/\.json$/i.test(artifact.name) && !artifact.text.trim().startsWith('[')) continue;
+    const trimmed = artifact.text.trim();
+    if (!/\.json$/i.test(artifact.name) && !trimmed.startsWith('[') && !trimmed.startsWith('{')) continue;
     try {
-      return parseGeneratedTaskList(artifact.text);
+      return parseGeneratedTasksPayload(artifact.text);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : 'Could not parse artifact text.');
     }
@@ -23,23 +31,60 @@ export function parseGeneratedTaskListFromSources(text: string, artifacts: ChatA
   throw new Error(errors[0] ?? 'No JSON task array found in the agent response.');
 }
 
+/** @deprecated Use parseGeneratedTasksFromSources for graph edges. */
+export function parseGeneratedTaskListFromSources(text: string, artifacts: ChatArtifact[]): TaskDraft[] {
+  return parseGeneratedTasksFromSources(text, artifacts).tasks;
+}
+
+export function parseGeneratedTasksPayload(text: string): ParsedGeneratedTasks {
+  const jsonText = extractGenerateTasksJson(text);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText) as unknown;
+  } catch {
+    throw new Error('The agent response did not contain valid JSON.');
+  }
+  if (Array.isArray(parsed)) {
+    if (parsed.length === 0) throw new Error('The task list is empty.');
+    return { tasks: parseGeneratedTaskRecords(parsed), edges: [] };
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Generate Tasks JSON must be an array or an object with a tasks array.');
+  }
+  const record = parsed as Record<string, unknown>;
+  const tasksRaw = record['tasks'] ?? record['nodes'];
+  if (!Array.isArray(tasksRaw) || tasksRaw.length === 0) {
+    throw new Error('The task list is empty.');
+  }
+  const edges = parseGeneratedEdgeList(record['edges'] ?? record['graph_edges'] ?? record['links']);
+  return { tasks: parseGeneratedTaskRecords(tasksRaw), edges };
+}
+
 export function parseGeneratedTaskList(text: string): TaskDraft[] {
+  return parseGeneratedTasksPayload(text).tasks;
+}
+
+function extractGenerateTasksJson(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const source = fenced?.[1] ?? text;
-  const start = source.indexOf('[');
+  const objectStart = source.indexOf('{');
+  const arrayStart = source.indexOf('[');
+  let start = -1;
+  if (objectStart >= 0 && (arrayStart < 0 || objectStart < arrayStart)) {
+    start = objectStart;
+    const end = source.lastIndexOf('}');
+    if (end <= start) throw new Error('No JSON task payload found in the agent response.');
+    return source.slice(start, end + 1);
+  }
+  start = arrayStart;
   const end = source.lastIndexOf(']');
   if (start < 0 || end <= start) {
     throw new Error('No JSON task array found in the agent response.');
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(source.slice(start, end + 1)) as unknown;
-  } catch {
-    throw new Error('The agent response did not contain valid JSON.');
-  }
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new Error('The task list is empty.');
-  }
+  return source.slice(start, end + 1);
+}
+
+function parseGeneratedTaskRecords(parsed: unknown[]): TaskDraft[] {
   return parsed.map((item, index) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       throw new Error(`Task ${index + 1} must be an object.`);
@@ -47,9 +92,10 @@ export function parseGeneratedTaskList(text: string): TaskDraft[] {
     const record = item as Record<string, unknown>;
     const title = requiredText(record['title'], `Task ${index + 1} title`);
     const prompt = requiredText(record['prompt'], `Task ${index + 1} prompt`);
-    const output = record['output_type'];
+    const workflowFields = resolveDraftFieldsFromWorkflow(record);
+    const output = workflowFields.output_type ?? record['output_type'];
     if (typeof output !== 'string' || !output.trim()) {
-      throw new Error(`Task ${index + 1} output_type is required.`);
+      throw new Error(`Task ${index + 1} output_type or task_kind is required.`);
     }
     const depends = record['depends_on'] ?? record['dependencies'] ?? [];
     if (!Array.isArray(depends) || depends.some((entry) => typeof entry !== 'string')) {
@@ -63,10 +109,12 @@ export function parseGeneratedTaskList(text: string): TaskDraft[] {
       throw new Error(`Task ${index + 1} sequential_with must be an array of task titles.`);
     }
     const brief = taskBriefFromDraftRecord(record);
-    const nodeKind = record['node_kind'] !== undefined ? normalizeTaskNodeKind(record['node_kind']) : undefined;
+    const nodeKind = workflowFields.node_kind
+      ?? (record['node_kind'] !== undefined ? normalizeTaskNodeKind(record['node_kind']) : undefined);
     const loopMode = normalizeLoopMode(record['loop_mode']);
     const connector = parseConnectorKind(record['connector_kind']);
-    const lifecyclePhase = normalizeLifecyclePhase(record['lifecycle_phase']);
+    const lifecyclePhase = workflowFields.lifecycle_phase
+      ?? normalizeLifecyclePhase(record['lifecycle_phase']);
     return {
       title,
       prompt,

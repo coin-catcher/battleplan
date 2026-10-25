@@ -114,9 +114,10 @@ export function buildDefaultTaskBrief(input: TaskBriefBuildInput): TaskBrief {
     : title;
 
   let scope = `Deliver a ${output} outcome for "${title}".`;
-  if (kind === 'decision') scope = `Resolve the design decision "${title}" with the human (HITL).`;
+  if (kind === 'decision') scope = `Review outputs for "${title}", score against acceptance, and decide rework vs proceed.`;
   if (kind === 'gate') scope = `Human gate: confirm prerequisites before downstream tasks proceed.`;
-  if (kind === 'fog') scope = `Clarify unknowns for "${title}" before ticketing work.`;
+  if (kind === 'fog' || kind === 'brainstorm') scope = `Brainstorm and clarify how "${title}" should be accomplished (Q&A with the human).`;
+  if (kind === 'architect') scope = `Review commits across related tasks and consolidate design patterns for "${title}".`;
 
   const contextParts = [
     prompt ? `Initial prompt:\n${prompt}` : '',

@@ -24,16 +24,18 @@ describe('generateTasksInstructionForResearchTask', () => {
     const text = generateTasksInstructionForResearchTask('Catalog research');
     expect(text).toContain('one-dimensional list of code tasks');
     expect(text).toContain('depends_on to []');
-    expect(text).toContain('Foundation code task');
-    expect(text).toContain('Child research task');
+    expect(text).toContain('complete brief');
+    expect(text).toContain('critiquing');
+    expect(text).toContain('break_condition');
   });
 });
 
 describe('generateTasksInstructionForProject', () => {
   it('includes JSON schema rules', () => {
     const text = generateTasksInstructionForProject();
-    expect(text).toContain('JSON array');
-    expect(text).toContain('depends_on');
+    expect(text).toContain('"tasks"');
+    expect(text).toContain('task_kind');
+    expect(text).toContain('fan-in');
   });
 });
 
