@@ -250,10 +250,11 @@
             <div
               class="map-node"
               [class.circle]="node.shape === 'project' || node.shape === 'subproject'"
-              [class.cloud]="node.shape === 'research' || node.shape === 'fog'"
+              [class.cloud]="node.shape === 'research' || node.shape === 'fog' || node.shape === 'brainstorm'"
               [class.code]="node.shape === 'code'"
               [class.decision]="node.shape === 'decision'"
               [class.gate]="node.shape === 'gate'"
+              [class.process]="node.shape === 'architect'"
               [class.active]="isMapSelected(node)"
               [class.group-selected]="isMapGroupSelected(node)"
               [class.editing]="editingNodeId() === node.id"

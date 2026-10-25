@@ -77,8 +77,13 @@ export class BattleplanApi {
     return this.engine.listTasks(projectId);
   }
 
-  createTasks(projectId: string, tasks: TaskDraft[], parentTaskId?: string): Promise<ProjectTask[]> {
-    return this.engine.createTasks(projectId, tasks, parentTaskId);
+  createTasks(
+    projectId: string,
+    tasks: TaskDraft[],
+    parentTaskId?: string,
+    graphEdges?: import('../core/generate-task-graph').GeneratedTaskEdgeDraft[],
+  ): Promise<ProjectTask[]> {
+    return this.engine.createTasks(projectId, tasks, parentTaskId, graphEdges);
   }
 
   createTask(projectId: string, input: {

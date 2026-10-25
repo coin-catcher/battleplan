@@ -623,6 +623,11 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 }
 
 .map-node.code { border-radius: 16px; }
+.map-node.process {
+  border-radius: 8px;
+  clip-path: polygon(12% 0%, 88% 0%, 100% 50%, 88% 100%, 12% 100%, 0% 50%);
+  padding-inline: 10px;
+}
 .map-node.decision {
   border-radius: 8px;
   transform: rotate(45deg);
