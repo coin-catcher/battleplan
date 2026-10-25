@@ -622,6 +622,16 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   border-color: var(--line);
 }
 
+.task-workflow-hint {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--text-muted, #4a443c);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
 .map-node.code { border-radius: 16px; }
 .map-node.process {
   border-radius: 8px;

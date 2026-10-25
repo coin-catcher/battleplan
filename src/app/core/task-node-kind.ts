@@ -1,5 +1,5 @@
 /** Logical node kinds on the Battleplan plan graph (beyond output_type shapes). */
-export const TASK_NODE_KINDS = ['work', 'decision', 'gate', 'fog', 'brainstorm', 'architect'] as const;
+export const TASK_NODE_KINDS = ['work', 'decision', 'gate', 'fog', 'brainstorm', 'architect', 'critique'] as const;
 export type TaskNodeKind = (typeof TASK_NODE_KINDS)[number];
 
 export const LOOP_MODES = ['HITL', 'AFK'] as const;
@@ -8,7 +8,8 @@ export type LoopMode = (typeof LOOP_MODES)[number];
 export function normalizeTaskNodeKind(value: unknown): TaskNodeKind {
   if (typeof value !== 'string') return 'work';
   const token = value.trim().toLowerCase();
-  if (token === 'decision' || token === 'hitl' || token === 'critique' || token === 'critiquing') return 'decision';
+  if (token === 'decision' || token === 'hitl') return 'decision';
+  if (token === 'critique' || token === 'critiquing' || token === 'critic') return 'critique';
   if (token === 'gate') return 'gate';
   if (token === 'fog') return 'fog';
   if (token === 'brainstorm' || token === 'brainstorming') return 'brainstorm';

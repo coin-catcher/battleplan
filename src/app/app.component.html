@@ -655,6 +655,9 @@
                     <span class="task-meta-hint">Subproject (no agent)</span>
                   }
                 </div>
+                @if (taskWorkflowHint(task); as hint) {
+                  <p class="task-workflow-hint">{{ hint }}</p>
+                }
                 @if (!taskAgentStarted(task)) {
                   <div class="task-pre-chat">
                     <label class="field">

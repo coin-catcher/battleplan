@@ -66,7 +66,8 @@ import {
   TASK_BRIEF_FIELDS,
   type TaskBrief,
 } from './core/task-brief';
-import { applyLifecycleBriefDefaults } from './core/task-lifecycle';
+import { applyTaskBriefDefaults } from './core/task-lifecycle';
+import { workflowHintForTask } from './core/task-workflow-lifecycle';
 import {
   buildKanbanBoard,
   listKanbanScopeOptions,
@@ -357,7 +358,10 @@ export class AppComponent implements OnInit {
       };
       this.taskBriefForm = mergeTaskBriefWithDefaults(
         task.brief,
-        applyLifecycleBriefDefaults(briefInput, task.lifecycle_phase),
+        applyTaskBriefDefaults(briefInput, {
+          lifecyclePhase: task.lifecycle_phase,
+          nodeKind: task.node_kind,
+        }),
       );
     });
 
@@ -1114,6 +1118,10 @@ export class AppComponent implements OnInit {
       dar: this.projectDar,
       initial_prompt: this.subprojectInitialPrompt,
     });
+  }
+
+  taskWorkflowHint(task: ProjectTask): string | undefined {
+    return workflowHintForTask(task);
   }
 
   taskAgentStarted(task: ProjectTask): boolean {
@@ -1940,15 +1948,19 @@ export class AppComponent implements OnInit {
   regenerateTaskBrief(): void {
     const project = this.store.project();
     const task = this.store.selectedTask();
-    this.taskBriefForm = applyLifecycleBriefDefaults({
+    this.taskBriefForm = applyTaskBriefDefaults({
       title: this.taskTitle,
       initialPrompt: this.taskInitialPrompt,
       dar: task ? taskDar(task) : '',
       outputType: this.outputType,
+      nodeKind: task?.node_kind,
       projectDar: project?.dar,
       repoUrl: project?.repo_url,
       lifecyclePhase: task?.lifecycle_phase,
-    }, task?.lifecycle_phase);
+    }, {
+      lifecyclePhase: task?.lifecycle_phase,
+      nodeKind: task?.node_kind,
+    });
     void this.onEditorFieldAutoSave();
   }
 
