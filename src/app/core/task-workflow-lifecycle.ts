@@ -1,5 +1,6 @@
 import type { Project, ProjectTask } from './models';
 import type { TaskBrief } from './task-brief';
+import type { TaskNodeKind } from './task-node-kind';
 import type { WorkflowTaskKind } from './workflow-task-kind';
 
 export function inferWorkflowKindFromTask(
