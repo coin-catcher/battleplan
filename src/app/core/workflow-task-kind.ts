@@ -52,7 +52,7 @@ export function workflowKindToTaskFields(kind: WorkflowTaskKind): WorkflowKindMa
     case 'research':
       return { output_type: 'research', node_kind: 'work', lifecycle_phase: 'discover' };
     case 'critiquing':
-      return { output_type: 'research', node_kind: 'decision', lifecycle_phase: 'verify' };
+      return { output_type: 'research', node_kind: 'critique', lifecycle_phase: 'verify' };
     case 'code':
       return { output_type: 'code', node_kind: 'work', lifecycle_phase: 'build' };
     case 'architect':

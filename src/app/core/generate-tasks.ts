@@ -21,7 +21,7 @@ const JSON_TASK_LIST_RULES = [
   'Stencil semantics:',
   '- brainstorming (cloud): discover approach via Q&A; usually HITL research',
   '- research (data/cylinder): gather evidence and inputs for downstream work',
-  '- critiquing (diamond/decision): review prior outputs, score against acceptance, choose rework vs proceed',
+  '- critiquing (diamond): review prior outputs, score against acceptance, choose rework vs proceed (agent-dispatched critique node)',
   '- code (rounded rectangle): implement and test on the agent branch',
   '- architect (process): review commits across the graph and consolidate design patterns',
   '',
