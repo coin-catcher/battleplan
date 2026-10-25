@@ -74,7 +74,13 @@ import {
 } from '../core/task-brief';
 import { isDispatchableNodeKind } from '../core/task-node-kind';
 import { defaultConnectorForTask } from '../core/connector-defaults';
-import { applyLifecycleBriefDefaults } from '../core/task-lifecycle';
+import { applyTaskBriefDefaults } from '../core/task-lifecycle';
+import {
+  defaultLoopModeForNodeKind,
+  inferWorkflowKindFromTask,
+  workflowExecutionPreamble,
+  workflowFeedbackPreamble,
+} from '../core/task-workflow-lifecycle';
 import { autoDispatchBatch, graphEdgesForRun } from '../core/task-ready';
 import {
   applyGraphEdgesToLegacyFields,
@@ -151,7 +157,10 @@ function briefBuildInput(
 
 function completeBriefForTask(task: ProjectTask, project: Project, existing?: TaskBrief): TaskBrief {
   const input = briefBuildInput(task, project);
-  const defaults = applyLifecycleBriefDefaults(input, task.lifecycle_phase);
+  const defaults = applyTaskBriefDefaults(input, {
+    lifecyclePhase: task.lifecycle_phase,
+    nodeKind: task.node_kind,
+  });
   return mergeTaskBriefWithDefaults(existing, defaults);
 }
 
@@ -499,7 +508,7 @@ export class LocalEngine {
         research_agent_id: draft.output_type === 'research' ? project.default_research_agent_id : undefined,
         code_agent_id: draft.output_type === 'code' ? project.default_code_agent_id : undefined,
         node_kind: draft.node_kind,
-        loop_mode: draft.loop_mode,
+        loop_mode: draft.loop_mode ?? defaultLoopModeForNodeKind(draft.node_kind),
         connector_kind: draft.connector_kind,
         backend_idempotency_key: taskId,
         created_at: timestamp,
@@ -1644,20 +1653,26 @@ export class LocalEngine {
     const repoUrl = launch.repoUrl;
     if (!repoUrl) throw new Error('Add a repository to the project before starting a task.');
     const base = launch.startingRef?.trim() || project.starting_ref?.trim() || 'main';
+    const workflow = inferWorkflowKindFromTask(task);
     const lines = [
       `You are executing a battleplan ${task.output_type} task.`,
       ...agentBranchPolicyLines({ baseBranch: base }),
       `Repository: ${repoUrl}.`,
-      'When finished, summarize the code changes you committed and name the branch you pushed.',
     ];
-    if (task.output_type === 'research') {
+    if (workflow) {
+      lines.push(workflowExecutionPreamble(workflow, task, project));
+    } else if (task.output_type === 'research') {
       lines.push(
         `Write the research into the git repository under \`research/${project.project_id}/${task.task_id}/\`.`,
         'Use markdown, JSON, CSV, or YAML, whichever fits the findings.',
         'Do not change application source code.',
       );
+      lines.push('When finished, summarize findings and list artifact paths.');
     } else {
-      lines.push('Implement the task in code on the agent branch.');
+      lines.push(
+        'Implement the task in code on the agent branch.',
+        'When finished, summarize the code changes you committed and name the branch you pushed.',
+      );
     }
     lines.push(`Task title: ${task.title}`);
     if (task.brief) {
@@ -1745,16 +1760,20 @@ export class LocalEngine {
     this.markTaskDoingOnAgentChat(task);
     const dar = joinDarSections(await collectTaskDarSections(task, this.darLookup()));
     const briefSection = task.brief ? formatTaskBriefMarkdown(task.brief) : '';
+    const workflow = inferWorkflowKindFromTask(task);
+    const workflowSection = workflow ? workflowExecutionPreamble(workflow, task, project) : '';
     const systemPrompt = joinDarSections([
       optionString(agent.options, 'system_prompt'),
+      workflowSection,
       dar,
       briefSection,
     ]);
     const prior = await this.repo.listTaskMessages(task.task_id);
     const turns = researchTurnsFromMessages(prior);
+    const roundNote = !options?.isFirstExecute ? workflowFeedbackPreamble(task) : undefined;
     const content = options?.isFirstExecute
       ? joinDarSections([dar, briefSection, userMessage])
-      : userMessage;
+      : joinDarSections([roundNote, userMessage].filter(Boolean) as string[]);
     turns.push({ role: 'user', content });
     try {
       const result = await sendResearchAgentChat(agent, turns, systemPrompt);
@@ -2051,6 +2070,15 @@ function bindDependencies(existing: ProjectTask[], created: ProjectTask[], draft
 }
 
 function feedbackPrompt(task: ProjectTask, feedback: string): string {
+  const workflowNote = workflowFeedbackPreamble(task);
+  if (workflowNote) {
+    return [
+      `The user sent a message on the "${task.title}" ${inferWorkflowKindFromTask(task) ?? 'workflow'} task.`,
+      workflowNote,
+      '',
+      feedback,
+    ].join('\n');
+  }
   return [
     `The user reviewed the work for "${task.title}" and sent feedback.`,
     'Incorporate the feedback on the existing agent branch, commit, and push. Do not create or update pull requests.',

@@ -2,6 +2,8 @@ import type { LifecyclePhase, OutputType } from './models';
 import { LIFECYCLE_PHASES } from './models';
 import type { TaskBriefBuildInput } from './task-brief';
 import { buildDefaultTaskBrief } from './task-brief';
+import type { TaskNodeKind } from './task-node-kind';
+import { applyWorkflowKindBriefDefaults, inferWorkflowKindFromTask } from './task-workflow-lifecycle';
 
 export { LIFECYCLE_PHASES };
 export type { LifecyclePhase };
@@ -48,6 +50,23 @@ export function applyLifecycleBriefDefaults(
       break;
     default:
       break;
+  }
+  return brief;
+}
+
+/** Lifecycle brief defaults plus workflow stencil overrides (brainstorm / research / critique). */
+export function applyTaskBriefDefaults(
+  input: TaskBriefBuildInput,
+  options?: { lifecyclePhase?: LifecyclePhase; nodeKind?: TaskNodeKind },
+): ReturnType<typeof buildDefaultTaskBrief> {
+  let brief = applyLifecycleBriefDefaults(input, options?.lifecyclePhase);
+  const workflow = inferWorkflowKindFromTask({
+    node_kind: options?.nodeKind ?? input.nodeKind,
+    output_type: input.outputType,
+    lifecycle_phase: options?.lifecyclePhase ?? input.lifecyclePhase,
+  });
+  if (workflow) {
+    brief = applyWorkflowKindBriefDefaults(brief, workflow, input.title);
   }
   return brief;
 }

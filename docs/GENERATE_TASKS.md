@@ -33,7 +33,9 @@ Each task object:
 | `depends_on` | Titles of **parent** tasks in this batch (tree links) |
 | `sequential_with` | Titles that must not run in parallel; later tasks in the batch wait for earlier ones |
 | `brief` | **Required** pstack object (`goal`, `scope`, `context`, `acceptance`, `verify`, `timebox`, `forbidden`, `report`, `standing`). Omitted fields are filled from **`buildDefaultTaskBrief`** at create time |
-| `node_kind` | Optional override: `work`, `decision`, `gate`, `fog`, `brainstorm`, `architect` |
+| `node_kind` | Optional override: `work`, `decision`, `gate`, `fog`, `brainstorm`, `architect`, `critique` (dispatched critiquing agent; diamond shape) |
+
+Execution behavior per stencil: [TASK_WORKFLOW_LIFECYCLES.md](./TASK_WORKFLOW_LIFECYCLES.md).
 | `loop_mode` | Optional `HITL` or `AFK` |
 | `connector_kind` | Optional execution backend |
 
