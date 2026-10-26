@@ -264,6 +264,41 @@ describe('LocalEngine', () => {
     expect(code.dar ?? '').toBe('');
   });
 
+  it('createTasks with graph edges ignores stale project edges and validates', async () => {
+    const repo = new MemoryRepository();
+    let tick = 0;
+    const engine = new LocalEngine(
+      repo,
+      cursor(),
+      () => `2026-10-02T00:00:0${tick}.000Z`,
+      () => `id-${tick++}`,
+    );
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+      task_graph_edges: [{
+        edge_id: 'fork:ghost->gone',
+        from_task_id: 'ghost',
+        to_task_id: 'gone',
+        kind: 'fork',
+      }],
+    });
+    const research = await engine.createTask('p1', { title: 'Research parent', output_type: 'research' });
+    await engine.createTasks('p1', [
+      { title: 'Architect contracts', prompt: 'Doc only', output_type: 'research', depends_on: [] },
+      { title: 'Implement edge fn', prompt: 'Code', output_type: 'code', depends_on: ['Architect contracts'] },
+    ], research.task_id, [
+      { from: 'Architect contracts', to: 'Implement edge fn', kind: 'fork' },
+    ]);
+    const project = await repo.getProject('p1');
+    expect(project?.task_graph_edges?.some((edge) => edge.from_task_id === 'ghost')).toBe(false);
+    expect(project?.task_graph_edges?.some((edge) => edge.kind === 'fork')).toBe(true);
+  });
+
   it('splits a both-output draft into research then code', async () => {
     const repo = new MemoryRepository();
     let tick = 0;
