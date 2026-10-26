@@ -116,6 +116,9 @@ export class BattleplanApi {
       code_agent_id: typeof patch['code_agent_id'] === 'string' ? patch['code_agent_id'] : undefined,
       brief: patch['brief'] as import('../core/task-brief').TaskBrief | undefined,
       regenerate_brief: patch['regenerate_brief'] === true ? true : undefined,
+      node_kind: patch['node_kind'] as import('../core/task-node-kind').TaskNodeKind | undefined,
+      lifecycle_phase: patch['lifecycle_phase'] as import('../core/models').LifecyclePhase | undefined,
+      repo_path: typeof patch['repo_path'] === 'string' ? patch['repo_path'] : undefined,
     });
   }
 
@@ -190,6 +193,10 @@ export class BattleplanApi {
 
   generateTaskTasks(taskId: string): Promise<ChatMessage> {
     return this.engine.generateTaskTasks(taskId);
+  }
+
+  generateLayeredTaskTasks(taskId: string, layer: number, message: string): Promise<ChatMessage> {
+    return this.engine.generateLayeredTaskTasks(taskId, layer, message);
   }
 
   repairGenerateTasksJson(

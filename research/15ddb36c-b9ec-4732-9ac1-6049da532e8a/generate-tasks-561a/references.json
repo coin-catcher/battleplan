@@ -1,0 +1,81 @@
+{
+  "human_spec": {
+    "source": "Battleplan task Data and Rules — Generate Tasks (this agent run)",
+    "summary": "Layered grilling, task types in dropdown, mindmap shapes, git paths, parent DOING/DONE"
+  },
+  "in_repo_docs": [
+    {
+      "path": "docs/GENERATE_TASKS.md",
+      "relevance": "Current one-shot flow, JSON schema, anchoring under research task"
+    },
+    {
+      "path": "docs/TASK_WORKFLOW_LIFECYCLES.md",
+      "relevance": "Stencil semantics for brainstorm/research/critique/code/architect"
+    },
+    {
+      "path": "docs/GRAPH_OF_AGENTS.md",
+      "relevance": "Extended task fields, graph-delta future integration"
+    }
+  ],
+  "in_repo_implementation": [
+    {
+      "path": "src/app/state/battleplan-store.service.ts",
+      "symbols": ["generateTasks", "importGeneratedTasksFromReply"],
+      "relevance": "Orchestration entry point; must gain session mode"
+    },
+    {
+      "path": "src/app/core/generate-tasks.ts",
+      "symbols": ["generateTasksInstructionForResearchTask", "JSON_TASK_LIST_RULES"],
+      "relevance": "Agent prompts; extend for layered protocol"
+    },
+    {
+      "path": "src/app/core/generate-task-links.ts",
+      "symbols": ["prepareGeneratedDrafts", "linkCreatedTasksUnderParent"],
+      "relevance": "Layer-1 anchoring; layer-2+ needs layer-aware variant"
+    },
+    {
+      "path": "src/app/core/workflow-task-kind.ts",
+      "symbols": ["WORKFLOW_TASK_KINDS", "workflowKindToTaskFields"],
+      "relevance": "Task kind dropdown mapping already defined"
+    },
+    {
+      "path": "src/app/core/mindmap.ts",
+      "symbols": ["MindmapShape resolution loop"],
+      "relevance": "Shape selection from node_kind and output_type"
+    },
+    {
+      "path": "src/app/app.component.html",
+      "lines_note": "map-node class bindings ~252-257; task Type select ~627-631",
+      "relevance": "Research incorrectly uses cloud CSS; dropdown limited to code/research/subproject"
+    },
+    {
+      "path": "src/styles.scss",
+      "symbols": [".map-node.cloud", ".map-node.process", ".map-node.decision", ".map-node.code"],
+      "relevance": "Existing shape CSS; research cylinder missing"
+    },
+    {
+      "path": "src/app/core/parse-tasks.ts",
+      "relevance": "JSON extraction from assistant reply"
+    },
+    {
+      "path": "src/app/core/validate-generated-tasks.ts",
+      "relevance": "Pre-import validation and repair messages"
+    },
+    {
+      "path": "src/app/data/local-engine.ts",
+      "symbols": ["createTasks", "generateTaskTasks", "saveResearchOutput path default"],
+      "relevance": "Persist tasks; research folder path on execute"
+    }
+  ],
+  "related_research": [
+    {
+      "path": "research/15ddb36c-b9ec-4732-9ac1-6049da532e8a/d51c-graph-of-agents/TASKS.md",
+      "relevance": "Prior graph-of-agents task breakdown; brief editor and shapes foundation"
+    }
+  ],
+  "upstream_handoff": {
+    "branch": "cursor/cleanup-right-side-panel-fa52",
+    "commit": "467d3a64121416b5adf4177b20b70a9b65200072",
+    "note": "Per-task errors in taskPanelErrors; editor-wide banner hidden when task panel open"
+  }
+}

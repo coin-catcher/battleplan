@@ -102,7 +102,16 @@ export function prepareGeneratedDrafts(
   drafts: TaskDraft[],
   sourceTask: ProjectTask | undefined,
 ): TaskDraft[] {
-  if (!sourceTask) return drafts;
+  return prepareGeneratedDraftsForLayer(drafts, sourceTask, 1);
+}
+
+/** Layer 1 anchors empty depends_on under the source task; deeper layers keep agent depends_on. */
+export function prepareGeneratedDraftsForLayer(
+  drafts: TaskDraft[],
+  sourceTask: ProjectTask | undefined,
+  layer: number,
+): TaskDraft[] {
+  if (layer > 1 || !sourceTask) return drafts;
   const parentTitle = sourceTask.title.trim();
   if (!parentTitle) return drafts;
   return drafts.map((draft) => ({
