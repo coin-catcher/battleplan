@@ -55,7 +55,8 @@ import {
 import { availableDescendants, independentBatch } from '../core/execute-children';
 import {
   buildGraphEdgesFromDrafts,
-  mergeAdvancedEdgesIntoProject,
+  filterGraphEdgesToTaskIds,
+  mergeGraphAfterGenerateTasksImport,
   type GeneratedTaskEdgeDraft,
 } from '../core/generate-task-graph';
 import { bindSequentialDraftLinks, linkCreatedTasksUnderParent } from '../core/generate-task-links';
@@ -531,12 +532,12 @@ export class LocalEngine {
     const advancedEdges = graphEdgeDrafts?.length
       ? buildGraphEdgesFromDrafts(existing, created, graphEdgeDrafts)
       : [];
-    project.task_graph_edges = mergeAdvancedEdgesIntoProject(
-      project.task_graph_edges,
-      legacyEdges,
-      advancedEdges,
-    );
-    validateTaskGraphEdges(project.task_graph_edges, new Set(allTasks.map((task) => task.task_id)));
+    const taskIds = new Set(allTasks.map((task) => task.task_id));
+    project.task_graph_edges = graphEdgeDrafts?.length
+      ? mergeGraphAfterGenerateTasksImport(legacyEdges, advancedEdges)
+      : mergeLegacyTreeOrderingIntoGraph(project.task_graph_edges, allTasks);
+    project.task_graph_edges = filterGraphEdgesToTaskIds(project.task_graph_edges, taskIds);
+    validateTaskGraphEdges(project.task_graph_edges, taskIds);
     project.updated_at = this.now();
     await this.repo.saveProject(project);
     return created;
@@ -1930,8 +1931,10 @@ export class LocalEngine {
   private async persistGraphAfterTaskChange(projectId: string): Promise<void> {
     const project = await this.requireProject(projectId);
     const tasks = await this.repo.listTasks(projectId);
+    const taskIds = new Set(tasks.map((task) => task.task_id));
     project.task_graph_edges = mergeLegacyTreeOrderingIntoGraph(project.task_graph_edges, tasks);
-    validateTaskGraphEdges(project.task_graph_edges, new Set(tasks.map((task) => task.task_id)));
+    project.task_graph_edges = filterGraphEdgesToTaskIds(project.task_graph_edges, taskIds);
+    validateTaskGraphEdges(project.task_graph_edges, taskIds);
     project.updated_at = this.now();
     await this.repo.saveProject(project);
   }
