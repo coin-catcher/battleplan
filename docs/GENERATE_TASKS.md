@@ -10,9 +10,10 @@
    - **Task chat**: sends a task-specific message to that task’s agent (or the project agent if the task has not started its own) via `LocalEngine.generateTaskTasks`.
 3. **Cursor** runs with `intent: 'generate_tasks'`. The app waits for the run to finish and reloads messages/artifacts.
 4. **Parse** — `parseGeneratedTasksFromSources()` reads `{ "tasks": [...], "edges": [...] }` (or a bare task array) from the assistant reply or a `.json` artifact (`parse-tasks.ts`).
-5. **Anchor (task scope only)** — when Generate Tasks is invoked from a task panel, Battleplan passes that task’s id into `createTasks()`. Drafts with empty `depends_on` get the source task title as a fallback; any generated task still without a tree parent is linked under the **source task id** (`linkCreatedTasksUnderParent()` in `generate-task-links.ts`).
-6. **Create** — `LocalEngine.createTasks()` normalizes drafts, creates `ProjectTask` rows, wires the mindmap graph (`bindDependencies()`), and applies **`sequential_with`** as mutual `sibling_dependencies` so conflicting code tasks do not execute in parallel (`bindSequentialDraftLinks()`).
-7. **UI** — tasks reload; new nodes appear on the left-hand mindmap.
+5. **Validate** — `validateAndRepairGeneratedTasks()` simulates the mindmap graph (tree, ordering, fork/join/cycle) before any tasks are created. Missing `break_condition` on `cycle` edges is auto-filled (`human:REVIEW`). If validation still fails, Battleplan sends up to **two** repair prompts to the Cursor agent with the error list, then imports or shows a clear error (`validate-generated-tasks.ts`, `BattleplanStore.importGeneratedTasksFromReply`).
+6. **Anchor (task scope only)** — when Generate Tasks is invoked from a task panel, Battleplan passes that task’s id into `createTasks()`. Drafts with empty `depends_on` get the source task title as a fallback; any generated task still without a tree parent is linked under the **source task id** (`linkCreatedTasksUnderParent()` in `generate-task-links.ts`).
+7. **Create** — `LocalEngine.createTasks()` normalizes drafts, creates `ProjectTask` rows, wires the mindmap graph (`bindDraftDependsOn()`), and applies **`sequential_with`** as one-way ordering among conflicting code tasks (`bindSequentialDraftLinks()`).
+8. **UI** — tasks reload; new nodes appear on the left-hand mindmap.
 
 ## JSON shape the agent must return
 

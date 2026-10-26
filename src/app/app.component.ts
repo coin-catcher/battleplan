@@ -1190,6 +1190,15 @@ export class AppComponent implements OnInit {
     return this.chatActionsLocked() || this.store.chatAgentSyncing();
   }
 
+  taskPanelEditorActive(): boolean {
+    const kind = this.store.selection().kind;
+    return kind === 'task' || kind === 'subproject';
+  }
+
+  retryTaskConnection(taskId: string): void {
+    void this.store.retryTaskAgentConnection(taskId);
+  }
+
   deleteProject(): void {
     const project = this.store.project();
     if (project && confirm(`Delete "${project.title}"?`)) void this.store.deleteProject();
