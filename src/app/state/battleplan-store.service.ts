@@ -22,7 +22,18 @@ import { defaultOptionValues, getAgentTypeDefinition } from '../core/agent-types
 import { isAgentDraftId, newDraftAgentId } from '../core/agent-id';
 import type { AgentEditorSaveInput } from '../api/battleplan-api.service';
 import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
-import { generateTasksSourceTaskId, linkCreatedTasksUnderParent, prepareGeneratedDrafts } from '../core/generate-task-links';
+import {
+  generateTasksSourceTaskId,
+  prepareGeneratedDrafts,
+  prepareGeneratedDraftsForLayer,
+} from '../core/generate-task-links';
+import {
+  buildLayeredGenerateTasksNextLayerMessage,
+  buildLayeredGenerateTasksProposalMessage,
+  isGenerateTasksEndCommand,
+  tryParseGeneratedTasksFromSources,
+  type GenerateTasksSessionState,
+} from '../core/generate-tasks-layered';
 import { parseGeneratedTasksFromSources } from '../core/parse-tasks';
 import {
   assertGeneratedTasksReady,
@@ -96,6 +107,7 @@ export class BattleplanStore {
   readonly agents = signal<ProjectAgent[]>([]);
   readonly openTabs = signal<string[]>([]);
   readonly taskPanelErrors = signal<Record<string, TaskPanelErrorState>>({});
+  readonly generateTasksSession = signal<GenerateTasksSessionState | null>(null);
 
   readonly project = computed(() => this.projects().find((item) => item.project_id === this.projectId()) ?? null);
   readonly rootProjects = computed(() => this.projects().filter((item) => !item.parent_project_id));
@@ -621,18 +633,40 @@ export class BattleplanStore {
     await this.syncTaskPanelAfterOpen(taskId, kind, existing, this.panelRefreshGeneration);
   }
 
+  generateTasksSessionFor(taskId: string): GenerateTasksSessionState | null {
+    const session = this.generateTasksSession();
+    return session?.sourceTaskId === taskId ? session : null;
+  }
+
   async generateTasks(): Promise<void> {
     const projectId = this.projectId();
     if (!projectId) return;
     const selection = this.selection();
     const taskId = generateTasksSourceTaskId(selection);
+    const sourceTask = taskId ? this.tasks().find((item) => item.task_id === taskId) : undefined;
+    const layered = Boolean(taskId && sourceTask?.output_type === 'research');
+    if (layered && taskId && sourceTask) {
+      this.generateTasksSession.set({ sourceTaskId: taskId, layer: 1 });
+      if (sourceTask.status !== 'DOING' && sourceTask.status !== 'DONE') {
+        await this.run(async () => {
+          this.replaceTask(await this.api.updateTask(projectId, taskId, { status: 'DOING', manual: true }));
+        });
+      }
+    }
     let runId: string | undefined;
     await this.run(async () => {
-      const sent = taskId
-        ? await this.api.generateTaskTasks(taskId)
-        : await this.api.generateTasks(projectId);
-      runId = sent.run_id;
-      this.rememberMessage(sent);
+      if (layered && taskId && sourceTask) {
+        const text = buildLayeredGenerateTasksProposalMessage(sourceTask, 1);
+        const sent = await this.api.generateLayeredTaskTasks(taskId, 1, text);
+        runId = sent.run_id;
+        this.rememberMessage(sent);
+      } else {
+        const sent = taskId
+          ? await this.api.generateTaskTasks(taskId)
+          : await this.api.generateTasks(projectId);
+        runId = sent.run_id;
+        this.rememberMessage(sent);
+      }
     });
     if (this.error() && taskId) this.adoptGlobalErrorAsTaskPanel(taskId);
     if (!runId || this.error()) return;
@@ -650,7 +684,9 @@ export class BattleplanStore {
     if (this.error() && taskId) this.adoptGlobalErrorAsTaskPanel(taskId);
     const reply = this.messages().find((message) => message.run_id === generateRunId && message.role === 'assistant');
     if (!reply) {
-      const message = 'The Cursor agent has not replied yet.';
+      const message = layered
+        ? 'The Cursor agent has not replied yet. Reply in chat with approve, disapprove, change, or END.'
+        : 'The Cursor agent has not replied yet.';
       if (taskId) {
         this.setTaskPanelError(taskId, { message, connectionFailed: false });
         this.error.set(null);
@@ -659,21 +695,62 @@ export class BattleplanStore {
       }
       return;
     }
-    await this.run(async () => {
-      await this.importGeneratedTasksFromReply(projectId, taskId, generateRunId);
-    });
+    if (layered && taskId) {
+      await this.tryImportGenerateTasksLayer(projectId, taskId, generateRunId);
+    } else {
+      await this.run(async () => {
+        await this.importGeneratedTasksFromReply(projectId, taskId, generateRunId, 1);
+      });
+    }
     if (this.error() && taskId) this.adoptGlobalErrorAsTaskPanel(taskId);
+  }
+
+  private async endGenerateTasksSession(taskId: string): Promise<void> {
+    const session = this.generateTasksSession();
+    if (!session || session.sourceTaskId !== taskId) return;
+    this.generateTasksSession.set(null);
+    const task = this.tasks().find((item) => item.task_id === taskId);
+    if (task && task.output_type === 'research' && task.status === 'DOING') {
+      await this.run(async () => {
+        this.replaceTask(await this.api.updateTask(task.project_id, taskId, { status: 'DONE', manual: true }));
+      });
+    }
+    this.notice.set('Generate Tasks session ended.');
+  }
+
+  private async tryImportGenerateTasksLayer(
+    projectId: string,
+    sourceTaskId: string,
+    runId: string,
+  ): Promise<void> {
+    const session = this.generateTasksSessionFor(sourceTaskId);
+    if (!session) return;
+    const reply = this.messages().find((message) => message.run_id === runId && message.role === 'assistant');
+    if (!reply) return;
+    if (!tryParseGeneratedTasksFromSources(reply.content, this.artifacts())) return;
+    await this.run(async () => {
+      await this.importGeneratedTasksFromReply(projectId, sourceTaskId, runId, session.layer);
+    });
+    if (this.error()) return;
+    const nextLayer = session.layer + 1;
+    this.generateTasksSession.set({ sourceTaskId, layer: nextLayer });
+    await this.run(async () => {
+      const text = buildLayeredGenerateTasksNextLayerMessage(nextLayer);
+      const sent = await this.api.generateLayeredTaskTasks(sourceTaskId, nextLayer, text);
+      this.rememberMessage(sent);
+    });
   }
 
   private async importGeneratedTasksFromReply(
     projectId: string,
     taskId: string | undefined,
     initialRunId: string,
+    layer = 1,
   ): Promise<void> {
     const sourceTask = taskId ? this.tasks().find((item) => item.task_id === taskId) : undefined;
     const existingTasks = this.tasks().filter((item) => item.project_id === projectId);
     let runId = initialRunId;
-    let validation = this.validateGenerateTasksAssistantRun(runId, sourceTask, taskId, existingTasks);
+    let validation = this.validateGenerateTasksAssistantRun(runId, sourceTask, taskId, existingTasks, layer);
 
     for (let repair = 0; repair <= GENERATE_TASKS_JSON_REPAIR_ATTEMPTS && !validation.valid; repair++) {
       if (repair === GENERATE_TASKS_JSON_REPAIR_ATTEMPTS) {
@@ -700,11 +777,12 @@ export class BattleplanStore {
         }
       });
       runId = repairRunId;
-      validation = this.validateGenerateTasksAssistantRun(runId, sourceTask, taskId, existingTasks);
+      validation = this.validateGenerateTasksAssistantRun(runId, sourceTask, taskId, existingTasks, layer);
     }
 
-    const drafts = prepareGeneratedDrafts(validation.payload.tasks, sourceTask);
-    await this.api.createTasks(projectId, drafts, taskId, validation.payload.edges);
+    const drafts = prepareGeneratedDraftsForLayer(validation.payload.tasks, sourceTask, layer);
+    const parentTaskId = layer <= 1 ? taskId : undefined;
+    await this.api.createTasks(projectId, drafts, parentTaskId, validation.payload.edges);
     await this.reloadTasks();
     const note = `Created ${drafts.length} task${drafts.length === 1 ? '' : 's'} from this conversation.`;
     const saved = taskId ? await this.api.noteTask(taskId, note) : await this.api.noteProject(projectId, note);
@@ -717,16 +795,18 @@ export class BattleplanStore {
     sourceTask: ProjectTask | undefined,
     parentTaskId: string | undefined,
     existingTasks: ProjectTask[],
+    layer = 1,
   ) {
     const reply = this.messages().find((message) => message.run_id === runId && message.role === 'assistant');
     if (!reply) {
       throw new Error('The Cursor agent has not replied yet.');
     }
     const parsed = parseGeneratedTasksFromSources(reply.content, this.artifacts());
-    const drafts = prepareGeneratedDrafts(parsed.tasks, sourceTask);
+    const drafts = prepareGeneratedDraftsForLayer(parsed.tasks, sourceTask, layer);
+    const anchorParentId = layer <= 1 ? parentTaskId : undefined;
     return validateAndRepairGeneratedTasks(
       { tasks: drafts, edges: parsed.edges },
-      { existingTasks, parentTaskId },
+      { existingTasks, parentTaskId: anchorParentId },
     );
   }
 
@@ -894,6 +974,9 @@ export class BattleplanStore {
     dar?: string;
     initial_prompt: string;
     output_type: OutputType;
+    node_kind?: import('../core/task-node-kind').TaskNodeKind;
+    lifecycle_phase?: import('../core/models').LifecyclePhase;
+    repo_path?: string;
     dependencies: string[];
     sibling_dependencies: string[];
     research_agent_id?: string;
@@ -1014,6 +1097,10 @@ export class BattleplanStore {
     const task = this.selectedTask();
     if (!task) return;
     const taskId = task.task_id;
+    const layeredSession = this.generateTasksSessionFor(taskId);
+    if (layeredSession && isGenerateTasksEndCommand(message)) {
+      await this.endGenerateTasksSession(taskId);
+    }
     this.clearTaskPanelError(taskId);
     this.patchTaskStatus(taskId, 'DOING');
     this.syncDoingBackgroundWatches();
@@ -1044,13 +1131,19 @@ export class BattleplanStore {
         this.ensureDoingBackgroundWatch(taskId);
       } else {
         await this.syncTaskUserRun(taskId, runId);
-        void this.watchTask(taskId, runId).finally(() => this.syncDoingBackgroundWatches());
+        if (this.generateTasksSessionFor(taskId)) {
+          await this.watchTask(taskId, runId);
+          await this.tryImportGenerateTasksLayer(task.project_id, taskId, runId);
+        } else {
+          void this.watchTask(taskId, runId).finally(() => this.syncDoingBackgroundWatches());
+        }
         this.ensureDoingBackgroundWatch(taskId);
       }
     } else {
       // Synchronous agent replies (e.g. library research) finish in the same request.
       this.syncDoingBackgroundWatches();
     }
+    this.syncDoingBackgroundWatches();
   }
 
   async approve(): Promise<void> {

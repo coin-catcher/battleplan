@@ -13,6 +13,11 @@ import type {
 } from './core/models';
 import { TASK_STATUSES } from './core/models';
 import {
+  fieldsFromTaskEditorKind,
+  taskEditorKindFromTask,
+  type TaskEditorKind,
+} from './core/task-editor-kind';
+import {
   agentLogoPublicPath,
   agentModelOptionDefinition,
   agentOptionRows,
@@ -203,6 +208,8 @@ export class AppComponent implements OnInit {
   });
   subprojectInitialPrompt = '';
   outputType: OutputType = 'code';
+  taskEditorKind: TaskEditorKind = 'code';
+  taskRepoPath = '';
   dependencies: string[] = [];
   siblingDependencies: string[] = [];
   readonly executeChildrenPrompt = signal<string | null>(null);
@@ -341,6 +348,8 @@ export class AppComponent implements OnInit {
       this.taskTitle = task.title;
       this.taskInitialPrompt = taskInitialPrompt(task);
       this.outputType = task.output_type;
+      this.taskEditorKind = taskEditorKindFromTask(task);
+      this.taskRepoPath = task.repo_path ?? `research/${task.project_id}/${task.task_id}/`;
       this.dependencies = [...task.dependencies];
       this.siblingDependencies = [...(task.sibling_dependencies ?? [])];
       this.taskResearchAgentId = task.research_agent_id ?? '';
@@ -620,6 +629,39 @@ export class AppComponent implements OnInit {
     this.onEditorFieldBlur();
   }
 
+  onTaskKindChange(): void {
+    const mapped = fieldsFromTaskEditorKind(this.taskEditorKind);
+    this.outputType = mapped.output_type;
+    const task = this.store.selectedTask();
+    if (task && mapped.node_kind !== task.node_kind) {
+      this.taskBriefForm = mergeTaskBriefWithDefaults(
+        this.taskBriefForm,
+        applyTaskBriefDefaults({
+          title: this.taskTitle,
+          initialPrompt: this.taskInitialPrompt,
+          dar: task ? taskDar(task) : '',
+          outputType: mapped.output_type,
+          nodeKind: mapped.node_kind,
+          projectDar: this.store.project()?.dar,
+          repoUrl: this.store.project()?.repo_url,
+          lifecyclePhase: mapped.lifecycle_phase ?? task.lifecycle_phase,
+        }, {
+          lifecyclePhase: mapped.lifecycle_phase ?? task.lifecycle_phase,
+          nodeKind: mapped.node_kind,
+        }),
+      );
+    }
+    this.onEditorFieldAutoSave();
+  }
+
+  private taskKindPatch(): {
+    output_type: OutputType;
+    node_kind?: import('./core/task-node-kind').TaskNodeKind;
+    lifecycle_phase?: import('./core/models').LifecyclePhase;
+  } {
+    return fieldsFromTaskEditorKind(this.taskEditorKind);
+  }
+
   private async persistEditorChanges(): Promise<boolean> {
     const selection = this.store.selection();
     if (selection.kind === 'project') {
@@ -642,10 +684,14 @@ export class AppComponent implements OnInit {
         initial_prompt: this.subprojectInitialPrompt,
       });
     } else if (selection.kind === 'task') {
+      const kindFields = this.taskKindPatch();
       await this.store.saveTask({
         title: this.taskTitle,
         initial_prompt: this.taskInitialPrompt,
-        output_type: this.outputType,
+        output_type: kindFields.output_type,
+        node_kind: kindFields.node_kind,
+        lifecycle_phase: kindFields.lifecycle_phase,
+        repo_path: this.taskRepoPath.trim() || undefined,
         dependencies: this.dependencies,
         sibling_dependencies: this.siblingDependencies,
         research_agent_id: this.taskResearchAgentId,
@@ -1942,10 +1988,14 @@ export class AppComponent implements OnInit {
   }
 
   async saveTask(): Promise<void> {
+    const kindFields = this.taskKindPatch();
     await this.store.saveTask({
       title: this.taskTitle,
       initial_prompt: this.taskInitialPrompt,
-      output_type: this.outputType,
+      output_type: kindFields.output_type,
+      node_kind: kindFields.node_kind,
+      lifecycle_phase: kindFields.lifecycle_phase,
+      repo_path: this.taskRepoPath.trim() || undefined,
       dependencies: this.dependencies,
       sibling_dependencies: this.siblingDependencies,
       research_agent_id: this.taskResearchAgentId,

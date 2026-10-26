@@ -1,47 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { bindSequentialDraftLinks, linkCreatedTasksUnderParent, prepareGeneratedDrafts } from './generate-task-links';
-import type { ProjectTask } from './models';
+import type { ProjectTask, TaskDraft } from './models';
+import { prepareGeneratedDraftsForLayer } from './generate-task-links';
 
-const task = (partial: Partial<ProjectTask> & Pick<ProjectTask, 'task_id' | 'title'>): ProjectTask => ({
-  project_id: 'p1',
+const source: ProjectTask = {
+  task_id: 'research',
+  project_id: 'p',
+  title: 'Research root',
   prompt: '',
   dependencies: [],
-  status: 'TODO',
-  output_type: 'code',
+  status: 'DOING',
+  output_type: 'research',
   order: 0,
-  created_at: '2026-01-01T00:00:00.000Z',
-  updated_at: '2026-01-01T00:00:00.000Z',
-  ...partial,
-});
+  created_at: '',
+  updated_at: '',
+};
 
-describe('linkCreatedTasksUnderParent', () => {
-  it('links orphan generated tasks under the source task', () => {
-    const parent = task({ task_id: 'parent', title: 'Research', output_type: 'research' });
-    const child = task({ task_id: 'c1', title: 'Code A', order: 1 });
-    linkCreatedTasksUnderParent([parent], [child], 'parent');
-    expect(parent.dependencies).toEqual(['c1']);
+describe('prepareGeneratedDraftsForLayer', () => {
+  it('anchors layer 1 under source task', () => {
+    const drafts: TaskDraft[] = [{ title: 'A', prompt: 'p', output_type: 'code', depends_on: [] }];
+    const out = prepareGeneratedDraftsForLayer(drafts, source, 1);
+    expect(out[0].depends_on).toEqual(['Research root']);
   });
-});
 
-describe('bindSequentialDraftLinks', () => {
-  it('creates one-way ordering for sequential_with (later waits for earlier)', () => {
-    const a = task({ task_id: 'a', title: 'A', order: 0 });
-    const b = task({ task_id: 'b', title: 'B', order: 1 });
-    bindSequentialDraftLinks([], [a, b], [
-      { sequential_with: ['B'] },
-      { sequential_with: ['A'] },
-    ]);
-    expect(a.sibling_dependencies ?? []).toEqual([]);
-    expect(b.sibling_dependencies).toEqual(['a']);
-  });
-});
-
-describe('prepareGeneratedDrafts', () => {
-  it('fills empty depends_on with the source task title', () => {
-    const source = task({ task_id: 'r1', title: 'Research parent', output_type: 'research' });
-    const drafts = prepareGeneratedDrafts([
-      { title: 'A', prompt: 'x', output_type: 'code', depends_on: [] },
-    ], source);
-    expect(drafts[0].depends_on).toEqual(['Research parent']);
+  it('keeps depends_on for layer 2+', () => {
+    const drafts: TaskDraft[] = [{ title: 'B', prompt: 'p', output_type: 'code', depends_on: ['A'] }];
+    const out = prepareGeneratedDraftsForLayer(drafts, source, 2);
+    expect(out[0].depends_on).toEqual(['A']);
   });
 });

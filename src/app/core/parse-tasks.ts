@@ -115,6 +115,9 @@ function parseGeneratedTaskRecords(parsed: unknown[]): TaskDraft[] {
     const connector = parseConnectorKind(record['connector_kind']);
     const lifecyclePhase = workflowFields.lifecycle_phase
       ?? normalizeLifecyclePhase(record['lifecycle_phase']);
+    const repoPath = typeof record['repo_path'] === 'string' && record['repo_path'].trim()
+      ? record['repo_path'].trim()
+      : undefined;
     return {
       title,
       prompt,
@@ -126,6 +129,7 @@ function parseGeneratedTaskRecords(parsed: unknown[]): TaskDraft[] {
       brief,
       connector_kind: connector,
       lifecycle_phase: lifecyclePhase,
+      repo_path: repoPath,
     };
   });
 }

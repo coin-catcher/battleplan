@@ -250,7 +250,8 @@
             <div
               class="map-node"
               [class.circle]="node.shape === 'project' || node.shape === 'subproject'"
-              [class.cloud]="node.shape === 'research' || node.shape === 'fog' || node.shape === 'brainstorm'"
+              [class.cloud]="node.shape === 'fog' || node.shape === 'brainstorm'"
+              [class.research]="node.shape === 'research'"
               [class.code]="node.shape === 'code'"
               [class.decision]="node.shape === 'decision'"
               [class.gate]="node.shape === 'gate'"
@@ -597,7 +598,7 @@
                 </button>
                 <div class="task-page-action-group">
                   @if (task.output_type === 'research') {
-                    <button type="button" class="accent" [disabled]="store.busy()" (click)="store.generateTasks()">Generate Tasks</button>
+                    <button type="button" class="accent" [disabled]="store.busy() || store.generateTasksSessionFor(task.task_id)" (click)="store.generateTasks()">Generate Tasks</button>
                   }
                   @if (task.status === 'REVIEW') {
                     <button type="button" class="accent" [disabled]="chatActionsLocked()" (click)="approveTask()">Approve</button>
@@ -623,10 +624,13 @@
                     <input [(ngModel)]="taskTitle" [name]="'taskTitle-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" />
                   </label>
                   <label class="field task-meta-field">
-                    <span>Type</span>
-                    <select [(ngModel)]="outputType" name="outputType" (change)="onEditorFieldAutoSave()">
+                    <span>Kind</span>
+                    <select [(ngModel)]="taskEditorKind" name="taskEditorKind" (change)="onTaskKindChange()">
                       <option value="code">code</option>
                       <option value="research">research</option>
+                      <option value="brainstorming">brainstorm</option>
+                      <option value="critiquing">critique</option>
+                      <option value="architect">architecture</option>
                       <option value="subproject">subproject</option>
                     </select>
                   </label>
@@ -664,9 +668,18 @@
                     <span class="task-meta-hint">Subproject (no agent)</span>
                   }
                 </div>
+                @if (store.generateTasksSessionFor(task.task_id); as gtSession) {
+                  <p class="task-workflow-hint generate-tasks-session">
+                    Generate Tasks — Layer {{ gtSession.layer }}: reply with approve, disapprove, change (per number), or END to finish.
+                  </p>
+                }
                 @if (taskWorkflowHint(task); as hint) {
                   <p class="task-workflow-hint">{{ hint }}</p>
                 }
+                <label class="field task-meta-field grow">
+                  <span>Repo folder</span>
+                  <input [(ngModel)]="taskRepoPath" [name]="'taskRepoPath-' + task.task_id" placeholder="research/…/" (blur)="onEditorFieldBlur()" />
+                </label>
                 @if (!taskAgentStarted(task)) {
                   <div class="task-pre-chat">
                     <label class="field">

@@ -112,6 +112,8 @@ export interface ProjectTask {
   backend_run_id?: string;
   /** Lifecycle phase template (not a mandatory global ordering). */
   lifecycle_phase?: LifecyclePhase;
+  /** Git folder for task briefs and collateral (trailing slash). */
+  repo_path?: string;
   /** Last completion handoff for downstream tasks (local → cloud). */
   handoff?: TaskHandoff;
   /** Explicit context inclusion (git + Mnemosyne pointers). */
@@ -177,6 +179,7 @@ export interface TaskDraft {
   brief?: TaskBrief;
   connector_kind?: TaskConnectorKind;
   lifecycle_phase?: LifecyclePhase;
+  repo_path?: string;
 }
 
 /** Execution backend for released tasks (see agent-connector.ts). */

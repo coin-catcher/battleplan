@@ -7,6 +7,7 @@ import {
   rootTaskIds,
   siblingDependencyIds,
 } from './dependencies';
+import { mindmapShapeForTask } from './mindmap-shape';
 
 export type MindmapShape =
   | 'project'
@@ -253,19 +254,7 @@ export function layoutMindmap(
     const radius = 200 + depthOf(task.task_id) * 150;
     const angle = angleOf.get(task.task_id) ?? 0;
     const pinned = Number.isFinite(task.map_x) && Number.isFinite(task.map_y);
-    const shape: MindmapShape = task.node_kind === 'decision' || task.node_kind === 'critique'
-      ? 'decision'
-      : task.node_kind === 'gate'
-        ? 'gate'
-        : task.node_kind === 'fog' || task.node_kind === 'brainstorm'
-          ? 'brainstorm'
-          : task.node_kind === 'architect'
-            ? 'architect'
-            : task.output_type === 'research'
-              ? 'research'
-              : task.output_type === 'subproject'
-                ? 'subproject'
-                : 'code';
+    const shape: MindmapShape = mindmapShapeForTask(task);
     const research = shape === 'research';
     nodes.push({
       id: task.task_id,

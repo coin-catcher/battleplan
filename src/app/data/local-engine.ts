@@ -138,6 +138,7 @@ interface NormalizedDraft {
   brief?: TaskBrief;
   connector_kind?: TaskConnectorKind;
   lifecycle_phase?: import('../core/models').LifecyclePhase;
+  repo_path?: string;
 }
 
 function briefBuildInput(
@@ -515,13 +516,28 @@ export class LocalEngine {
         created_at: timestamp,
         updated_at: timestamp,
       };
+      const repoPath = (draft.repo_path?.trim()
+        || `research/${projectId}/${taskId}/`).replace(/\/?$/, '/');
       return {
         ...skeleton,
         brief: completeBriefForTask({ ...skeleton, lifecycle_phase: draft.lifecycle_phase } as ProjectTask, project, draft.brief),
         connector_kind: draft.connector_kind ?? defaultConnectorForTask({ ...skeleton, lifecycle_phase: draft.lifecycle_phase } as ProjectTask, project),
         lifecycle_phase: draft.lifecycle_phase,
+        repo_path: repoPath,
       };
     });
+    for (const task of created) {
+      if (task.output_type === 'research' && task.repo_path) {
+        await this.repo.saveResearchOutput({
+          task_id: task.task_id,
+          repo: normalizeRepoUrl(project.repo_url || ''),
+          branch: project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH,
+          pr_message: task.title.slice(0, 500),
+          pr_link: '',
+          path: task.repo_path,
+        });
+      }
+    }
     bindDraftDependsOn(existing, created, normalized);
     bindSequentialDraftLinks(existing, created, normalized);
     if (parentTaskId) {
@@ -576,6 +592,9 @@ export class LocalEngine {
     dependencies?: string[];
     sibling_dependencies?: string[];
     output_type?: OutputType;
+    node_kind?: import('../core/task-node-kind').TaskNodeKind;
+    lifecycle_phase?: import('../core/models').LifecyclePhase;
+    repo_path?: string;
     status?: TaskStatus;
     manual?: boolean;
     map_x?: number;
@@ -628,6 +647,9 @@ export class LocalEngine {
           task.subproject_id = nested.project_id;
           await this.attachSubproject(projectId, nested.project_id, { kind: 'task', taskId: task.task_id });
         }
+        if (patch.output_type === 'subproject') {
+          task.node_kind = undefined;
+        }
         changes.push(`Output: ${patch.output_type}`);
       }
       task.output_type = patch.output_type;
@@ -679,6 +701,19 @@ export class LocalEngine {
       const next = patch.code_agent_id.trim();
       if (next !== (task.code_agent_id ?? '')) changes.push('Code agent updated.');
       task.code_agent_id = next || undefined;
+    }
+    if (patch.node_kind !== undefined && patch.node_kind !== task.node_kind) {
+      changes.push(`Node kind: ${patch.node_kind ?? 'default'}`);
+      task.node_kind = patch.node_kind;
+    }
+    if (patch.lifecycle_phase !== undefined && patch.lifecycle_phase !== task.lifecycle_phase) {
+      changes.push(`Lifecycle: ${patch.lifecycle_phase}`);
+      task.lifecycle_phase = patch.lifecycle_phase;
+    }
+    if (patch.repo_path !== undefined) {
+      const next = patch.repo_path.trim().replace(/\/?$/, '/');
+      if (next !== (task.repo_path ?? '')) changes.push('Repo folder updated.');
+      task.repo_path = next || undefined;
     }
     task.updated_at = this.now();
     await this.repo.saveTask(task);
@@ -835,6 +870,37 @@ export class LocalEngine {
     if (!project.cursor_agent_id) throw new Error('This project is not linked to a Cursor agent.');
     const text = buildGenerateTasksRepairUserMessage(issues);
     return this.dispatchProject(projectId, text, 'generate_tasks');
+  }
+
+  async generateLayeredTaskTasks(taskId: string, layer: number, message: string): Promise<ChatMessage> {
+    const task = await this.requireTaskById(taskId);
+    const project = await this.requireProject(task.project_id);
+    const agentId = task.cursor_agent_id || project.cursor_agent_id;
+    if (!agentId) throw new Error('This project is not linked to a Cursor agent.');
+    const text = message.trim();
+    if (!text) throw new Error('message is required.');
+    const output = task.output_type === 'code'
+      ? await this.repo.getCodeOutput(taskId)
+      : await this.repo.getResearchOutput(taskId);
+    const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
+    const run = await this.cursor.createRun(agentId, {
+      text: wrapAgentRunPrompt(text, { baseBranch: base, agentBranch: output?.branch }),
+      mode: task.cursor_agent_id ? 'agent' : 'plan',
+    });
+    this.markTaskDoingOnAgentChat(task);
+    task.latest_run_id = run.id;
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+    return this.record({
+      scope: 'task',
+      project_id: task.project_id,
+      task_id: taskId,
+      role: 'user',
+      content: text,
+      run_id: run.id,
+      intent: 'generate_tasks',
+      cursor_agent_id: agentId,
+    });
   }
 
   async generateTaskTasks(taskId: string): Promise<ChatMessage> {
@@ -1703,7 +1769,7 @@ export class LocalEngine {
       lines.push(workflowExecutionPreamble(workflow, task, project));
     } else if (task.output_type === 'research') {
       lines.push(
-        `Write the research into the git repository under \`research/${project.project_id}/${task.task_id}/\`.`,
+        `Write the research into the git repository under \`${task.repo_path ?? `research/${project.project_id}/${task.task_id}/`}\`.`,
         'Use markdown, JSON, CSV, or YAML, whichever fits the findings.',
         'Do not change application source code.',
       );
@@ -2045,6 +2111,7 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
       brief: item.brief,
       connector_kind: item.connector_kind,
       lifecycle_phase: item.lifecycle_phase,
+      repo_path: item.repo_path,
     };
     if (types.length === 1) {
       normalized.push({ title, prompt, output_type: types[0], depends_on: depends, sequential_with: sequential, ...meta });
