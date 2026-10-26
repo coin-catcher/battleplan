@@ -70,6 +70,34 @@ export function bindSequentialDraftLinks(
 }
 
 /** Prefer task-id anchoring; keep title-based depends_on fill as a fallback for the agent JSON. */
+/** Wire draft depends_on titles to parent.dependencies → child task ids (mindmap tree). */
+export function bindDraftDependsOn(
+  existing: ProjectTask[],
+  created: ProjectTask[],
+  drafts: Pick<TaskDraft, 'depends_on'>[],
+): void {
+  const titles = new Map<string, string[]>();
+  for (const task of [...existing, ...created]) {
+    const ids = titles.get(task.title) ?? [];
+    ids.push(task.task_id);
+    titles.set(task.title, ids);
+  }
+  const byId = new Map([...existing, ...created].map((task) => [task.task_id, task]));
+  created.forEach((task) => {
+    task.dependencies = [];
+  });
+  created.forEach((task, index) => {
+    for (const title of drafts[index]?.depends_on ?? []) {
+      const matches = titles.get(title) ?? [];
+      if (matches.length === 0) throw new Error(`Unknown dependency "${title}".`);
+      if (matches.length > 1) throw new Error(`Dependency "${title}" matches more than one task.`);
+      const parent = byId.get(matches[0]);
+      if (!parent) throw new Error(`Unknown dependency "${title}".`);
+      parent.dependencies = [...new Set([...parent.dependencies, task.task_id])];
+    }
+  });
+}
+
 export function prepareGeneratedDrafts(
   drafts: TaskDraft[],
   sourceTask: ProjectTask | undefined,

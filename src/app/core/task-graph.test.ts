@@ -40,6 +40,14 @@ describe('task-graph', () => {
     ], ids)).toThrow(/break_condition/i);
   });
 
+  it('allows intentional rework loop when only cycle edges lack break on non-cycle edges in the loop', () => {
+    const ids = new Set(['a', 'b', 'c']);
+    expect(() => validateTaskGraphEdges([
+      { edge_id: 'o1', from_task_id: 'a', to_task_id: 'b', kind: 'ordering' },
+      { edge_id: 'c1', from_task_id: 'c', to_task_id: 'a', kind: 'cycle', break_condition: 'human:REVIEW' },
+    ], ids)).not.toThrow();
+  });
+
   it('defaults mnemosyne path per project', () => {
     expect(mnemosyneDefaultRelativePath('abc')).toBe('mnemosyne/abc');
   });
