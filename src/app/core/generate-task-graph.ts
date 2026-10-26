@@ -67,6 +67,29 @@ export function parseGeneratedEdgeList(raw: unknown): GeneratedTaskEdgeDraft[] {
   });
 }
 
+function buildTitleToIdForGeneratedEdges(existing: ProjectTask[], created: ProjectTask[]): Map<string, string> {
+  const seenInBatch = new Set<string>();
+  for (const task of created) {
+    const title = task.title.trim();
+    if (!title) continue;
+    if (seenInBatch.has(title)) {
+      throw new Error(`Duplicate task title "${title}" in generated batch.`);
+    }
+    seenInBatch.add(title);
+  }
+  const titleToId = new Map<string, string>();
+  for (const task of created) {
+    const title = task.title.trim();
+    if (title) titleToId.set(title, task.task_id);
+  }
+  for (const task of existing) {
+    const title = task.title.trim();
+    if (!title || titleToId.has(title)) continue;
+    titleToId.set(title, task.task_id);
+  }
+  return titleToId;
+}
+
 /** Resolve title-based edge drafts to task ids and merge into the project graph. */
 export function buildGraphEdgesFromDrafts(
   existing: ProjectTask[],
@@ -74,15 +97,7 @@ export function buildGraphEdgesFromDrafts(
   drafts: GeneratedTaskEdgeDraft[],
 ): TaskGraphEdge[] {
   if (!drafts.length) return [];
-  const titleToId = new Map<string, string>();
-  for (const task of [...existing, ...created]) {
-    const title = task.title.trim();
-    if (!title) continue;
-    if (titleToId.has(title)) {
-      throw new Error(`Duplicate task title "${title}"; graph edges require unique titles in this batch.`);
-    }
-    titleToId.set(title, task.task_id);
-  }
+  const titleToId = buildTitleToIdForGeneratedEdges(existing, created);
   const edges: TaskGraphEdge[] = [];
   const seen = new Set<string>();
   drafts.forEach((draft, index) => {
@@ -115,14 +130,32 @@ export function mergeAdvancedEdgesIntoProject(
 ): TaskGraphEdge[] {
   const legacyKeys = new Set(legacySynced.map((edge) => edge.edge_id));
   const preserved = (current ?? []).filter((edge) => !legacyKeys.has(edge.edge_id));
+  return dedupeGraphEdges([...legacySynced, ...preserved, ...advanced]);
+}
+
+/** Import Generate Tasks graph: tree/ordering from tasks plus JSON fork/join/cycle (drops stale advanced edges). */
+export function mergeGraphAfterGenerateTasksImport(
+  legacyTreeOrdering: TaskGraphEdge[],
+  advancedFromJson: TaskGraphEdge[],
+): TaskGraphEdge[] {
+  return dedupeGraphEdges([...legacyTreeOrdering, ...advancedFromJson]);
+}
+
+export function dedupeGraphEdges(edges: TaskGraphEdge[]): TaskGraphEdge[] {
   const mergedKeys = new Set<string>();
   const out: TaskGraphEdge[] = [];
-  for (const edge of [...legacySynced, ...preserved, ...advanced]) {
+  for (const edge of edges) {
     if (mergedKeys.has(edge.edge_id)) continue;
     mergedKeys.add(edge.edge_id);
     out.push(edge);
   }
   return out;
+}
+
+export function filterGraphEdgesToTaskIds(edges: TaskGraphEdge[], taskIds: Set<string>): TaskGraphEdge[] {
+  return edges.filter(
+    (edge) => taskIds.has(edge.from_task_id) && taskIds.has(edge.to_task_id),
+  );
 }
 
 function requiredTitle(value: unknown, label: string): string {
