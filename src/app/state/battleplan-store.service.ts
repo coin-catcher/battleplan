@@ -636,8 +636,9 @@ export class BattleplanStore {
     });
     if (this.error() && taskId) this.adoptGlobalErrorAsTaskPanel(taskId);
     if (!runId || this.error()) return;
-    if (taskId) await this.watchTask(taskId, runId);
-    else await this.watchProject(projectId, runId);
+    const generateRunId = runId;
+    if (taskId) await this.watchTask(taskId, generateRunId);
+    else await this.watchProject(projectId, generateRunId);
     await this.run(async () => {
       if (taskId) {
         const refreshed = await this.api.listTaskMessages(taskId);
@@ -647,7 +648,7 @@ export class BattleplanStore {
       }
     });
     if (this.error() && taskId) this.adoptGlobalErrorAsTaskPanel(taskId);
-    const reply = this.messages().find((message) => message.run_id === runId && message.role === 'assistant');
+    const reply = this.messages().find((message) => message.run_id === generateRunId && message.role === 'assistant');
     if (!reply) {
       const message = 'The Cursor agent has not replied yet.';
       if (taskId) {
@@ -659,7 +660,7 @@ export class BattleplanStore {
       return;
     }
     await this.run(async () => {
-      await this.importGeneratedTasksFromReply(projectId, taskId, runId);
+      await this.importGeneratedTasksFromReply(projectId, taskId, generateRunId);
     });
     if (this.error() && taskId) this.adoptGlobalErrorAsTaskPanel(taskId);
   }
