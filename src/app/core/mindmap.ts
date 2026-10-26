@@ -7,7 +7,7 @@ import {
   rootTaskIds,
   siblingDependencyIds,
 } from './dependencies';
-import { mindmapShapeForTask } from './mindmap-shape';
+import { mindmapNodeSize, mindmapShapeForTask } from './mindmap-shape';
 
 export type MindmapShape =
   | 'project'
@@ -53,8 +53,6 @@ export interface MindmapLayout {
 export const PROJECT_RADIUS = 68;
 export const TASK_WIDTH = 156;
 export const TASK_HEIGHT = 64;
-export const RESEARCH_WIDTH = 168;
-export const RESEARCH_HEIGHT = 96;
 
 export type CardinalDirection = 'north' | 'south' | 'east' | 'west';
 
@@ -255,7 +253,7 @@ export function layoutMindmap(
     const angle = angleOf.get(task.task_id) ?? 0;
     const pinned = Number.isFinite(task.map_x) && Number.isFinite(task.map_y);
     const shape: MindmapShape = mindmapShapeForTask(task);
-    const research = shape === 'research';
+    const size = mindmapNodeSize(shape);
     nodes.push({
       id: task.task_id,
       kind: 'task',
@@ -264,8 +262,8 @@ export function layoutMindmap(
       status: task.status,
       x: pinned ? task.map_x! : projectX + Math.cos(angle) * radius,
       y: pinned ? task.map_y! : projectY + Math.sin(angle) * radius,
-      width: research ? RESEARCH_WIDTH : TASK_WIDTH,
-      height: research ? RESEARCH_HEIGHT : TASK_HEIGHT,
+      width: size.width,
+      height: size.height,
     });
   }
   separateUnpinned(nodes, tasks);
@@ -372,6 +370,17 @@ function borderPoint(node: MindmapNode, ux: number, uy: number): { x: number; y:
   }
   const halfWidth = node.width / 2;
   const halfHeight = node.height / 2;
+  if (node.shape === 'decision') {
+    const denom = Math.abs(ux) / halfWidth + Math.abs(uy) / halfHeight;
+    const scale = denom > 0 ? 1 / denom : 0;
+    return { x: node.x + ux * scale, y: node.y + uy * scale };
+  }
+  if (node.shape === 'architect') {
+    const scaleX = ux === 0 ? Number.POSITIVE_INFINITY : halfWidth / Math.abs(ux);
+    const scaleY = uy === 0 ? Number.POSITIVE_INFINITY : (halfHeight * 0.92) / Math.abs(uy);
+    const scale = Math.min(scaleX, scaleY);
+    return { x: node.x + ux * scale, y: node.y + uy * scale };
+  }
   const scaleX = ux === 0 ? Number.POSITIVE_INFINITY : halfWidth / Math.abs(ux);
   const scaleY = uy === 0 ? Number.POSITIVE_INFINITY : halfHeight / Math.abs(uy);
   const scale = Math.min(scaleX, scaleY);

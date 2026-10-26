@@ -101,6 +101,17 @@ describe('mindmap', () => {
     expect(world).toEqual({ x: 100, y: 125 });
   });
 
+  it('anchors decision nodes on the diamond border', () => {
+    const layout = layoutMindmap('Plan', [
+      task('critique', { output_type: 'research', node_kind: 'critique' }),
+    ]);
+    const node = layout.nodes.find((item) => item.id === 'critique')!;
+    expect(node.shape).toBe('decision');
+    const east = cardinalAnchor(node, 'east');
+    expect(east.x).toBeCloseTo(node.x + node.width / 2, 0);
+    expect(east.y).toBeCloseTo(node.y, 0);
+  });
+
   it('selects nodes whose bounds intersect a world rectangle', () => {
     const layout = layoutMindmap('Plan', [task('alpha'), task('beta', {}, 1)]);
     const alpha = layout.nodes.find((node) => node.id === 'alpha')!;
