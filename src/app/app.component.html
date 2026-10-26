@@ -618,124 +618,128 @@
 
             @if (taskPageTab() === 'chat') {
               <div class="task-chat-panel">
-                <div class="task-meta-row">
+                <div class="task-chat-chrome">
+                  <div class="task-meta-row">
+                    <label class="field task-meta-field grow">
+                      <span>Title</span>
+                      <input [(ngModel)]="taskTitle" [name]="'taskTitle-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" />
+                    </label>
+                    <label class="field task-meta-field">
+                      <span>Kind</span>
+                      <select [(ngModel)]="taskEditorKind" name="taskEditorKind" (change)="onTaskKindChange()">
+                        <option value="code">code</option>
+                        <option value="research">research</option>
+                        <option value="brainstorming">brainstorm</option>
+                        <option value="critiquing">critique</option>
+                        <option value="architect">architecture</option>
+                        <option value="subproject">subproject</option>
+                      </select>
+                    </label>
+                    <label class="field task-meta-field">
+                      <span>Status</span>
+                      <select [value]="task.status" (change)="onStatusChange(task.task_id, $event)">
+                        @for (status of statuses; track status) {
+                          <option [value]="status">{{ status }}</option>
+                        }
+                      </select>
+                    </label>
+                    @if (task.output_type === 'research') {
+                      <label class="field task-meta-field">
+                        <span>Agent</span>
+                        <select [(ngModel)]="taskResearchAgentId" [name]="'taskResearchAgent-' + task.task_id" (change)="onEditorFieldAutoSave()">
+                          <option value="">Project default</option>
+                          @for (agent of libraryAgents('research'); track agent.agent_id) {
+                            <option [value]="agent.agent_id">{{ agent.name }}</option>
+                          }
+                        </select>
+                      </label>
+                    }
+                    @if (task.output_type === 'code') {
+                      <label class="field task-meta-field">
+                        <span>Agent</span>
+                        <select [(ngModel)]="taskCodeAgentId" [name]="'taskCodeAgent-' + task.task_id" (change)="onEditorFieldAutoSave()">
+                          <option value="">Project default</option>
+                          @for (agent of libraryAgents('code'); track agent.agent_id) {
+                            <option [value]="agent.agent_id">{{ agent.name }}</option>
+                          }
+                        </select>
+                      </label>
+                    }
+                    @if (task.output_type === 'subproject') {
+                      <span class="task-meta-hint">Subproject (no agent)</span>
+                    }
+                  </div>
+                  @if (store.generateTasksSessionFor(task.task_id); as gtSession) {
+                    <p class="task-workflow-hint generate-tasks-session">
+                      Generate Tasks — Layer {{ gtSession.layer }}: reply with approve, disapprove, change (per number), or END to finish.
+                    </p>
+                  }
+                  @if (taskWorkflowHint(task); as hint) {
+                    <p class="task-workflow-hint">{{ hint }}</p>
+                  }
                   <label class="field task-meta-field grow">
-                    <span>Title</span>
-                    <input [(ngModel)]="taskTitle" [name]="'taskTitle-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" />
+                    <span>Repo folder</span>
+                    <input [(ngModel)]="taskRepoPath" [name]="'taskRepoPath-' + task.task_id" placeholder="research/…/" (blur)="onEditorFieldBlur()" />
                   </label>
-                  <label class="field task-meta-field">
-                    <span>Kind</span>
-                    <select [(ngModel)]="taskEditorKind" name="taskEditorKind" (change)="onTaskKindChange()">
-                      <option value="code">code</option>
-                      <option value="research">research</option>
-                      <option value="brainstorming">brainstorm</option>
-                      <option value="critiquing">critique</option>
-                      <option value="architect">architecture</option>
-                      <option value="subproject">subproject</option>
-                    </select>
-                  </label>
-                  <label class="field task-meta-field">
-                    <span>Status</span>
-                    <select [value]="task.status" (change)="onStatusChange(task.task_id, $event)">
-                      @for (status of statuses; track status) {
-                        <option [value]="status">{{ status }}</option>
-                      }
-                    </select>
-                  </label>
-                  @if (task.output_type === 'research') {
-                    <label class="field task-meta-field">
-                      <span>Agent</span>
-                      <select [(ngModel)]="taskResearchAgentId" [name]="'taskResearchAgent-' + task.task_id" (change)="onEditorFieldAutoSave()">
-                        <option value="">Project default</option>
-                        @for (agent of libraryAgents('research'); track agent.agent_id) {
-                          <option [value]="agent.agent_id">{{ agent.name }}</option>
+                  @if (!taskAgentStarted(task)) {
+                    <div class="task-pre-chat">
+                      <label class="field">
+                        <span>Initial Prompt</span>
+                        <textarea rows="3" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this task."></textarea>
+                      </label>
+                      <div class="composer-actions">
+                        @if (store.chatActionPending() === 'execute') {
+                          <span class="inline-spinner" aria-label="Executing task"></span>
+                        } @else {
+                          <button type="button" class="accent" [disabled]="chatActionsLocked() || !taskInitialPrompt.trim() || task.status === 'ABANDONED'" (click)="executeTask()">Execute</button>
                         }
-                      </select>
-                    </label>
-                  }
-                  @if (task.output_type === 'code') {
-                    <label class="field task-meta-field">
-                      <span>Agent</span>
-                      <select [(ngModel)]="taskCodeAgentId" [name]="'taskCodeAgent-' + task.task_id" (change)="onEditorFieldAutoSave()">
-                        <option value="">Project default</option>
-                        @for (agent of libraryAgents('code'); track agent.agent_id) {
-                          <option [value]="agent.agent_id">{{ agent.name }}</option>
+                        @if (taskHasChildren(task.task_id)) {
+                          <button type="button" class="ghost" [disabled]="chatActionsLocked()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
                         }
-                      </select>
-                    </label>
-                  }
-                  @if (task.output_type === 'subproject') {
-                    <span class="task-meta-hint">Subproject (no agent)</span>
+                      </div>
+                    </div>
                   }
                 </div>
-                @if (store.generateTasksSessionFor(task.task_id); as gtSession) {
-                  <p class="task-workflow-hint generate-tasks-session">
-                    Generate Tasks — Layer {{ gtSession.layer }}: reply with approve, disapprove, change (per number), or END to finish.
-                  </p>
-                }
-                @if (taskWorkflowHint(task); as hint) {
-                  <p class="task-workflow-hint">{{ hint }}</p>
-                }
-                <label class="field task-meta-field grow">
-                  <span>Repo folder</span>
-                  <input [(ngModel)]="taskRepoPath" [name]="'taskRepoPath-' + task.task_id" placeholder="research/…/" (blur)="onEditorFieldBlur()" />
-                </label>
-                @if (!taskAgentStarted(task)) {
-                  <div class="task-pre-chat">
-                    <label class="field">
-                      <span>Initial Prompt</span>
-                      <textarea rows="3" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this task."></textarea>
-                    </label>
-                    <div class="composer-actions">
-                      @if (store.chatActionPending() === 'execute') {
-                        <span class="inline-spinner" aria-label="Executing task"></span>
+                <div class="task-chat-conversation">
+                  <div #chatTranscript class="chat-transcript-scroll transcript" aria-live="polite">
+                    @for (item of timeline(); track item.id) {
+                      @if (item.kind === 'message') {
+                        <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
+                          <p class="who">{{ speaker(item.message) }}</p>
+                          <markdown class="md chat-md" mermaid [data]="planMarkdown(item.message.content)"></markdown>
+                        </article>
                       } @else {
-                        <button type="button" class="accent" [disabled]="chatActionsLocked() || !taskInitialPrompt.trim() || task.status === 'ABANDONED'" (click)="executeTask()">Execute</button>
+                        <article class="artifact">
+                          <header>{{ item.artifact.name }}</header>
+                          @if (markdownArtifact(item.artifact) && item.artifact.text) {
+                            <markdown class="md" mermaid [data]="planMarkdown(item.artifact.text)"></markdown>
+                          } @else if (item.artifact.text) {
+                            <pre>{{ item.artifact.text }}</pre>
+                          } @else if (item.artifact.content_type === 'image' && item.artifact.url) {
+                            <img [src]="item.artifact.url" [alt]="item.artifact.name" />
+                          } @else if (item.artifact.url) {
+                            <a class="text-link" [href]="item.artifact.url" target="_blank" rel="noopener">Download {{ item.artifact.name }}</a>
+                          }
+                        </article>
                       }
-                      @if (taskHasChildren(task.task_id)) {
-                        <button type="button" class="ghost" [disabled]="chatActionsLocked()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
+                    }
+                    @if (store.pendingReply()) {
+                      <p class="pending">Waiting for Cursor…</p>
+                    }
+                  </div>
+                  <div class="composer task-chat-composer">
+                    <label class="sr-only" for="task-chat">Message</label>
+                    <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat." [disabled]="!taskAgentStarted(task)"></textarea>
+                    <div class="composer-actions">
+                      @if (store.chatActionPending() === 'send') {
+                        <span class="inline-spinner" aria-label="Sending message"></span>
+                      } @else {
+                        <button type="button" class="primary" [disabled]="chatSendDisabled() || !chatDraft.trim() || !taskAgentStarted(task)" (click)="sendChat()">Send</button>
+                        @if (store.chatAgentSyncing()) {
+                          <span class="inline-spinner" aria-label="Syncing chat with agent"></span>
+                        }
                       }
                     </div>
-                  </div>
-                }
-                <div #chatTranscript class="chat-transcript-scroll transcript" aria-live="polite">
-                  @for (item of timeline(); track item.id) {
-                    @if (item.kind === 'message') {
-                      <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
-                        <p class="who">{{ speaker(item.message) }}</p>
-                        <markdown class="md chat-md" mermaid [data]="planMarkdown(item.message.content)"></markdown>
-                      </article>
-                    } @else {
-                      <article class="artifact">
-                        <header>{{ item.artifact.name }}</header>
-                        @if (markdownArtifact(item.artifact) && item.artifact.text) {
-                          <markdown class="md" mermaid [data]="planMarkdown(item.artifact.text)"></markdown>
-                        } @else if (item.artifact.text) {
-                          <pre>{{ item.artifact.text }}</pre>
-                        } @else if (item.artifact.content_type === 'image' && item.artifact.url) {
-                          <img [src]="item.artifact.url" [alt]="item.artifact.name" />
-                        } @else if (item.artifact.url) {
-                          <a class="text-link" [href]="item.artifact.url" target="_blank" rel="noopener">Download {{ item.artifact.name }}</a>
-                        }
-                      </article>
-                    }
-                  }
-                  @if (store.pendingReply()) {
-                    <p class="pending">Waiting for Cursor…</p>
-                  }
-                </div>
-                <div class="composer">
-                  <label class="sr-only" for="task-chat">Message</label>
-                  <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat." [disabled]="!taskAgentStarted(task)"></textarea>
-                  <div class="composer-actions">
-                    @if (store.chatActionPending() === 'send') {
-                      <span class="inline-spinner" aria-label="Sending message"></span>
-                    } @else {
-                      <button type="button" class="primary" [disabled]="chatSendDisabled() || !chatDraft.trim() || !taskAgentStarted(task)" (click)="sendChat()">Send</button>
-                      @if (store.chatAgentSyncing()) {
-                        <span class="inline-spinner" aria-label="Syncing chat with agent"></span>
-                      }
-                    }
                   </div>
                 </div>
               </div>
