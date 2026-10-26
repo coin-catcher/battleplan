@@ -334,7 +334,7 @@
         <p>Loading...</p>
       </div>
     }
-    @if (store.error()) {
+    @if (store.error() && !taskPanelEditorActive()) {
       <p class="banner error" role="alert">{{ store.error() }}</p>
     }
     @if (store.notice()) {
@@ -605,6 +605,15 @@
                 </div>
               </div>
             </header>
+
+            @if (store.taskPanelError(task.task_id); as panelErr) {
+              <div class="task-panel-error banner error" role="alert">
+                <p>{{ panelErr.message }}</p>
+                @if (panelErr.connectionFailed) {
+                  <button type="button" class="ghost" [disabled]="store.chatAgentSyncing()" (click)="retryTaskConnection(task.task_id)">Retry connection</button>
+                }
+              </div>
+            }
 
             @if (taskPageTab() === 'chat') {
               <div class="task-chat-panel">
@@ -880,6 +889,14 @@
         @if (store.editorProject(); as subproject) {
           @if (store.selectedTask(); as task) {
           <section class="panel chat-layout">
+            @if (store.taskPanelError(task.task_id); as panelErr) {
+              <div class="task-panel-error banner error" role="alert">
+                <p>{{ panelErr.message }}</p>
+                @if (panelErr.connectionFailed) {
+                  <button type="button" class="ghost" [disabled]="store.chatAgentSyncing()" (click)="retryTaskConnection(task.task_id)">Retry connection</button>
+                }
+              </div>
+            }
             <div class="chat-editor-chrome">
               <div class="toolbar">
                 <button type="button" class="danger" [disabled]="store.busy()" (click)="deleteTask(task)">Delete</button>

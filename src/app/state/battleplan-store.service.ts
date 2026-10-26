@@ -62,6 +62,11 @@ export interface ProjectTabRestore {
   mindmapView: MindmapViewState | null;
 }
 
+export interface TaskPanelErrorState {
+  message: string;
+  connectionFailed: boolean;
+}
+
 @Injectable({ providedIn: 'root' })
 export class BattleplanStore {
   private readonly api = inject(BattleplanApi);
@@ -85,6 +90,7 @@ export class BattleplanStore {
   readonly pendingChanges = signal<PendingChange[]>([]);
   readonly agents = signal<ProjectAgent[]>([]);
   readonly openTabs = signal<string[]>([]);
+  readonly taskPanelErrors = signal<Record<string, TaskPanelErrorState>>({});
 
   readonly project = computed(() => this.projects().find((item) => item.project_id === this.projectId()) ?? null);
   readonly rootProjects = computed(() => this.projects().filter((item) => !item.parent_project_id));
@@ -600,6 +606,16 @@ export class BattleplanStore {
     }
   }
 
+  taskPanelError(taskId: string): TaskPanelErrorState | null {
+    return this.taskPanelErrors()[taskId] ?? null;
+  }
+
+  async retryTaskAgentConnection(taskId: string): Promise<void> {
+    const existing = this.tasks().find((item) => item.task_id === taskId);
+    const kind = existing?.output_type === 'subproject' ? 'subproject' : 'task';
+    await this.syncTaskPanelAfterOpen(taskId, kind, existing, this.panelRefreshGeneration);
+  }
+
   async generateTasks(): Promise<void> {
     const projectId = this.projectId();
     if (!projectId) return;
@@ -613,6 +629,7 @@ export class BattleplanStore {
       runId = sent.run_id;
       this.rememberMessage(sent);
     });
+    if (this.error() && taskId) this.adoptGlobalErrorAsTaskPanel(taskId);
     if (!runId || this.error()) return;
     if (taskId) await this.watchTask(taskId, runId);
     else await this.watchProject(projectId, runId);
@@ -624,9 +641,16 @@ export class BattleplanStore {
         this.applyConversation(await this.api.listProjectMessages(projectId));
       }
     });
+    if (this.error() && taskId) this.adoptGlobalErrorAsTaskPanel(taskId);
     const reply = this.messages().find((message) => message.run_id === runId && message.role === 'assistant');
     if (!reply) {
-      this.error.set('The Cursor agent has not replied yet.');
+      const message = 'The Cursor agent has not replied yet.';
+      if (taskId) {
+        this.setTaskPanelError(taskId, { message, connectionFailed: false });
+        this.error.set(null);
+      } else {
+        this.error.set(message);
+      }
       return;
     }
     await this.run(async () => {
@@ -640,10 +664,12 @@ export class BattleplanStore {
       this.rememberMessage(saved);
       this.notice.set(note);
     });
+    if (this.error() && taskId) this.adoptGlobalErrorAsTaskPanel(taskId);
   }
 
   async openTask(taskId: string): Promise<void> {
     this.stopWatch();
+    this.error.set(null);
     const existing = this.tasks().find((item) => item.task_id === taskId);
     const kind = existing?.output_type === 'subproject' ? 'subproject' : 'task';
     this.selection.set({ kind, taskId });
@@ -666,7 +692,10 @@ export class BattleplanStore {
           this.applyTaskConversation(result);
         }
       } catch (error) {
-        this.error.set(error instanceof Error ? error.message : 'Could not load task chat.');
+        this.setTaskPanelError(taskId, {
+          message: error instanceof Error ? error.message : 'Could not load task chat.',
+          connectionFailed: true,
+        });
       }
     }
     void this.syncTaskPanelAfterOpen(taskId, kind, existing, generation);
@@ -850,6 +879,7 @@ export class BattleplanStore {
       this.applyTaskConversation(await this.api.listTaskMessages(taskId));
     });
     if (this.error()) {
+      this.adoptGlobalErrorAsTaskPanel(taskId);
       this.patchTaskStatus(taskId, statusBeforeExecute);
       this.syncDoingBackgroundWatches();
       return;
@@ -921,6 +951,7 @@ export class BattleplanStore {
     const task = this.selectedTask();
     if (!task) return;
     const taskId = task.task_id;
+    this.clearTaskPanelError(taskId);
     this.patchTaskStatus(taskId, 'DOING');
     this.syncDoingBackgroundWatches();
     let runId: string | undefined;
@@ -938,6 +969,7 @@ export class BattleplanStore {
       }
     });
     if (this.error()) {
+      this.adoptGlobalErrorAsTaskPanel(taskId);
       this.patchTaskStatus(taskId, 'REVIEW');
       this.syncDoingBackgroundWatches();
       return;
@@ -1203,9 +1235,15 @@ export class BattleplanStore {
         await this.refreshOutput(result.task);
         this.continueTaskWatch(taskId);
       }
+      if (generation === this.panelRefreshGeneration) {
+        this.clearTaskPanelError(taskId);
+      }
     } catch (error) {
       if (generation === this.panelRefreshGeneration) {
-        this.error.set(error instanceof Error ? error.message : 'Could not sync task chat.');
+        this.setTaskPanelError(taskId, {
+          message: error instanceof Error ? error.message : 'This task could not connect to the backend agent.',
+          connectionFailed: true,
+        });
       }
     } finally {
       if (generation === this.panelRefreshGeneration) {
@@ -1254,7 +1292,7 @@ export class BattleplanStore {
         this.ensureDoingBackgroundWatch(taskId);
         this.notice.set('Merge conflict — the task agent is resolving it.');
       } else {
-        this.error.set(message);
+        this.setTaskPanelError(taskId, { message, connectionFailed: false });
         const refreshed = await this.api.listTaskMessages(taskId, { syncAgent: false });
         this.applyTaskConversation(refreshed);
         if (refreshed.task.status === 'REVIEW') {
@@ -1596,6 +1634,26 @@ export class BattleplanStore {
         task: cloneProjectTask(patched),
       });
     }
+  }
+
+  private setTaskPanelError(taskId: string, error: TaskPanelErrorState): void {
+    this.taskPanelErrors.update((current) => ({ ...current, [taskId]: error }));
+  }
+
+  private clearTaskPanelError(taskId: string): void {
+    this.taskPanelErrors.update((current) => {
+      if (!(taskId in current)) return current;
+      const next = { ...current };
+      delete next[taskId];
+      return next;
+    });
+  }
+
+  private adoptGlobalErrorAsTaskPanel(taskId: string, connectionFailed = false): void {
+    const message = this.error();
+    if (!message) return;
+    this.setTaskPanelError(taskId, { message, connectionFailed });
+    this.error.set(null);
   }
 
   private async run(work: () => Promise<void>): Promise<void> {

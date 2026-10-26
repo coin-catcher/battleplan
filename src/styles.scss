@@ -882,6 +882,20 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   padding-top: 0;
 }
 
+.task-panel-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+}
+
+.task-panel-error p {
+  margin: 0;
+  flex: 1 1 12rem;
+}
+
 .task-page-header {
   flex: none;
   display: flex;
