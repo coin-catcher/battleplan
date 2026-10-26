@@ -4,15 +4,26 @@
 
 ## End-to-end flow
 
+### Research task (layered grilling)
+
+1. **User** clicks **Generate Tasks** on a **research** task. Battleplan starts a **Generate Tasks session** (parent stays **DOING** until **END** or session teardown).
+2. **Layer proposal** — the agent receives a prompt to list **titles only** for layer 1 (direct children of the research task). The user replies with **approve**, **disapprove**, or **change** per numbered item.
+3. **Layer commit** — when titles are approved, the agent writes briefs under `research/{project_id}/{task_id}/` and replies with JSON. Battleplan imports that layer, updates the mindmap, then automatically requests the **next layer** (children of prior-layer tasks where appropriate).
+4. Repeat until the user sends **END** or the agent has no further layers. Parent research moves to **DONE** when the session ends.
+
+See `src/app/core/generate-tasks-layered.ts` and `BattleplanStore.generateTasksSession`.
+
+### Project chat or non-research task (one-shot)
+
 1. **User** clicks **Generate Tasks** in the right-hand panel (`BattleplanStore.generateTasks()`).
 2. **Scope**
    - **Project chat**: sends a generate instruction to the project’s Cursor agent (`LocalEngine.generateTasks`).
-   - **Task chat**: sends a task-specific message to that task’s agent (or the project agent if the task has not started its own) via `LocalEngine.generateTaskTasks`.
+   - **Task chat (non-research)**: sends a task-specific message via `LocalEngine.generateTaskTasks`.
 3. **Cursor** runs with `intent: 'generate_tasks'`. The app waits for the run to finish and reloads messages/artifacts.
 4. **Parse** — `parseGeneratedTasksFromSources()` reads `{ "tasks": [...], "edges": [...] }` (or a bare task array) from the assistant reply or a `.json` artifact (`parse-tasks.ts`).
 5. **Validate** — `validateAndRepairGeneratedTasks()` simulates the mindmap graph (tree, ordering, fork/join/cycle) before any tasks are created. Missing `break_condition` on `cycle` edges is auto-filled (`human:REVIEW`). If validation still fails, Battleplan sends up to **two** repair prompts to the Cursor agent with the error list, then imports or shows a clear error (`validate-generated-tasks.ts`, `BattleplanStore.importGeneratedTasksFromReply`).
-6. **Anchor (task scope only)** — when Generate Tasks is invoked from a task panel, Battleplan passes that task’s id into `createTasks()`. Drafts with empty `depends_on` get the source task title as a fallback; any generated task still without a tree parent is linked under the **source task id** (`linkCreatedTasksUnderParent()` in `generate-task-links.ts`).
-7. **Create** — `LocalEngine.createTasks()` normalizes drafts, creates `ProjectTask` rows, wires the mindmap graph (`bindDraftDependsOn()`), and applies **`sequential_with`** as one-way ordering among conflicting code tasks (`bindSequentialDraftLinks()`).
+6. **Anchor (task scope only)** — when Generate Tasks is invoked from a task panel, Battleplan passes that task’s id into `createTasks()`. Drafts with empty `depends_on` get the source task title as a fallback; any generated task still without a tree parent is linked under the **source task id** (`linkCreatedTasksUnderParent()` in `generate-task-links.ts`). **Layer 2+** in a research session keeps agent `depends_on` and does not re-anchor everything under the research root (`prepareGeneratedDraftsForLayer()`).
+7. **Create** — `LocalEngine.createTasks()` normalizes drafts, creates `ProjectTask` rows (with default `repo_path`), wires the mindmap graph (`bindDraftDependsOn()`), and applies **`sequential_with`** as one-way ordering among conflicting code tasks (`bindSequentialDraftLinks()`).
 8. **UI** — tasks reload; new nodes appear on the left-hand mindmap.
 
 ## JSON shape the agent must return
