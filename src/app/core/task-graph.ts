@@ -156,9 +156,16 @@ export function validateTaskGraphEdges(edges: TaskGraphEdge[], taskIds: Set<stri
   }
   const cycles = directedCycleEdgeSets(edges);
   for (const cycleEdges of cycles) {
-    const allHaveBreak = cycleEdges.every((edge) => Boolean(edge.break_condition?.trim()));
-    if (!allHaveBreak) {
-      throw new Error('Every edge in a dependency cycle must declare a break_condition.');
+    const loopEdges = cycleEdges.filter((edge) => edge.kind === 'cycle');
+    if (loopEdges.length === 0) {
+      throw new Error(
+        'Accidental dependency cycle (tree/ordering/fork/join only). Remove or retime edges so the graph is acyclic, or model rework as kind "cycle" with break_condition.',
+      );
+    }
+    for (const edge of loopEdges) {
+      if (!edge.break_condition?.trim()) {
+        throw new Error('Every edge in a dependency cycle must declare a break_condition.');
+      }
     }
   }
 }

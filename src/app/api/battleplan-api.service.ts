@@ -192,6 +192,20 @@ export class BattleplanApi {
     return this.engine.generateTaskTasks(taskId);
   }
 
+  repairGenerateTasksJson(
+    taskId: string,
+    issues: import('../core/validate-generated-tasks').GeneratedTasksValidationIssue[],
+  ): Promise<ChatMessage> {
+    return this.engine.repairGenerateTasksJson(taskId, issues);
+  }
+
+  repairGenerateTasksJsonForProject(
+    projectId: string,
+    issues: import('../core/validate-generated-tasks').GeneratedTasksValidationIssue[],
+  ): Promise<ChatMessage> {
+    return this.engine.repairGenerateTasksJsonForProject(projectId, issues);
+  }
+
   noteProject(projectId: string, message: string): Promise<ChatMessage> {
     return this.engine.noteProject(projectId, message);
   }

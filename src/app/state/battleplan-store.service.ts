@@ -24,6 +24,10 @@ import type { AgentEditorSaveInput } from '../api/battleplan-api.service';
 import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
 import { generateTasksSourceTaskId, linkCreatedTasksUnderParent, prepareGeneratedDrafts } from '../core/generate-task-links';
 import { parseGeneratedTasksFromSources } from '../core/parse-tasks';
+import {
+  assertGeneratedTasksReady,
+  validateAndRepairGeneratedTasks,
+} from '../core/validate-generated-tasks';
 import { buildTaskForest, reorderTaskIds, type TaskNode } from '../core/task-tree';
 import { MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL } from '../core/github-client';
 import {
@@ -38,6 +42,7 @@ import { doingBackgroundWatchTaskIds, taskNeedsDoingBackgroundPoll } from './doi
 
 const POLL_INTERVAL_MS = 3000;
 const POLL_ATTEMPTS = 300;
+const GENERATE_TASKS_JSON_REPAIR_ATTEMPTS = 2;
 
 export interface ProjectTabSnapshot {
   selection: Selection;
@@ -654,17 +659,74 @@ export class BattleplanStore {
       return;
     }
     await this.run(async () => {
-      let parsed = parseGeneratedTasksFromSources(reply.content, this.artifacts());
-      const sourceTask = taskId ? this.tasks().find((item) => item.task_id === taskId) : undefined;
-      const drafts = prepareGeneratedDrafts(parsed.tasks, sourceTask);
-      await this.api.createTasks(projectId, drafts, taskId, parsed.edges);
-      await this.reloadTasks();
-      const note = `Created ${drafts.length} task${drafts.length === 1 ? '' : 's'} from this conversation.`;
-      const saved = taskId ? await this.api.noteTask(taskId, note) : await this.api.noteProject(projectId, note);
-      this.rememberMessage(saved);
-      this.notice.set(note);
+      await this.importGeneratedTasksFromReply(projectId, taskId, runId);
     });
     if (this.error() && taskId) this.adoptGlobalErrorAsTaskPanel(taskId);
+  }
+
+  private async importGeneratedTasksFromReply(
+    projectId: string,
+    taskId: string | undefined,
+    initialRunId: string,
+  ): Promise<void> {
+    const sourceTask = taskId ? this.tasks().find((item) => item.task_id === taskId) : undefined;
+    const existingTasks = this.tasks().filter((item) => item.project_id === projectId);
+    let runId = initialRunId;
+    let validation = this.validateGenerateTasksAssistantRun(runId, sourceTask, taskId, existingTasks);
+
+    for (let repair = 0; repair <= GENERATE_TASKS_JSON_REPAIR_ATTEMPTS && !validation.valid; repair++) {
+      if (repair === GENERATE_TASKS_JSON_REPAIR_ATTEMPTS) {
+        assertGeneratedTasksReady(validation);
+        return;
+      }
+      let repairRunId: string | undefined;
+      await this.run(async () => {
+        const sent = taskId
+          ? await this.api.repairGenerateTasksJson(taskId, validation.issues)
+          : await this.api.repairGenerateTasksJsonForProject(projectId, validation.issues);
+        repairRunId = sent.run_id;
+        this.rememberMessage(sent);
+      });
+      if (!repairRunId || this.error()) return;
+      if (taskId) await this.watchTask(taskId, repairRunId);
+      else await this.watchProject(projectId, repairRunId);
+      await this.run(async () => {
+        if (taskId) {
+          const refreshed = await this.api.listTaskMessages(taskId);
+          this.applyTaskConversation(refreshed);
+        } else {
+          this.applyConversation(await this.api.listProjectMessages(projectId));
+        }
+      });
+      runId = repairRunId;
+      validation = this.validateGenerateTasksAssistantRun(runId, sourceTask, taskId, existingTasks);
+    }
+
+    const drafts = prepareGeneratedDrafts(validation.payload.tasks, sourceTask);
+    await this.api.createTasks(projectId, drafts, taskId, validation.payload.edges);
+    await this.reloadTasks();
+    const note = `Created ${drafts.length} task${drafts.length === 1 ? '' : 's'} from this conversation.`;
+    const saved = taskId ? await this.api.noteTask(taskId, note) : await this.api.noteProject(projectId, note);
+    this.rememberMessage(saved);
+    this.notice.set(note);
+  }
+
+  private validateGenerateTasksAssistantRun(
+    runId: string,
+    sourceTask: ProjectTask | undefined,
+    parentTaskId: string | undefined,
+    existingTasks: ProjectTask[],
+  ) {
+    const reply = this.messages().find((message) => message.run_id === runId && message.role === 'assistant');
+    if (!reply) {
+      throw new Error('The Cursor agent has not replied yet.');
+    }
+    const parsed = parseGeneratedTasksFromSources(reply.content, this.artifacts());
+    const drafts = prepareGeneratedDrafts(parsed.tasks, sourceTask);
+    return validateAndRepairGeneratedTasks(
+      { tasks: drafts, edges: parsed.edges },
+      { existingTasks, parentTaskId },
+    );
   }
 
   async openTask(taskId: string): Promise<void> {

@@ -59,12 +59,13 @@ import {
   mergeGraphAfterGenerateTasksImport,
   type GeneratedTaskEdgeDraft,
 } from '../core/generate-task-graph';
-import { bindSequentialDraftLinks, linkCreatedTasksUnderParent } from '../core/generate-task-links';
+import { bindDraftDependsOn, bindSequentialDraftLinks, linkCreatedTasksUnderParent } from '../core/generate-task-links';
 import { applyLinkRelocation, type MindmapLinkRef } from '../core/link-relocation';
 import {
   buildGenerateTaskTasksUserMessage,
   generateTasksInstructionForProject,
 } from '../core/generate-tasks';
+import { buildGenerateTasksRepairUserMessage } from '../core/validate-generated-tasks';
 import { defaultDarForOutputType, taskDar, taskInitialPrompt } from '../core/task-fields';
 import {
   assertTaskBriefReadyForRelease,
@@ -521,7 +522,7 @@ export class LocalEngine {
         lifecycle_phase: draft.lifecycle_phase,
       };
     });
-    bindDependencies(existing, created, normalized);
+    bindDraftDependsOn(existing, created, normalized);
     bindSequentialDraftLinks(existing, created, normalized);
     if (parentTaskId) {
       linkCreatedTasksUnderParent(existing, created, parentTaskId);
@@ -795,6 +796,45 @@ export class LocalEngine {
 
   generateTasks(projectId: string): Promise<ChatMessage> {
     return this.dispatchProject(projectId, generateTasksInstructionForProject(), 'generate_tasks');
+  }
+
+  async repairGenerateTasksJson(
+    taskId: string,
+    issues: import('../core/validate-generated-tasks').GeneratedTasksValidationIssue[],
+  ): Promise<ChatMessage> {
+    const task = await this.requireTaskById(taskId);
+    const project = await this.requireProject(task.project_id);
+    const agentId = task.cursor_agent_id || project.cursor_agent_id;
+    if (!agentId) throw new Error('This project is not linked to a Cursor agent.');
+    const text = buildGenerateTasksRepairUserMessage(issues);
+    const output = task.output_type === 'code'
+      ? await this.repo.getCodeOutput(taskId)
+      : await this.repo.getResearchOutput(taskId);
+    const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
+    const run = await this.cursor.createRun(agentId, {
+      text: wrapAgentRunPrompt(text, { baseBranch: base, agentBranch: output?.branch }),
+      mode: task.cursor_agent_id ? 'agent' : 'plan',
+    });
+    return this.record({
+      scope: 'task',
+      project_id: task.project_id,
+      task_id: taskId,
+      role: 'user',
+      content: text,
+      run_id: run.id,
+      intent: 'generate_tasks',
+      cursor_agent_id: agentId,
+    });
+  }
+
+  async repairGenerateTasksJsonForProject(
+    projectId: string,
+    issues: import('../core/validate-generated-tasks').GeneratedTasksValidationIssue[],
+  ): Promise<ChatMessage> {
+    const project = await this.requireProject(projectId);
+    if (!project.cursor_agent_id) throw new Error('This project is not linked to a Cursor agent.');
+    const text = buildGenerateTasksRepairUserMessage(issues);
+    return this.dispatchProject(projectId, text, 'generate_tasks');
   }
 
   async generateTaskTasks(taskId: string): Promise<ChatMessage> {
@@ -2046,29 +2086,6 @@ function outputTypesOf(value: string, index: number): OutputType[] {
     types.add(token);
   }
   return [...types];
-}
-
-function bindDependencies(existing: ProjectTask[], created: ProjectTask[], drafts: NormalizedDraft[]): void {
-  const titles = new Map<string, string[]>();
-  for (const task of [...existing, ...created]) {
-    const ids = titles.get(task.title) ?? [];
-    ids.push(task.task_id);
-    titles.set(task.title, ids);
-  }
-  const byId = new Map([...existing, ...created].map((task) => [task.task_id, task]));
-  created.forEach((task) => {
-    task.dependencies = [];
-  });
-  created.forEach((task, index) => {
-    for (const title of drafts[index].depends_on) {
-      const matches = titles.get(title) ?? [];
-      if (matches.length === 0) throw new Error(`Unknown dependency "${title}".`);
-      if (matches.length > 1) throw new Error(`Dependency "${title}" matches more than one task.`);
-      const parent = byId.get(matches[0]);
-      if (!parent) throw new Error(`Unknown dependency "${title}".`);
-      parent.dependencies = [...new Set([...parent.dependencies, task.task_id])];
-    }
-  });
 }
 
 function feedbackPrompt(task: ProjectTask, feedback: string): string {
