@@ -26,7 +26,7 @@ export function validateCritiqueRetryEdges(
   const issues: PatternValidationIssue[] = [];
   for (const title of critiqueTitles) {
     const back = edges.filter((e) => e.to === title || e.from === title);
-    const hasCycle = back.some((e) => e.kind === 'cycle' || e.kind === 'loop');
+    const hasCycle = back.some((e) => e.kind === 'cycle');
     if (!hasCycle) {
       issues.push({
         path: `pattern:critique_retry_loop:${title}`,
