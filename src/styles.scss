@@ -1107,6 +1107,13 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   gap: 8px;
 }
 
+.discovery-start-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .task-details-panel,
 .task-graph-panel {
   flex: 1 1 0;

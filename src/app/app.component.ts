@@ -95,6 +95,7 @@ import {
 import { normalChildIds } from './core/dependencies';
 import { libraryAgentsForKind, taskResearchChatStarted } from './core/agent-bindings';
 import { BattleplanStore } from './state/battleplan-store.service';
+import { isDiscoveryRootTask as taskIsDiscoveryRoot } from './core/task-generate-eligibility';
 
 @Component({
   selector: 'app-root',
@@ -1193,6 +1194,10 @@ export class AppComponent implements OnInit {
 
   taskWorkflowHint(task: ProjectTask): string | undefined {
     return workflowHintForTask(task);
+  }
+
+  isDiscoveryRootTask(task: ProjectTask): boolean {
+    return taskIsDiscoveryRoot(task);
   }
 
   taskAgentStarted(task: ProjectTask): boolean {

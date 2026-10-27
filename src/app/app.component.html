@@ -446,7 +446,6 @@
             <div class="chat-editor-chrome">
               <div class="toolbar">
                 <button type="button" class="danger" [disabled]="store.busy()" (click)="deleteProject()">Delete</button>
-                <button type="button" class="accent" [disabled]="store.busy()" (click)="store.generateTasks()">Generate Tasks</button>
                 @if (projectRootStatus(project) === 'REVIEW') {
                   <button type="button" class="accent" [disabled]="chatActionsLocked()" (click)="approveProjectRelease()">Approve and merge</button>
                 }
@@ -605,9 +604,6 @@
                   </svg>
                 </button>
                 <div class="task-page-action-group">
-                  @if (task.output_type === 'research') {
-                    <button type="button" class="accent" [disabled]="store.busy() || store.generateTasksSessionFor(task.task_id) || !store.canRunGenerateTasksOnSelectedTask()" (click)="store.generateTasks()">Generate Tasks</button>
-                  }
                   @if (task.status === 'REVIEW') {
                     <button type="button" class="accent" [disabled]="chatActionsLocked()" (click)="approveTask()">Approve</button>
                   }
@@ -682,8 +678,15 @@
                   </div>
                   @if (store.generateTasksSessionFor(task.task_id); as gtSession) {
                     <p class="task-workflow-hint generate-tasks-session">
-                      Generate Tasks — Layer {{ gtSession.layer }}: reply with approve, disapprove, change (per number), or END to finish.
+                      @if (gtSession.phase === 'partition') {
+                        Start Discovery — partition phase: reply with approve, disapprove, change (per number), or END to finish.
+                      } @else {
+                        Start Discovery — depth-first on "{{ gtSession.focusPartitionTitle ?? gtSession.activeGraphGoal }}" (layer {{ gtSession.layer }}): approve/disapprove/change, GRAPH DONE when this partition graph is complete, or END.
+                      }
                     </p>
+                    <div class="discovery-start-actions">
+                      <button type="button" class="ghost" [disabled]="store.busy()" (click)="store.importDiscoveryJsonFromLastAssistant()">Import task graph from last reply</button>
+                    </div>
                   }
                   @if (taskWorkflowHint(task); as hint) {
                     <p class="task-workflow-hint">{{ hint }}</p>
@@ -720,9 +723,19 @@
                   @if (!taskAgentStarted(task)) {
                     <div class="task-pre-chat">
                       <label class="field">
-                        <span>Initial Prompt</span>
-                        <textarea rows="3" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this task."></textarea>
+                        @if (isDiscoveryRootTask(task)) {
+                          <span>Approximate Goal</span>
+                          <textarea rows="3" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Rough goal for discovery; refined as tasks are generated."></textarea>
+                        } @else {
+                          <span>Initial Prompt</span>
+                          <textarea rows="3" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this task."></textarea>
+                        }
                       </label>
+                      @if (isDiscoveryRootTask(task)) {
+                        <div class="discovery-start-actions">
+                          <button type="button" class="accent" [disabled]="store.busy() || store.generateTasksSessionFor(task.task_id) || !store.canRunGenerateTasksOnSelectedTask()" (click)="store.generateTasks()">Start Discovery</button>
+                        </div>
+                      }
                       <div class="composer-actions">
                         @if (store.chatActionPending() === 'execute') {
                           <span class="inline-spinner" aria-label="Executing task"></span>

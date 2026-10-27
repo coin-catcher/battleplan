@@ -11,9 +11,13 @@ export interface GraphDiscoveryIndexEntry {
 export interface DiscoverySessionState {
   source_task_id: string;
   mode: 'depth_first';
+  phase?: 'partition' | 'depth_first';
   active_graph_id: string;
   active_graph_goal: string;
   layer: number;
+  partition_titles?: string[];
+  partition_index?: number;
+  focus_partition_title?: string;
 }
 
 export function newDiscoveryGraphId(): string {
