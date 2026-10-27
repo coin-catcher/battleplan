@@ -12,6 +12,7 @@ import type { ParsedGeneratedTasks } from './parse-tasks';
 import type { ProjectTask, TaskDraft } from './models';
 import { rebuildGraphEdgesFromLegacy, validateTaskGraphEdges } from './task-graph';
 import { validateTaskBrief } from './task-brief';
+import { validateCritiqueRetryEdges } from './task-patterns';
 
 export interface GeneratedTasksValidationIssue {
   path: string;
@@ -119,6 +120,22 @@ export function validateAndRepairGeneratedTasks(
     edgeDrafts = cycleRepair.edges;
     repaired = true;
   }
+
+  const critiqueTitles = parsed.tasks
+    .filter((d) => d.node_kind === 'critique')
+    .map((d) => d.title.trim())
+    .filter(Boolean);
+  for (const item of validateCritiqueRetryEdges(critiqueTitles, edgeDrafts)) {
+    issues.push(item);
+  }
+  parsed.tasks.forEach((draft, index) => {
+    if (draft.cross_graph_edit && !draft.cross_graph_edit_rationale?.trim()) {
+      issues.push({
+        path: `tasks[${index}].cross_graph_edit_rationale`,
+        message: 'cross_graph_edit_rationale is required when cross_graph_edit is true.',
+      });
+    }
+  });
 
   if (issues.length === 0) {
     try {

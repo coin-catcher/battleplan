@@ -1,10 +1,20 @@
+import type { TaskOutputManifest } from './battleplan-storage';
+import type { DiscoverySessionState, GraphDiscoveryIndexEntry } from './graph-discovery';
+import type {
+  AddWorkflowTaskConfig,
+  ExecuteTaskConfig,
+  N8nWorkflowDefinition,
+  TaskTemplateDefinition,
+  TemplateInstanceRunState,
+} from './n8n-workflow';
+import type { TaskGraphPatternId } from './task-patterns';
 import type { LoopMode, TaskNodeKind } from './task-node-kind';
 import type { TaskBrief } from './task-brief';
 import type { TaskHandoff } from './task-handoff';
 
 export const TASK_STATUSES = ['TODO', 'DOING', 'REVIEW', 'BLOCKED', 'DONE', 'ABANDONED'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
-export type OutputType = 'code' | 'research' | 'subproject';
+export type OutputType = 'code' | 'research' | 'subproject' | 'execute' | 'add_workflow';
 
 export interface PendingChange {
   change_id: string;
@@ -55,6 +65,16 @@ export interface Project {
   mnemosyne_base_path?: string;
   /** Unified task graph edges (tree, ordering, fork, join, cycle). */
   task_graph_edges?: import('./task-graph').TaskGraphEdge[];
+  /** Local/git storage layout version (see battleplan-storage.ts). */
+  battleplan_storage_version?: number;
+  /** Completed depth-first discovery graphs. */
+  graph_discovery_index?: GraphDiscoveryIndexEntry[];
+  /** Active Generate Tasks depth-first session. */
+  discovery_session?: DiscoverySessionState;
+  task_templates?: TaskTemplateDefinition[];
+  workflows?: N8nWorkflowDefinition[];
+  /** Serial template–instance orchestration (parallel cap deferred). */
+  template_instance_run?: TemplateInstanceRunState;
   created_at: string;
   updated_at: string;
 }
@@ -114,6 +134,17 @@ export interface ProjectTask {
   lifecycle_phase?: LifecyclePhase;
   /** Git folder for task briefs and collateral (trailing slash). */
   repo_path?: string;
+  /** Depth-first discovery graph membership. */
+  graph_id?: string;
+  /** Named task graph pattern (see task-patterns.ts). */
+  pattern_id?: TaskGraphPatternId | string;
+  /** Task template ids merged into this task config. */
+  template_ids?: string[];
+  output_manifest?: TaskOutputManifest;
+  execute_config?: ExecuteTaskConfig;
+  add_workflow_config?: AddWorkflowTaskConfig;
+  /** Set when another graph’s task was modified; surfaced to the agent. */
+  cross_graph_edit_rationale?: string;
   /** Last completion handoff for downstream tasks (local → cloud). */
   handoff?: TaskHandoff;
   /** Explicit context inclusion (git + Mnemosyne pointers). */
@@ -180,6 +211,12 @@ export interface TaskDraft {
   connector_kind?: TaskConnectorKind;
   lifecycle_phase?: LifecyclePhase;
   repo_path?: string;
+  graph_id?: string;
+  pattern_id?: string;
+  template_ids?: string[];
+  cross_graph_edit?: boolean;
+  cross_graph_edit_rationale?: string;
+  execute_config?: ExecuteTaskConfig;
 }
 
 /** Execution backend for released tasks (see agent-connector.ts). */

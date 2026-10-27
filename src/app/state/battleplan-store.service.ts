@@ -21,6 +21,7 @@ import type {
 import { defaultOptionValues, getAgentTypeDefinition } from '../core/agent-types';
 import { isAgentDraftId, newDraftAgentId } from '../core/agent-id';
 import type { AgentEditorSaveInput } from '../api/battleplan-api.service';
+import { fieldsFromTaskEditorKind } from '../core/task-editor-kind';
 import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
 import {
   generateTasksSourceTaskId,
@@ -30,10 +31,18 @@ import {
 import {
   buildLayeredGenerateTasksNextLayerMessage,
   buildLayeredGenerateTasksProposalMessage,
+  buildLeafFanInRefactorPassMessage,
   isGenerateTasksEndCommand,
+  isGraphCompleteCommand,
   tryParseGeneratedTasksFromSources,
   type GenerateTasksSessionState,
 } from '../core/generate-tasks-layered';
+import {
+  appendGraphIndexEntry,
+  newDiscoveryGraphId,
+  type GraphDiscoveryIndexEntry,
+} from '../core/graph-discovery';
+import { canRunGenerateTasks } from '../core/task-generate-eligibility';
 import { parseGeneratedTasksFromSources } from '../core/parse-tasks';
 import {
   assertGeneratedTasksReady,
@@ -638,38 +647,77 @@ export class BattleplanStore {
     return session?.sourceTaskId === taskId ? session : null;
   }
 
+  canRunGenerateTasksOnSelectedTask(): boolean {
+    return canRunGenerateTasks(this.selectedTask() ?? undefined);
+  }
+
   async generateTasks(): Promise<void> {
     const projectId = this.projectId();
     if (!projectId) return;
     const selection = this.selection();
     const taskId = generateTasksSourceTaskId(selection);
     const sourceTask = taskId ? this.tasks().find((item) => item.task_id === taskId) : undefined;
-    const layered = Boolean(taskId && sourceTask?.output_type === 'research');
+    if (taskId && sourceTask && !canRunGenerateTasks(sourceTask)) {
+      this.error.set('Generate Tasks is only available on Brainstorm and Research tasks.');
+      this.adoptGlobalErrorAsTaskPanel(taskId);
+      return;
+    }
+    const layered = Boolean(taskId && sourceTask && canRunGenerateTasks(sourceTask));
+    const graphId = newDiscoveryGraphId();
     if (layered && taskId && sourceTask) {
-      this.generateTasksSession.set({ sourceTaskId: taskId, layer: 1 });
+      const session: GenerateTasksSessionState = {
+        sourceTaskId: taskId,
+        layer: 1,
+        activeGraphId: graphId,
+        activeGraphGoal: sourceTask.title,
+      };
+      this.generateTasksSession.set(session);
       if (sourceTask.status !== 'DOING' && sourceTask.status !== 'DONE') {
         await this.run(async () => {
           this.replaceTask(await this.api.updateTask(projectId, taskId, { status: 'DOING', manual: true }));
         });
       }
+      await this.run(async () => {
+        this.projects.update((projects) => projects.map((item) => item.project_id === projectId
+          ? {
+            ...item,
+            discovery_session: {
+              source_task_id: taskId,
+              mode: 'depth_first',
+              active_graph_id: graphId,
+              active_graph_goal: sourceTask.title,
+              layer: 1,
+            },
+          }
+          : item));
+        await this.api.updateProject(projectId, {
+          discovery_session: {
+            source_task_id: taskId,
+            mode: 'depth_first',
+            active_graph_id: graphId,
+            active_graph_goal: sourceTask.title,
+            layer: 1,
+          },
+        });
+      });
     }
     let runId: string | undefined;
     await this.run(async () => {
       if (layered && taskId && sourceTask) {
-        const text = buildLayeredGenerateTasksProposalMessage(sourceTask, 1);
+        const session = this.generateTasksSession()!;
+        const text = buildLayeredGenerateTasksProposalMessage(sourceTask, 1, this.project(), session);
         const sent = await this.api.generateLayeredTaskTasks(taskId, 1, text);
         runId = sent.run_id;
         this.rememberMessage(sent);
+      } else if (taskId) {
+        this.error.set('Generate Tasks is only available on Brainstorm and Research tasks.');
       } else {
-        const sent = taskId
-          ? await this.api.generateTaskTasks(taskId)
-          : await this.api.generateTasks(projectId);
-        runId = sent.run_id;
-        this.rememberMessage(sent);
+        this.error.set('Open a Brainstorm or Research task to run Generate Tasks.');
       }
     });
     if (this.error() && taskId) this.adoptGlobalErrorAsTaskPanel(taskId);
     if (!runId || this.error()) return;
+    if (!layered) return;
     const generateRunId = runId;
     if (taskId) await this.watchTask(taskId, generateRunId);
     else await this.watchProject(projectId, generateRunId);
@@ -705,12 +753,39 @@ export class BattleplanStore {
     if (this.error() && taskId) this.adoptGlobalErrorAsTaskPanel(taskId);
   }
 
-  private async endGenerateTasksSession(taskId: string): Promise<void> {
+  private async completeActiveDiscoveryGraph(projectId: string, session: GenerateTasksSessionState): Promise<void> {
+    const entry: GraphDiscoveryIndexEntry = {
+      graph_id: session.activeGraphId,
+      root_task_id: session.sourceTaskId,
+      final_goal: session.activeGraphGoal,
+      task_summary: this.tasks()
+        .filter((t) => t.graph_id === session.activeGraphId)
+        .map((t) => `${t.title} (${t.output_type})`)
+        .join('; ') || session.activeGraphGoal,
+      completed_at: new Date().toISOString(),
+    };
+    const project = this.project();
+    const index = appendGraphIndexEntry(project?.graph_discovery_index, entry);
+    await this.run(async () => {
+      const updated = await this.api.updateProject(projectId, { graph_discovery_index: index });
+      this.projects.update((projects) => projects.map((p) => (p.project_id === updated.project_id ? updated : p)));
+    });
+  }
+
+  private async endGenerateTasksSession(taskId: string, projectId: string): Promise<void> {
     const session = this.generateTasksSession();
     if (!session || session.sourceTaskId !== taskId) return;
+    await this.run(async () => {
+      const text = buildLeafFanInRefactorPassMessage(this.project());
+      await this.api.generateLayeredTaskTasks(taskId, session.layer, text);
+    });
+    await this.completeActiveDiscoveryGraph(projectId, session);
     this.generateTasksSession.set(null);
+    await this.run(async () => {
+      await this.api.updateProject(projectId, { discovery_session: undefined });
+    });
     const task = this.tasks().find((item) => item.task_id === taskId);
-    if (task && task.output_type === 'research' && task.status === 'DOING') {
+    if (task && canRunGenerateTasks(task) && task.status === 'DOING') {
       await this.run(async () => {
         this.replaceTask(await this.api.updateTask(task.project_id, taskId, { status: 'DONE', manual: true }));
       });
@@ -732,10 +807,12 @@ export class BattleplanStore {
       await this.importGeneratedTasksFromReply(projectId, sourceTaskId, runId, session.layer);
     });
     if (this.error()) return;
-    const nextLayer = session.layer + 1;
-    this.generateTasksSession.set({ sourceTaskId, layer: nextLayer });
+    const sessionAfter = this.generateTasksSessionFor(sourceTaskId);
+    if (!sessionAfter) return;
+    const nextLayer = sessionAfter.layer + 1;
+    this.generateTasksSession.set({ ...sessionAfter, layer: nextLayer });
     await this.run(async () => {
-      const text = buildLayeredGenerateTasksNextLayerMessage(nextLayer);
+      const text = buildLayeredGenerateTasksNextLayerMessage(nextLayer, this.project(), sessionAfter);
       const sent = await this.api.generateLayeredTaskTasks(sourceTaskId, nextLayer, text);
       this.rememberMessage(sent);
     });
@@ -780,7 +857,15 @@ export class BattleplanStore {
       validation = this.validateGenerateTasksAssistantRun(runId, sourceTask, taskId, existingTasks, layer);
     }
 
-    const drafts = prepareGeneratedDraftsForLayer(validation.payload.tasks, sourceTask, layer);
+    const session = taskId ? this.generateTasksSessionFor(taskId) : null;
+    const drafts = prepareGeneratedDraftsForLayer(
+      validation.payload.tasks.map((draft) => ({
+        ...draft,
+        graph_id: draft.graph_id ?? session?.activeGraphId,
+      })),
+      sourceTask,
+      layer,
+    );
     const parentTaskId = layer <= 1 ? taskId : undefined;
     await this.api.createTasks(projectId, drafts, parentTaskId, validation.payload.edges);
     await this.reloadTasks();
@@ -878,6 +963,7 @@ export class BattleplanStore {
     sourceId: string;
     sourceKind: 'project' | 'task';
     direction: CardinalDirection;
+    taskKind?: import('../core/task-editor-kind').MindmapConnectTaskKind;
     output_type?: OutputType;
   }): Promise<string | null> {
     const projectId = this.projectId();
@@ -898,6 +984,9 @@ export class BattleplanStore {
     const map_x = Math.round(placement.x);
     const map_y = Math.round(placement.y);
     const depends_on = input.sourceKind === 'task' ? input.sourceId : undefined;
+    const taskFields = input.taskKind
+      ? fieldsFromTaskEditorKind(input.taskKind)
+      : { output_type: input.output_type ?? 'research' as OutputType };
     this.stopWatch();
     let taskId = '';
     await this.withEditorLoading(async () => {
@@ -906,7 +995,9 @@ export class BattleplanStore {
           depends_on,
           map_x,
           map_y,
-          output_type: input.output_type ?? 'research',
+          output_type: taskFields.output_type,
+          node_kind: taskFields.node_kind,
+          lifecycle_phase: taskFields.lifecycle_phase,
         });
         taskId = task.task_id;
         await this.reloadProjects();
@@ -977,6 +1068,7 @@ export class BattleplanStore {
     node_kind?: import('../core/task-node-kind').TaskNodeKind;
     lifecycle_phase?: import('../core/models').LifecyclePhase;
     repo_path?: string;
+    execute_config?: import('../core/n8n-workflow').ExecuteTaskConfig;
     dependencies: string[];
     sibling_dependencies: string[];
     research_agent_id?: string;
@@ -1099,7 +1191,18 @@ export class BattleplanStore {
     const taskId = task.task_id;
     const layeredSession = this.generateTasksSessionFor(taskId);
     if (layeredSession && isGenerateTasksEndCommand(message)) {
-      await this.endGenerateTasksSession(taskId);
+      await this.endGenerateTasksSession(taskId, task.project_id);
+    }
+    if (layeredSession && isGraphCompleteCommand(message)) {
+      await this.completeActiveDiscoveryGraph(task.project_id, layeredSession);
+      const nextGraphId = newDiscoveryGraphId();
+      this.generateTasksSession.set({
+        ...layeredSession,
+        layer: 1,
+        activeGraphId: nextGraphId,
+        activeGraphGoal: `${layeredSession.activeGraphGoal} (continued)`,
+      });
+      this.notice.set('Graph indexed. Starting next depth-first graph.');
     }
     this.clearTaskPanelError(taskId);
     this.patchTaskStatus(taskId, 'DOING');
