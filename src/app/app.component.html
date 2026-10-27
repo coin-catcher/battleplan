@@ -628,7 +628,7 @@
             @if (taskPageTab() === 'chat') {
                 <div class="task-chat-chrome">
                   <div class="task-meta-row">
-                    <label class="field task-meta-field grow">
+                    <label class="field task-meta-field task-title-field">
                       <span>Title</span>
                       <input [(ngModel)]="taskTitle" [name]="'taskTitle-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" />
                     </label>
@@ -735,7 +735,8 @@
                     </div>
                   }
                 </div>
-                <div #chatTranscript class="chat-transcript-scroll transcript task-chat-transcript" aria-live="polite">
+                <div class="task-chat-scroll-host">
+                  <div #chatTranscript class="chat-transcript-scroll transcript" aria-live="polite">
                     @for (item of timeline(); track item.id) {
                       @if (item.kind === 'message') {
                         <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
@@ -760,6 +761,7 @@
                     @if (store.pendingReply()) {
                       <p class="pending">Waiting for Cursor…</p>
                     }
+                  </div>
                 </div>
                 <div class="composer task-chat-composer">
                   <label class="sr-only" for="task-chat">Message</label>
