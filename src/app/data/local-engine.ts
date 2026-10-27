@@ -1215,7 +1215,7 @@ export class LocalEngine {
     const project = await this.requireProject(task.project_id);
     const token = requireProjectGithubPat(project);
     const { owner, repo } = repoSlugFromProject(project);
-    const base = project.starting_ref?.trim() || DEFAULT_MAIN_BRANCH;
+    const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
     const head = await this.resolveTaskMergeBranch(task, output?.branch, base, token, owner, repo);
     const pull = await createPullRequest({
       owner,

@@ -26,6 +26,36 @@ describe('branchNamesFromRun', () => {
 });
 
 describe('pickTaskAgentBranch', () => {
+  it('re-checks the preferred branch when cached compare scores are zero', async () => {
+    let compareCalls = 0;
+    const fetchImpl = async (input: RequestInfo): Promise<Response> => {
+      const url = decodeURIComponent(String(input));
+      compareCalls += 1;
+      if (url.includes('cursor/mindmap-965c')) {
+        const ahead = compareCalls === 1 ? 0 : 2;
+        return new Response(JSON.stringify({ ahead_by: ahead, commits: ahead ? [{ sha: 'abc', commit: { message: 'x' } }] : [] }), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    };
+    const original = globalThis.fetch;
+    globalThis.fetch = fetchImpl as typeof fetch;
+    try {
+      const picked = await pickTaskAgentBranch({
+        branchNames: ['cursor/mindmap-965c'],
+        preferred: 'cursor/mindmap-965c',
+        owner: 'org',
+        repo: 'repo',
+        base: 'develop',
+        token: 'pat',
+      });
+      expect(picked?.branch).toBe('cursor/mindmap-965c');
+      expect(picked?.aheadBy).toBe(2);
+      expect(compareCalls).toBeGreaterThanOrEqual(2);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it('prefers the branch with commits when a stale branch has none', async () => {
     const fetchImpl = async (input: RequestInfo): Promise<Response> => {
       const url = decodeURIComponent(String(input));
