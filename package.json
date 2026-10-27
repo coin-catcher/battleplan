@@ -1,6 +1,6 @@
 {
   "name": "battleplan",
-  "version": "1.0.38",
+  "version": "1.0.39",
   "description": "Strategy, tactics, design, and agent orchestration management dashboard for Cursor Cloud Agents.",
   "author": {
     "name": "coin-catcher",
