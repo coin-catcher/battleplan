@@ -544,6 +544,9 @@ export class AppComponent implements OnInit {
       this.saveCurrent();
       return;
     }
+    if (this.handleMindmapDeleteKey(event)) {
+      return;
+    }
     if (event.key !== 'Escape' || this.unsavedPromptOpen() || this.editingNodeId()) {
       return;
     }
@@ -2163,8 +2166,62 @@ export class AppComponent implements OnInit {
 
   deleteTask(task: ProjectTask): void {
     if (confirm(`Delete "${task.title}"?`)) {
-      void this.store.deleteTask(task.task_id);
+      void this.store.deleteTasks([task.task_id]);
     }
+  }
+
+  private handleMindmapDeleteKey(event: KeyboardEvent): boolean {
+    if (event.key !== 'Delete') return false;
+    if (this.unsavedPromptOpen() || this.editingNodeId() || this.store.busy()) return false;
+    if (this.projectViewMode() !== 'mindmap' || !this.store.project()) return false;
+    if (this.isEditableKeyboardTarget(event.target)) return false;
+
+    const groupIds = this.mapGroupSelection().filter((id) => id !== 'project');
+    if (groupIds.length >= 2) {
+      const tasks = groupIds
+        .map((id) => this.store.tasks().find((item) => item.task_id === id))
+        .filter((task): task is ProjectTask => Boolean(task));
+      if (tasks.length < 2) return false;
+      event.preventDefault();
+      const listing = tasks.map((task) => `• ${task.title}`).join('\n');
+      const ok = confirm(`Delete ${tasks.length} selected tasks?\n\n${listing}`);
+      if (ok) {
+        this.clearMapGroupSelection();
+        void this.store.deleteTasks(tasks.map((task) => task.task_id));
+      }
+      return true;
+    }
+
+    const taskId = groupIds.length === 1
+      ? groupIds[0]
+      : this.mindmapPanelSelectedTaskId();
+    if (!taskId) return false;
+
+    const task = this.store.tasks().find((item) => item.task_id === taskId);
+    if (!task) return false;
+
+    event.preventDefault();
+    if (confirm(`Delete "${task.title}"?`)) {
+      this.clearMapGroupSelection();
+      void this.store.deleteTasks([task.task_id]);
+    }
+    return true;
+  }
+
+  private mindmapPanelSelectedTaskId(): string | null {
+    const selection = this.store.selection();
+    if (selection.kind === 'subproject' || selection.kind === 'task' || selection.kind === 'code' || selection.kind === 'research') {
+      return selection.taskId ?? null;
+    }
+    return null;
+  }
+
+  private isEditableKeyboardTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.closest('.map-label-input')) return true;
+    const tag = target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    return target.isContentEditable;
   }
 }
 
