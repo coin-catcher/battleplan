@@ -31,5 +31,6 @@ export function mindmapShapeForTask(task: Pick<ProjectTask, 'output_type' | 'nod
   if (task.node_kind === 'architect') return 'architect';
   if (task.output_type === 'research') return 'research';
   if (task.output_type === 'subproject') return 'subproject';
+  if (task.output_type === 'execute' || task.output_type === 'add_workflow') return 'code';
   return 'code';
 }
