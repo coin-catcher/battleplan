@@ -14,7 +14,11 @@ import type {
 import { TASK_STATUSES } from './core/models';
 import {
   fieldsFromTaskEditorKind,
+  MINDMAP_CONNECT_TASK_KINDS,
+  mindmapConnectDefaultTitle,
+  mindmapConnectTaskLabel,
   taskEditorKindFromTask,
+  type MindmapConnectTaskKind,
   type TaskEditorKind,
 } from './core/task-editor-kind';
 import {
@@ -108,6 +112,8 @@ export class AppComponent implements OnInit {
   readonly themes = THEMES;
   private readonly zone = inject(NgZone);
   readonly statuses = TASK_STATUSES;
+  readonly mindmapConnectTaskKinds = MINDMAP_CONNECT_TASK_KINDS;
+  readonly mindmapConnectTaskLabel = mindmapConnectTaskLabel;
   readonly signingOpen = signal(false);
   readonly githubPatOpen = signal(false);
   readonly zoom = signal(1);
@@ -536,6 +542,9 @@ export class AppComponent implements OnInit {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
       this.saveCurrent();
+      return;
+    }
+    if (this.handleMindmapDeleteKey(event)) {
       return;
     }
     if (event.key !== 'Escape' || this.unsavedPromptOpen() || this.editingNodeId()) {
@@ -1890,24 +1899,19 @@ export class AppComponent implements OnInit {
     this.connectPanel.set(null);
   }
 
-  async confirmAddConnectedTask(outputType: 'code' | 'research' | 'subproject', event: Event): Promise<void> {
+  async confirmAddConnectedTask(taskKind: MindmapConnectTaskKind, event: Event): Promise<void> {
     event.stopPropagation();
     const panel = this.connectPanel();
     if (!panel) return;
     this.dismissConnectPanel();
-    const labels: Record<typeof outputType, string> = {
-      code: 'New code task',
-      research: 'New research task',
-      subproject: 'New subproject',
-    };
     await this.guardUnsavedChanges(async () => {
       const taskId = await this.store.addConnectedTask({
         sourceId: panel.sourceId,
         sourceKind: panel.sourceKind,
         direction: panel.direction,
-        output_type: outputType,
+        taskKind,
       });
-      if (taskId) this.startInlineEdit(taskId, labels[outputType]);
+      if (taskId) this.startInlineEdit(taskId, mindmapConnectDefaultTitle(taskKind));
     });
   }
 
@@ -2162,8 +2166,62 @@ export class AppComponent implements OnInit {
 
   deleteTask(task: ProjectTask): void {
     if (confirm(`Delete "${task.title}"?`)) {
-      void this.store.deleteTask(task.task_id);
+      void this.store.deleteTasks([task.task_id]);
     }
+  }
+
+  private handleMindmapDeleteKey(event: KeyboardEvent): boolean {
+    if (event.key !== 'Delete') return false;
+    if (this.unsavedPromptOpen() || this.editingNodeId() || this.store.busy()) return false;
+    if (this.projectViewMode() !== 'mindmap' || !this.store.project()) return false;
+    if (this.isEditableKeyboardTarget(event.target)) return false;
+
+    const groupIds = this.mapGroupSelection().filter((id) => id !== 'project');
+    if (groupIds.length >= 2) {
+      const tasks = groupIds
+        .map((id) => this.store.tasks().find((item) => item.task_id === id))
+        .filter((task): task is ProjectTask => Boolean(task));
+      if (tasks.length < 2) return false;
+      event.preventDefault();
+      const listing = tasks.map((task) => `• ${task.title}`).join('\n');
+      const ok = confirm(`Delete ${tasks.length} selected tasks?\n\n${listing}`);
+      if (ok) {
+        this.clearMapGroupSelection();
+        void this.store.deleteTasks(tasks.map((task) => task.task_id));
+      }
+      return true;
+    }
+
+    const taskId = groupIds.length === 1
+      ? groupIds[0]
+      : this.mindmapPanelSelectedTaskId();
+    if (!taskId) return false;
+
+    const task = this.store.tasks().find((item) => item.task_id === taskId);
+    if (!task) return false;
+
+    event.preventDefault();
+    if (confirm(`Delete "${task.title}"?`)) {
+      this.clearMapGroupSelection();
+      void this.store.deleteTasks([task.task_id]);
+    }
+    return true;
+  }
+
+  private mindmapPanelSelectedTaskId(): string | null {
+    const selection = this.store.selection();
+    if (selection.kind === 'subproject' || selection.kind === 'task' || selection.kind === 'code' || selection.kind === 'research') {
+      return selection.taskId ?? null;
+    }
+    return null;
+  }
+
+  private isEditableKeyboardTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.closest('.map-label-input')) return true;
+    const tag = target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    return target.isContentEditable;
   }
 }
 

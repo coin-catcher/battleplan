@@ -43,6 +43,16 @@ export async function pickTaskAgentBranch(input: {
   if (withCommits.length === 0) {
     const fallback = preferred && candidates.includes(preferred) ? preferred : candidates[candidates.length - 1];
     const match = scored.find((item) => item.branch === fallback);
+    if (fallback && (match?.aheadBy ?? 0) <= 0 && input.token?.trim()) {
+      try {
+        const compare = await compareBranches(input.owner, input.repo, input.base, fallback, input.token.trim());
+        if (compare.ahead_by > 0) {
+          return { branch: fallback, aheadBy: compare.ahead_by };
+        }
+      } catch {
+        // fall through to zero-ahead result below
+      }
+    }
     return { branch: fallback, aheadBy: match?.aheadBy ?? 0 };
   }
 

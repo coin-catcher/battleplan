@@ -292,9 +292,15 @@
               [style.top.px]="connectArrowPoint(panel.sourceId, panel.direction).y + 28"
               (pointerdown)="$event.stopPropagation()"
             >
-              <button type="button" class="map-panel-option primary" (click)="confirmAddConnectedTask('code', $event)">Add Code task</button>
-              <button type="button" class="map-panel-option ghost" (click)="confirmAddConnectedTask('research', $event)">Add Research task</button>
-              <button type="button" class="map-panel-option ghost" (click)="confirmAddConnectedTask('subproject', $event)">Add Subproject task</button>
+              @for (kind of mindmapConnectTaskKinds; track kind) {
+                <button
+                  type="button"
+                  class="map-panel-option"
+                  [class.primary]="kind === 'code'"
+                  [class.ghost]="kind !== 'code'"
+                  (click)="confirmAddConnectedTask(kind, $event)"
+                >{{ mindmapConnectTaskLabel(kind) }}</button>
+              }
             </div>
           }
           @if (convertPanel(); as convert) {
@@ -323,13 +329,6 @@
       <li data-status="DONE">DONE</li>
       <li data-status="BLOCKED">BLOCKED</li>
       <li data-status="ABANDONED">ABANDONED</li>
-    </ul>
-    <ul class="shape-legend" aria-label="Mindmap task shapes">
-      <li><span class="shape-swatch code" aria-hidden="true"></span> Code (process)</li>
-      <li><span class="shape-swatch research" aria-hidden="true"></span> Research (I/O)</li>
-      <li><span class="shape-swatch cloud" aria-hidden="true"></span> Brainstorm</li>
-      <li><span class="shape-swatch decision" aria-hidden="true"></span> Critique (decision)</li>
-      <li><span class="shape-swatch hexagon" aria-hidden="true"></span> Architecture</li>
     </ul>
   </aside>
 
@@ -413,7 +412,9 @@
           </div>
         }
       </section>
-    } @else { @switch (store.selection().kind) {
+    } @else {
+      <div class="editor-panel-host">
+        @switch (store.selection().kind) {
       @case ('create') {
         <section class="panel">
           <header class="panel-head">
@@ -623,6 +624,7 @@
               </div>
             }
 
+            <div class="task-page-body">
             @if (taskPageTab() === 'chat') {
               <div class="task-chat-panel">
                 <div class="task-chat-chrome">
@@ -933,6 +935,7 @@
                 </div>
               </div>
             }
+            </div>
           </section>
         }
       }
@@ -1476,7 +1479,9 @@
           <button type="button" class="primary" (click)="store.showCreate()">New project</button>
         </section>
       }
-    } }
+        }
+      </div>
+    }
   </main>
 </div>
 
