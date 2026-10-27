@@ -210,6 +210,9 @@ export class AppComponent implements OnInit {
   outputType: OutputType = 'code';
   taskEditorKind: TaskEditorKind = 'code';
   taskRepoPath = '';
+  taskExecuteMode: 'script' | 'workflow' = 'script';
+  taskExecuteScript = '';
+  taskExecuteWorkflowId = '';
   dependencies: string[] = [];
   siblingDependencies: string[] = [];
   readonly executeChildrenPrompt = signal<string | null>(null);
@@ -349,7 +352,10 @@ export class AppComponent implements OnInit {
       this.taskInitialPrompt = taskInitialPrompt(task);
       this.outputType = task.output_type;
       this.taskEditorKind = taskEditorKindFromTask(task);
-      this.taskRepoPath = task.repo_path ?? `research/${task.project_id}/${task.task_id}/`;
+      this.taskRepoPath = task.repo_path ?? `battleplan/projects/${task.project_id}/tasks/${task.task_id}/outputs/`;
+      this.taskExecuteMode = task.execute_config?.mode ?? 'script';
+      this.taskExecuteScript = task.execute_config?.script ?? '';
+      this.taskExecuteWorkflowId = task.execute_config?.workflow_id ?? '';
       this.dependencies = [...task.dependencies];
       this.siblingDependencies = [...(task.sibling_dependencies ?? [])];
       this.taskResearchAgentId = task.research_agent_id ?? '';
@@ -662,6 +668,15 @@ export class AppComponent implements OnInit {
     return fieldsFromTaskEditorKind(this.taskEditorKind);
   }
 
+  private taskExecuteConfigPatch(): import('./core/n8n-workflow').ExecuteTaskConfig | undefined {
+    if (this.taskEditorKind !== 'execute') return undefined;
+    return {
+      mode: this.taskExecuteMode,
+      script: this.taskExecuteMode === 'script' ? this.taskExecuteScript : undefined,
+      workflow_id: this.taskExecuteMode === 'workflow' ? this.taskExecuteWorkflowId || undefined : undefined,
+    };
+  }
+
   private async persistEditorChanges(): Promise<boolean> {
     const selection = this.store.selection();
     if (selection.kind === 'project') {
@@ -692,6 +707,7 @@ export class AppComponent implements OnInit {
         node_kind: kindFields.node_kind,
         lifecycle_phase: kindFields.lifecycle_phase,
         repo_path: this.taskRepoPath.trim() || undefined,
+        execute_config: this.taskExecuteConfigPatch(),
         dependencies: this.dependencies,
         sibling_dependencies: this.siblingDependencies,
         research_agent_id: this.taskResearchAgentId,
@@ -1996,6 +2012,7 @@ export class AppComponent implements OnInit {
       node_kind: kindFields.node_kind,
       lifecycle_phase: kindFields.lifecycle_phase,
       repo_path: this.taskRepoPath.trim() || undefined,
+      execute_config: this.taskExecuteConfigPatch(),
       dependencies: this.dependencies,
       sibling_dependencies: this.siblingDependencies,
       research_agent_id: this.taskResearchAgentId,

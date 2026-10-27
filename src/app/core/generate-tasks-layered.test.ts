@@ -28,7 +28,10 @@ describe('generate-tasks-layered', () => {
   });
 
   it('layer proposal mentions approve/disapprove/change and titles only', () => {
-    const text = buildLayeredGenerateTasksProposalMessage(researchTask(), 1);
+    const text = buildLayeredGenerateTasksProposalMessage(researchTask(), 1, null, {
+      activeGraphId: 'graph-1',
+      activeGraphGoal: 'Plan feature',
+    });
     expect(text).toMatch(/approve/i);
     expect(text).toMatch(/disapprove/i);
     expect(text).toMatch(/change/i);

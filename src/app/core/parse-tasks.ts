@@ -118,6 +118,15 @@ function parseGeneratedTaskRecords(parsed: unknown[]): TaskDraft[] {
     const repoPath = typeof record['repo_path'] === 'string' && record['repo_path'].trim()
       ? record['repo_path'].trim()
       : undefined;
+    const patternId = typeof record['pattern_id'] === 'string' ? record['pattern_id'].trim() : undefined;
+    const graphId = typeof record['graph_id'] === 'string' ? record['graph_id'].trim() : undefined;
+    const crossGraph = record['cross_graph_edit'] === true ? true : undefined;
+    const crossRationale = typeof record['cross_graph_edit_rationale'] === 'string'
+      ? record['cross_graph_edit_rationale'].trim()
+      : undefined;
+    const templateIds = Array.isArray(record['template_ids'])
+      ? record['template_ids'].filter((v): v is string => typeof v === 'string').map((v) => v.trim()).filter(Boolean)
+      : undefined;
     return {
       title,
       prompt,
@@ -129,7 +138,12 @@ function parseGeneratedTaskRecords(parsed: unknown[]): TaskDraft[] {
       brief,
       connector_kind: connector,
       lifecycle_phase: lifecyclePhase,
-      repo_path: repoPath,
+      ...(repoPath ? { repo_path: repoPath } : {}),
+      ...(patternId ? { pattern_id: patternId } : {}),
+      ...(graphId ? { graph_id: graphId } : {}),
+      ...(templateIds?.length ? { template_ids: templateIds } : {}),
+      ...(crossGraph ? { cross_graph_edit: true } : {}),
+      ...(crossRationale ? { cross_graph_edit_rationale: crossRationale } : {}),
     };
   });
 }

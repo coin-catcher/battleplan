@@ -605,7 +605,7 @@
                 </button>
                 <div class="task-page-action-group">
                   @if (task.output_type === 'research') {
-                    <button type="button" class="accent" [disabled]="store.busy() || store.generateTasksSessionFor(task.task_id)" (click)="store.generateTasks()">Generate Tasks</button>
+                    <button type="button" class="accent" [disabled]="store.busy() || store.generateTasksSessionFor(task.task_id) || !store.canRunGenerateTasksOnSelectedTask()" (click)="store.generateTasks()">Generate Tasks</button>
                   }
                   @if (task.status === 'REVIEW') {
                     <button type="button" class="accent" [disabled]="chatActionsLocked()" (click)="approveTask()">Approve</button>
@@ -639,9 +639,11 @@
                         <option value="brainstorming">brainstorm</option>
                         <option value="critiquing">critique</option>
                         <option value="architect">architecture</option>
-                        <option value="subproject">subproject</option>
-                      </select>
-                    </label>
+                      <option value="subproject">subproject</option>
+                      <option value="execute">execute</option>
+                      <option value="add_workflow">add workflow</option>
+                    </select>
+                  </label>
                     <label class="field task-meta-field">
                       <span>Status</span>
                       <select [value]="task.status" (change)="onStatusChange(task.task_id, $event)">
@@ -684,10 +686,35 @@
                   @if (taskWorkflowHint(task); as hint) {
                     <p class="task-workflow-hint">{{ hint }}</p>
                   }
-                  <label class="field task-meta-field grow">
-                    <span>Repo folder</span>
-                    <input [(ngModel)]="taskRepoPath" [name]="'taskRepoPath-' + task.task_id" placeholder="research/…/" (blur)="onEditorFieldBlur()" />
+                <label class="field task-meta-field grow">
+                  <span>Repo folder</span>
+                  <input [(ngModel)]="taskRepoPath" [name]="'taskRepoPath-' + task.task_id" placeholder="battleplan/projects/…/tasks/…/outputs/" (blur)="onEditorFieldBlur()" />
+                </label>
+                @if (taskEditorKind === 'execute') {
+                  <label class="field">
+                    <span>Execute mode</span>
+                    <select [(ngModel)]="taskExecuteMode" [name]="'taskExecuteMode-' + task.task_id" (change)="onEditorFieldAutoSave()">
+                      <option value="script">script</option>
+                      <option value="workflow">n8n workflow</option>
+                    </select>
                   </label>
+                  @if (taskExecuteMode === 'script') {
+                    <label class="field grow">
+                      <span>Script / command</span>
+                      <textarea rows="3" [(ngModel)]="taskExecuteScript" [name]="'taskExecuteScript-' + task.task_id" (blur)="onEditorFieldBlur()"></textarea>
+                    </label>
+                  } @else {
+                    <label class="field">
+                      <span>Workflow</span>
+                      <select [(ngModel)]="taskExecuteWorkflowId" [name]="'taskExecuteWorkflow-' + task.task_id" (change)="onEditorFieldAutoSave()">
+                        <option value="">Select workflow…</option>
+                        @for (wf of store.project()?.workflows ?? []; track wf.workflow_id) {
+                          <option [value]="wf.workflow_id">{{ wf.name }}</option>
+                        }
+                      </select>
+                    </label>
+                  }
+                }
                   @if (!taskAgentStarted(task)) {
                     <div class="task-pre-chat">
                       <label class="field">
