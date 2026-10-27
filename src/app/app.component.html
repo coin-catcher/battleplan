@@ -675,24 +675,15 @@
                       <span class="task-meta-hint">Subproject (no agent)</span>
                     }
                   </div>
-                  @if (store.generateTasksSessionFor(task.task_id); as gtSession) {
-                    <p class="task-workflow-hint generate-tasks-session">
-                      @if (gtSession.phase === 'partition') {
-                        Start Discovery — Layer 1 partitions: approve / disapprove / change until agreed, then JSON import.
-                      } @else if (gtSession.phase === 'depth_first') {
-                        Start Discovery — depth-first on "{{ gtSession.focusPartitionTitle ?? gtSession.activeGraphGoal }}": approve / disapprove / change; send GRAPH DONE when this partition graph is ready for JSON.
-                      } @else if (gtSession.phase === 'cluster_review') {
-                        Start Discovery — final cluster review with the agent.
-                      } @else {
-                        Start Discovery — architecture fan-in pass (JSON import when the agent responds).
-                      }
-                    </p>
+                  @if (store.generateTasksSessionFor(task.task_id)) {
                     <div class="discovery-start-actions">
                       <button type="button" class="ghost" [disabled]="store.busy()" (click)="store.importDiscoveryJsonFromLastAssistant()">Import task graph from last reply</button>
                     </div>
                   }
                   @if (taskWorkflowHint(task); as hint) {
-                    <p class="task-workflow-hint">{{ hint }}</p>
+                    @if (!isDiscoveryRootTask(task)) {
+                      <p class="task-workflow-hint">{{ hint }}</p>
+                    }
                   }
                 <label class="field task-repo-field">
                   <span>Repo folder</span>
@@ -733,7 +724,7 @@
                         <button type="button" class="accent" [disabled]="store.busy() || !taskInitialPrompt.trim() || !store.canRunGenerateTasksOnSelectedTask()" (click)="startDiscovery()">Start Discovery</button>
                       </div>
                     </div>
-                  } @else if (!taskAgentStarted(task)) {
+                  } @else if (!taskAgentStarted(task) && !isDiscoveryRootTask(task)) {
                     <div class="task-pre-chat">
                       <label class="field">
                         <span>Initial Prompt</span>

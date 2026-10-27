@@ -31,7 +31,7 @@ describe('task-workflow-lifecycle', () => {
 
   it('includes grilling instructions in brainstorm preamble', () => {
     const text = workflowExecutionPreamble('brainstorming', task({ node_kind: 'brainstorm' }), project);
-    expect(text).toMatch(/Generate Tasks/i);
+    expect(text).toMatch(/Start Discovery/i);
     expect(text).toMatch(/distilled understanding/i);
   });
 
