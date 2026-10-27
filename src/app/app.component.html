@@ -622,7 +622,6 @@
 
             <div class="task-page-body">
             @if (taskPageTab() === 'chat') {
-              <div class="task-chat-panel">
                 <div class="task-chat-chrome">
                   <div class="task-meta-row">
                     <label class="field task-meta-field grow">
@@ -695,7 +694,7 @@
                   @if (taskWorkflowHint(task); as hint) {
                     <p class="task-workflow-hint">{{ hint }}</p>
                   }
-                <label class="field task-meta-field grow">
+                <label class="field task-repo-field">
                   <span>Repo folder</span>
                   <input [(ngModel)]="taskRepoPath" [name]="'taskRepoPath-' + task.task_id" placeholder="battleplan/projects/…/tasks/…/outputs/" (blur)="onEditorFieldBlur()" />
                 </label>
@@ -708,7 +707,7 @@
                     </select>
                   </label>
                   @if (taskExecuteMode === 'script') {
-                    <label class="field grow">
+                    <label class="field task-repo-field">
                       <span>Script / command</span>
                       <textarea rows="3" [(ngModel)]="taskExecuteScript" [name]="'taskExecuteScript-' + task.task_id" (blur)="onEditorFieldBlur()"></textarea>
                     </label>
@@ -753,8 +752,7 @@
                     </div>
                   }
                 </div>
-                <div class="task-chat-conversation">
-                  <div #chatTranscript class="chat-transcript-scroll transcript" aria-live="polite">
+                <div #chatTranscript class="chat-transcript-scroll transcript task-chat-transcript" aria-live="polite">
                     @for (item of timeline(); track item.id) {
                       @if (item.kind === 'message') {
                         <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
@@ -779,25 +777,23 @@
                     @if (store.pendingReply()) {
                       <p class="pending">Waiting for Cursor…</p>
                     }
-                  </div>
-                  @if (!isDiscoveryRootTask(task) || taskDiscoveryInterviewActive(task)) {
-                    <div class="composer task-chat-composer">
-                      <label class="sr-only" for="task-chat">Message</label>
-                      <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat." [disabled]="!taskChatComposerEnabled(task)"></textarea>
-                      <div class="composer-actions">
-                        @if (store.chatActionPending() === 'send') {
-                          <span class="inline-spinner" aria-label="Sending message"></span>
-                        } @else {
-                          <button type="button" class="primary" [disabled]="chatSendDisabled() || !chatDraft.trim() || !taskChatComposerEnabled(task)" (click)="sendChat()">Send</button>
-                          @if (store.chatAgentSyncing()) {
-                            <span class="inline-spinner" aria-label="Syncing chat with agent"></span>
-                          }
-                        }
-                      </div>
-                    </div>
-                  }
                 </div>
-              </div>
+                @if (!isDiscoveryRootTask(task) || taskDiscoveryInterviewActive(task)) {
+                  <div class="composer task-chat-composer">
+                    <label class="sr-only" for="task-chat">Message</label>
+                    <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat." [disabled]="!taskChatComposerEnabled(task)"></textarea>
+                    <div class="composer-actions">
+                      @if (store.chatActionPending() === 'send') {
+                        <span class="inline-spinner" aria-label="Sending message"></span>
+                      } @else {
+                        <button type="button" class="primary" [disabled]="chatSendDisabled() || !chatDraft.trim() || !taskChatComposerEnabled(task)" (click)="sendChat()">Send</button>
+                        @if (store.chatAgentSyncing()) {
+                          <span class="inline-spinner" aria-label="Syncing chat with agent"></span>
+                        }
+                      }
+                    </div>
+                  </div>
+                }
             }
 
             @if (taskPageTab() === 'details') {
