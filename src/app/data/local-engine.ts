@@ -950,6 +950,12 @@ export class LocalEngine {
       ? await this.repo.getCodeOutput(taskId)
       : await this.repo.getResearchOutput(taskId);
     const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
+    if (!task.cursor_agent_id && agentId) {
+      task.cursor_agent_id = agentId;
+      if (!task.cursor_chat_link && project.cursor_chat_link) {
+        task.cursor_chat_link = project.cursor_chat_link;
+      }
+    }
     const run = await this.cursor.createRun(agentId, {
       text: wrapAgentRunPrompt(text, { baseBranch: base, agentBranch: output?.branch }),
       mode: task.cursor_agent_id ? 'agent' : 'plan',
@@ -1125,14 +1131,25 @@ export class LocalEngine {
     await this.seedAgentLibraryForProject(task.project_id);
     const agents = await this.repo.listProjectAgents(task.project_id);
     const researchAgent = findProjectAgent(agents, resolveResearchAgentId(task, project));
+    const discoveryActive = project.discovery_session?.source_task_id === taskId;
     if (task.output_type === 'research' && usesResearchChatAdapter(researchAgent)) {
-      if (task.status === 'TODO') {
+      if (task.status === 'TODO' && !discoveryActive) {
         throw new Error('Execute the task with its Initial Prompt before sending chat messages.');
       }
       return this.sendResearchLibraryMessage(task, project, researchAgent!, feedback, 'feedback');
     }
     if (!task.cursor_agent_id) {
-      throw new Error('Execute the task with its Initial Prompt before sending chat messages.');
+      if (discoveryActive && project.cursor_agent_id) {
+        task.cursor_agent_id = project.cursor_agent_id;
+        if (!task.cursor_chat_link && project.cursor_chat_link) {
+          task.cursor_chat_link = project.cursor_chat_link;
+        }
+        this.markTaskDoingOnAgentChat(task);
+        task.updated_at = this.now();
+        await this.repo.saveTask(task);
+      } else {
+        throw new Error('Execute the task with its Initial Prompt before sending chat messages.');
+      }
     }
     const active = await this.requireTaskById(taskId);
     if (!active.cursor_agent_id) throw new Error('Start the task before sending feedback.');
