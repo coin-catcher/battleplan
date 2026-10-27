@@ -57,6 +57,12 @@ export class BattleplanApi {
     default_code_agent_id?: string;
     status?: TaskStatus;
     manual?: boolean;
+    graph_discovery_index?: import('../core/graph-discovery').GraphDiscoveryIndexEntry[];
+    discovery_session?: import('../core/graph-discovery').DiscoverySessionState;
+    task_templates?: import('../core/n8n-workflow').TaskTemplateDefinition[];
+    workflows?: import('../core/n8n-workflow').N8nWorkflowDefinition[];
+    template_instance_run?: import('../core/n8n-workflow').TemplateInstanceRunState;
+    battleplan_storage_version?: number;
   }): Promise<Project> {
     return this.engine.updateProject(projectId, patch);
   }
@@ -106,7 +112,17 @@ export class BattleplanApi {
       dependencies: Array.isArray(patch['dependencies']) ? patch['dependencies'] as string[] : undefined,
       sibling_dependencies: Array.isArray(patch['sibling_dependencies']) ? patch['sibling_dependencies'] as string[] : undefined,
       output_type: patch['output_type'] === 'code' || patch['output_type'] === 'research' || patch['output_type'] === 'subproject'
+        || patch['output_type'] === 'execute' || patch['output_type'] === 'add_workflow'
         ? patch['output_type']
+        : undefined,
+      graph_id: typeof patch['graph_id'] === 'string' ? patch['graph_id'] : undefined,
+      pattern_id: typeof patch['pattern_id'] === 'string' ? patch['pattern_id'] : undefined,
+      template_ids: Array.isArray(patch['template_ids']) ? patch['template_ids'] as string[] : undefined,
+      execute_config: patch['execute_config'] as import('../core/n8n-workflow').ExecuteTaskConfig | undefined,
+      add_workflow_config: patch['add_workflow_config'] as import('../core/n8n-workflow').AddWorkflowTaskConfig | undefined,
+      repo_path: typeof patch['repo_path'] === 'string' ? patch['repo_path'] : undefined,
+      cross_graph_edit_rationale: typeof patch['cross_graph_edit_rationale'] === 'string'
+        ? patch['cross_graph_edit_rationale']
         : undefined,
       status: typeof patch['status'] === 'string' ? patch['status'] as TaskStatus : undefined,
       manual: typeof patch['manual'] === 'boolean' ? patch['manual'] : undefined,

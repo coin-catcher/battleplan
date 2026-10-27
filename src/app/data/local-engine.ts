@@ -42,6 +42,10 @@ import {
   repoSlugFromProject,
 } from '../core/github-client';
 import { TASK_STATUSES } from '../core/models';
+import { battleplanTaskRepoPath } from '../core/battleplan-storage';
+import { migrateProjectStorageToV2 } from '../core/battleplan-storage-migrate';
+import { buildInputDocumentsSection } from '../core/input-documents';
+import type { N8nWorkflowDefinition } from '../core/n8n-workflow';
 import type { CursorClient, CursorRun } from './cursor-browser';
 import { normalizeRepoUrl } from './cursor-browser';
 import type { BattleplanRepository } from './repository';
@@ -139,6 +143,10 @@ interface NormalizedDraft {
   connector_kind?: TaskConnectorKind;
   lifecycle_phase?: import('../core/models').LifecyclePhase;
   repo_path?: string;
+  graph_id?: string;
+  pattern_id?: string;
+  template_ids?: string[];
+  cross_graph_edit_rationale?: string;
 }
 
 function briefBuildInput(
@@ -283,6 +291,12 @@ export class LocalEngine {
     default_code_agent_id?: string;
     status?: TaskStatus;
     manual?: boolean;
+    graph_discovery_index?: Project['graph_discovery_index'];
+    discovery_session?: Project['discovery_session'];
+    task_templates?: Project['task_templates'];
+    workflows?: Project['workflows'];
+    template_instance_run?: Project['template_instance_run'];
+    battleplan_storage_version?: number;
   }): Promise<Project> {
     const project = await this.requireProject(projectId);
     const changes: string[] = [];
@@ -336,6 +350,27 @@ export class LocalEngine {
       if (patch.status !== rootProjectStatus(project)) changes.push(`Status: ${patch.status}`);
       applyProjectStatusTransition(project, patch.status, patch.manual ? 'manual' : 'execute_or_send');
     }
+    if (patch.graph_discovery_index !== undefined) {
+      project.graph_discovery_index = patch.graph_discovery_index;
+      changes.push('Task graph index updated.');
+    }
+    if (patch.discovery_session !== undefined) {
+      project.discovery_session = patch.discovery_session;
+    }
+    if (patch.task_templates !== undefined) {
+      project.task_templates = patch.task_templates;
+      changes.push('Task templates updated.');
+    }
+    if (patch.workflows !== undefined) {
+      project.workflows = patch.workflows;
+      changes.push('Workflow catalog updated.');
+    }
+    if (patch.template_instance_run !== undefined) {
+      project.template_instance_run = patch.template_instance_run;
+    }
+    if (patch.battleplan_storage_version !== undefined) {
+      project.battleplan_storage_version = patch.battleplan_storage_version;
+    }
     project.updated_at = this.now();
     await this.repo.saveProject(project);
     if (changes.length > 0) {
@@ -375,13 +410,20 @@ export class LocalEngine {
     if (migrated) {
       await this.repo.saveTasks(tasks);
     }
+    const storage = migrateProjectStorageToV2(project, tasks);
+    let workingTasks = tasks;
+    if (storage.migratedTasks > 0 || (project.battleplan_storage_version ?? 1) < 2) {
+      await this.repo.saveProject(storage.project);
+      await this.repo.saveTasks(storage.tasks);
+      project = storage.project;
+      workingTasks = storage.tasks;
+    }
     if (!project.task_graph_edges?.length) {
-      project = await this.requireProject(projectId);
-      project.task_graph_edges = rebuildGraphEdgesFromLegacy(tasks);
+      project.task_graph_edges = rebuildGraphEdgesFromLegacy(workingTasks);
       project.updated_at = this.now();
       await this.repo.saveProject(project);
     }
-    return tasks;
+    return workingTasks;
   }
 
   async updateProjectTaskGraph(projectId: string, edges: import('../core/task-graph').TaskGraphEdge[]): Promise<ProjectTask[]> {
@@ -415,8 +457,8 @@ export class LocalEngine {
     const outputType = input.output_type ?? 'research';
     const dar = input.dar !== undefined ? input.dar.trim() : defaultDarForOutputType(outputType);
     const initialPrompt = input.initial_prompt?.trim() ?? '';
-    if (outputType !== 'code' && outputType !== 'research' && outputType !== 'subproject') {
-      throw new Error('output_type must be code, research, or subproject.');
+    if (!isAllowedOutputType(outputType)) {
+      throw new Error('output_type is not supported for manual task create.');
     }
     const parentId = input.depends_on?.trim();
     if (parentId && !existing.some((task) => task.task_id === parentId)) {
@@ -517,13 +559,17 @@ export class LocalEngine {
         updated_at: timestamp,
       };
       const repoPath = (draft.repo_path?.trim()
-        || `research/${projectId}/${taskId}/`).replace(/\/?$/, '/');
+        || battleplanTaskRepoPath(projectId, taskId)).replace(/\/?$/, '/');
       return {
         ...skeleton,
         brief: completeBriefForTask({ ...skeleton, lifecycle_phase: draft.lifecycle_phase } as ProjectTask, project, draft.brief),
         connector_kind: draft.connector_kind ?? defaultConnectorForTask({ ...skeleton, lifecycle_phase: draft.lifecycle_phase } as ProjectTask, project),
         lifecycle_phase: draft.lifecycle_phase,
         repo_path: repoPath,
+        graph_id: draft.graph_id,
+        pattern_id: draft.pattern_id,
+        template_ids: draft.template_ids,
+        cross_graph_edit_rationale: draft.cross_graph_edit_rationale,
       };
     });
     for (const task of created) {
@@ -595,6 +641,13 @@ export class LocalEngine {
     node_kind?: import('../core/task-node-kind').TaskNodeKind;
     lifecycle_phase?: import('../core/models').LifecyclePhase;
     repo_path?: string;
+    graph_id?: string;
+    pattern_id?: string;
+    template_ids?: string[];
+    execute_config?: import('../core/n8n-workflow').ExecuteTaskConfig;
+    add_workflow_config?: import('../core/n8n-workflow').AddWorkflowTaskConfig;
+    output_manifest?: import('../core/battleplan-storage').TaskOutputManifest;
+    cross_graph_edit_rationale?: string;
     status?: TaskStatus;
     manual?: boolean;
     map_x?: number;
@@ -629,8 +682,8 @@ export class LocalEngine {
       task.initial_prompt = initial || undefined;
     }
     if (patch.output_type !== undefined) {
-      if (patch.output_type !== 'code' && patch.output_type !== 'research' && patch.output_type !== 'subproject') {
-        throw new Error('output_type must be code, research, or subproject.');
+      if (!isAllowedOutputType(patch.output_type)) {
+        throw new Error('output_type is not supported.');
       }
       if (patch.output_type !== task.output_type) {
         if (patch.output_type !== 'subproject' && task.output_type !== 'subproject') {
@@ -714,6 +767,15 @@ export class LocalEngine {
       const next = patch.repo_path.trim().replace(/\/?$/, '/');
       if (next !== (task.repo_path ?? '')) changes.push('Repo folder updated.');
       task.repo_path = next || undefined;
+    }
+    if (patch.graph_id !== undefined) task.graph_id = patch.graph_id || undefined;
+    if (patch.pattern_id !== undefined) task.pattern_id = patch.pattern_id || undefined;
+    if (patch.template_ids !== undefined) task.template_ids = patch.template_ids;
+    if (patch.execute_config !== undefined) task.execute_config = patch.execute_config;
+    if (patch.add_workflow_config !== undefined) task.add_workflow_config = patch.add_workflow_config;
+    if (patch.output_manifest !== undefined) task.output_manifest = patch.output_manifest;
+    if (patch.cross_graph_edit_rationale !== undefined) {
+      task.cross_graph_edit_rationale = patch.cross_graph_edit_rationale || undefined;
     }
     task.updated_at = this.now();
     await this.repo.saveTask(task);
@@ -1020,6 +1082,14 @@ export class LocalEngine {
     }
     if (task.output_type === 'subproject') {
       throw new Error('Open the subproject and use Execute there.');
+    }
+    if (task.output_type === 'execute') {
+      return this.runExecuteTask(task);
+    }
+    if (task.output_type === 'add_workflow') {
+      const initial = taskInitialPrompt(task);
+      if (!initial) throw new Error('Initial prompt is required.');
+      return this.launchWithFirstMessage(task, initial);
     }
     if (!isDispatchableNodeKind(task.node_kind)) {
       throw new Error('Decision and fog nodes are completed in Battleplan, not dispatched to agents.');
@@ -1785,6 +1855,8 @@ export class LocalEngine {
       lines.push('Task brief:', formatTaskBriefMarkdown(task.brief));
     }
     const tasks = await this.repo.listTasks(task.project_id);
+    const inputDocs = buildInputDocumentsSection(task, tasks);
+    if (inputDocs) lines.push(inputDocs);
     const upstream = this.upstreamHandoffMarkdown(task, tasks);
     if (upstream) lines.push(upstream);
     const siblingIds = siblingDependencyIds(task);
@@ -2088,6 +2160,66 @@ export class LocalEngine {
     if (!task) throw new Error('Task not found.');
     return task;
   }
+
+  private async runExecuteTask(task: ProjectTask): Promise<ChatMessage> {
+    const config = task.execute_config;
+    if (!config?.mode) {
+      throw new Error('Configure execute mode (script or workflow) before running this task.');
+    }
+    const project = await this.requireProject(task.project_id);
+    const tasks = await this.repo.listTasks(task.project_id);
+    const inputDocs = buildInputDocumentsSection(task, tasks);
+    let summary: string;
+    if (config.mode === 'script') {
+      if (!config.script?.trim()) throw new Error('Script text is required for execute tasks.');
+      summary = [
+        'Execute task (script mode) — v1 records intent; run the script in your environment or via a future Battleplan runner.',
+        inputDocs,
+        'Script:',
+        config.script.trim(),
+      ].filter(Boolean).join('\n\n');
+    } else {
+      const workflow = project.workflows?.find((w) => w.workflow_id === config.workflow_id);
+      if (!workflow) throw new Error('Select a workflow from the project catalog.');
+      summary = [
+        'Execute task (n8n workflow mode) — trigger on local n8n instance.',
+        `Workflow: ${workflow.name} (n8n id: ${workflow.n8n_workflow_id})`,
+        `Parameters: ${JSON.stringify(config.workflow_parameters ?? {})}`,
+        inputDocs,
+      ].filter(Boolean).join('\n\n');
+    }
+    applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+    applyTaskStatusTransition(task, 'REVIEW', 'agent_finished');
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+    return this.record({
+      scope: 'task',
+      project_id: task.project_id,
+      task_id: task.task_id,
+      role: 'assistant',
+      content: summary,
+      intent: 'chat',
+    });
+  }
+
+  async registerWorkflow(projectId: string, workflow: N8nWorkflowDefinition): Promise<Project> {
+    const project = await this.requireProject(projectId);
+    const list = [...(project.workflows ?? [])];
+    const index = list.findIndex((w) => w.workflow_id === workflow.workflow_id);
+    if (index >= 0) list[index] = workflow;
+    else list.push(workflow);
+    project.workflows = list;
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    return project;
+  }
+}
+
+function isAllowedOutputType(value: OutputType): boolean {
+  return value === 'code' || value === 'research' || value === 'subproject'
+    || value === 'execute' || value === 'add_workflow';
 }
 
 function isStatus(value: string): value is TaskStatus {
@@ -2147,8 +2279,12 @@ function outputTypesOf(value: string, index: number): OutputType[] {
       types.add('code');
       continue;
     }
+    if (token === 'execute' || token === 'add_workflow' || token === 'subproject') {
+      types.add(token);
+      continue;
+    }
     if (token !== 'code' && token !== 'research') {
-      throw new Error(`Task ${index} output_type must be "code" or "research".`);
+      throw new Error(`Task ${index} output_type must be "code", "research", "execute", or "add_workflow".`);
     }
     types.add(token);
   }
