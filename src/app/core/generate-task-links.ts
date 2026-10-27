@@ -1,7 +1,10 @@
-import type { ProjectTask, Selection, TaskDraft } from './models';
+import type { ChatArtifact, ChatMessage } from './models';
+import type { ProjectTask, TaskDraft } from './models';
 import { pickPrimaryParentId } from './dependencies';
+import type { GenerateTasksSessionState } from './generate-tasks-layered';
+import { tryParseGeneratedTasksFromSources } from './generate-tasks-layered';
 
-export function generateTasksSourceTaskId(selection: Selection): string | undefined {
+export function generateTasksSourceTaskId(selection: import('./models').Selection): string | undefined {
   if (selection.kind === 'task' || selection.kind === 'subproject' || selection.kind === 'code' || selection.kind === 'research') {
     return selection.taskId;
   }
@@ -56,7 +59,6 @@ export function bindSequentialDraftLinks(
       const otherId = matches[0];
       const otherIndex = indexById.get(otherId);
       if (otherIndex === undefined || otherIndex === index) continue;
-      // Later tasks in the batch wait for earlier ones (one-way ordering avoids graph cycles).
       if (index > otherIndex) {
         addPair(task.task_id, otherId);
       }
@@ -69,8 +71,6 @@ export function bindSequentialDraftLinks(
   }
 }
 
-/** Prefer task-id anchoring; keep title-based depends_on fill as a fallback for the agent JSON. */
-/** Wire draft depends_on titles to parent.dependencies → child task ids (mindmap tree). */
 export function bindDraftDependsOn(
   existing: ProjectTask[],
   created: ProjectTask[],
@@ -118,4 +118,36 @@ export function prepareGeneratedDraftsForLayer(
     ...draft,
     depends_on: (draft.depends_on ?? []).filter(Boolean).length > 0 ? draft.depends_on : [parentTitle],
   }));
+}
+
+/** Discovery: partition layer under root; depth-first layers under the active partition title. */
+export function prepareGeneratedDraftsForDiscovery(
+  drafts: TaskDraft[],
+  sourceTask: ProjectTask | undefined,
+  session: Pick<GenerateTasksSessionState, 'phase' | 'layer' | 'focusPartitionTitle'>,
+): TaskDraft[] {
+  if (session.phase === 'partition') {
+    return prepareGeneratedDraftsForLayer(drafts, sourceTask, 1);
+  }
+  const anchor = session.focusPartitionTitle?.trim();
+  if (!anchor) return drafts;
+  if (session.layer <= 1) {
+    return drafts.map((draft) => ({
+      ...draft,
+      depends_on: (draft.depends_on ?? []).filter(Boolean).length > 0 ? draft.depends_on : [anchor],
+    }));
+  }
+  return drafts;
+}
+
+export function findLastAssistantTaskGraph(
+  messages: ChatMessage[],
+  artifacts: ChatArtifact[],
+): ChatMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== 'assistant') continue;
+    if (tryParseGeneratedTasksFromSources(message.content, artifacts)) return message;
+  }
+  return null;
 }
