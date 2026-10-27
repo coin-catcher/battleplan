@@ -42,3 +42,44 @@ export function fieldsFromTaskEditorKind(kind: TaskEditorKind): {
 export function isResearchFamilyOutputType(outputType: OutputType): boolean {
   return outputType === 'research';
 }
+
+/** Task kinds offered when adding a connected node from a mindmap edge arrow. */
+export type MindmapConnectTaskKind = Exclude<TaskEditorKind, 'execute'>;
+
+export const MINDMAP_CONNECT_TASK_KINDS: readonly MindmapConnectTaskKind[] = [
+  'brainstorming',
+  'research',
+  'code',
+  'critiquing',
+  'architect',
+  'add_workflow',
+  'subproject',
+];
+
+const MINDMAP_CONNECT_LABELS: Record<MindmapConnectTaskKind, string> = {
+  brainstorming: 'Add brainstorm task',
+  research: 'Add research task',
+  code: 'Add code task',
+  critiquing: 'Add critique task',
+  architect: 'Add architecture task',
+  add_workflow: 'Add workflow task',
+  subproject: 'Add subproject',
+};
+
+const MINDMAP_CONNECT_DEFAULT_TITLES: Record<MindmapConnectTaskKind, string> = {
+  brainstorming: 'New brainstorm task',
+  research: 'New research task',
+  code: 'New code task',
+  critiquing: 'New critique task',
+  architect: 'New architecture task',
+  add_workflow: 'New workflow task',
+  subproject: 'New subproject',
+};
+
+export function mindmapConnectTaskLabel(kind: MindmapConnectTaskKind): string {
+  return MINDMAP_CONNECT_LABELS[kind];
+}
+
+export function mindmapConnectDefaultTitle(kind: MindmapConnectTaskKind): string {
+  return MINDMAP_CONNECT_DEFAULT_TITLES[kind];
+}

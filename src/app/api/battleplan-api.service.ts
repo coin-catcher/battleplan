@@ -98,6 +98,8 @@ export class BattleplanApi {
     dar?: string;
     initial_prompt?: string;
     output_type?: OutputType;
+    node_kind?: import('../core/task-node-kind').TaskNodeKind;
+    lifecycle_phase?: import('../core/models').LifecyclePhase;
     map_x?: number;
     map_y?: number;
   }): Promise<ProjectTask> {

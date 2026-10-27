@@ -14,7 +14,11 @@ import type {
 import { TASK_STATUSES } from './core/models';
 import {
   fieldsFromTaskEditorKind,
+  MINDMAP_CONNECT_TASK_KINDS,
+  mindmapConnectDefaultTitle,
+  mindmapConnectTaskLabel,
   taskEditorKindFromTask,
+  type MindmapConnectTaskKind,
   type TaskEditorKind,
 } from './core/task-editor-kind';
 import {
@@ -108,6 +112,8 @@ export class AppComponent implements OnInit {
   readonly themes = THEMES;
   private readonly zone = inject(NgZone);
   readonly statuses = TASK_STATUSES;
+  readonly mindmapConnectTaskKinds = MINDMAP_CONNECT_TASK_KINDS;
+  readonly mindmapConnectTaskLabel = mindmapConnectTaskLabel;
   readonly signingOpen = signal(false);
   readonly githubPatOpen = signal(false);
   readonly zoom = signal(1);
@@ -1890,24 +1896,19 @@ export class AppComponent implements OnInit {
     this.connectPanel.set(null);
   }
 
-  async confirmAddConnectedTask(outputType: 'code' | 'research' | 'subproject', event: Event): Promise<void> {
+  async confirmAddConnectedTask(taskKind: MindmapConnectTaskKind, event: Event): Promise<void> {
     event.stopPropagation();
     const panel = this.connectPanel();
     if (!panel) return;
     this.dismissConnectPanel();
-    const labels: Record<typeof outputType, string> = {
-      code: 'New code task',
-      research: 'New research task',
-      subproject: 'New subproject',
-    };
     await this.guardUnsavedChanges(async () => {
       const taskId = await this.store.addConnectedTask({
         sourceId: panel.sourceId,
         sourceKind: panel.sourceKind,
         direction: panel.direction,
-        output_type: outputType,
+        taskKind,
       });
-      if (taskId) this.startInlineEdit(taskId, labels[outputType]);
+      if (taskId) this.startInlineEdit(taskId, mindmapConnectDefaultTitle(taskKind));
     });
   }
 
