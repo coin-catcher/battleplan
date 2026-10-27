@@ -928,11 +928,23 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   overflow: hidden;
 }
 
-.task-page-body > .task-chat-panel,
 .task-page-body > .task-details-panel,
 .task-page-body > .task-graph-panel {
   flex: 1 1 0;
   min-height: 0;
+}
+
+.task-page-body > .task-chat-chrome {
+  flex: none;
+}
+
+.task-page-body > .task-chat-transcript {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.task-page-body > .task-chat-composer {
+  flex: none;
 }
 
 .task-panel-error {
@@ -1037,42 +1049,17 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   background: color-mix(in srgb, #c0392b 10%, var(--field-bg));
 }
 
-.task-chat-panel {
-  flex: 1 1 0;
-  min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 10px;
-  overflow: hidden;
-}
-
 .task-chat-chrome {
-  min-height: 0;
+  flex: none;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.task-chat-conversation {
-  min-height: 0;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 10px;
-  overflow: hidden;
-}
-
-.panel.task-page .task-chat-conversation > .chat-transcript-scroll {
-  min-height: 0;
-  height: 100%;
-  overflow: auto;
-}
-
-.panel.task-page .task-chat-conversation > .chat-transcript-scroll.transcript {
-  min-height: 0;
-}
-
-.panel.task-page .task-chat-composer {
-  min-height: 0;
+.task-repo-field {
+  flex: none;
+  width: 100%;
+  align-self: stretch;
 }
 
 .task-meta-row {
@@ -1105,6 +1092,27 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.discovery-start-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.discovery-summary-list {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.discovery-summary-patterns {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .task-details-panel,

@@ -446,7 +446,6 @@
             <div class="chat-editor-chrome">
               <div class="toolbar">
                 <button type="button" class="danger" [disabled]="store.busy()" (click)="deleteProject()">Delete</button>
-                <button type="button" class="accent" [disabled]="store.busy()" (click)="store.generateTasks()">Generate Tasks</button>
                 @if (projectRootStatus(project) === 'REVIEW') {
                   <button type="button" class="accent" [disabled]="chatActionsLocked()" (click)="approveProjectRelease()">Approve and merge</button>
                 }
@@ -605,9 +604,6 @@
                   </svg>
                 </button>
                 <div class="task-page-action-group">
-                  @if (task.output_type === 'research') {
-                    <button type="button" class="accent" [disabled]="store.busy() || store.generateTasksSessionFor(task.task_id) || !store.canRunGenerateTasksOnSelectedTask()" (click)="store.generateTasks()">Generate Tasks</button>
-                  }
                   @if (task.status === 'REVIEW') {
                     <button type="button" class="accent" [disabled]="chatActionsLocked()" (click)="approveTask()">Approve</button>
                   }
@@ -626,7 +622,6 @@
 
             <div class="task-page-body">
             @if (taskPageTab() === 'chat') {
-              <div class="task-chat-panel">
                 <div class="task-chat-chrome">
                   <div class="task-meta-row">
                     <label class="field task-meta-field grow">
@@ -682,13 +677,24 @@
                   </div>
                   @if (store.generateTasksSessionFor(task.task_id); as gtSession) {
                     <p class="task-workflow-hint generate-tasks-session">
-                      Generate Tasks — Layer {{ gtSession.layer }}: reply with approve, disapprove, change (per number), or END to finish.
+                      @if (gtSession.phase === 'partition') {
+                        Start Discovery — Layer 1 partitions: approve / disapprove / change until agreed, then JSON import.
+                      } @else if (gtSession.phase === 'depth_first') {
+                        Start Discovery — depth-first on "{{ gtSession.focusPartitionTitle ?? gtSession.activeGraphGoal }}": approve / disapprove / change; send GRAPH DONE when this partition graph is ready for JSON.
+                      } @else if (gtSession.phase === 'cluster_review') {
+                        Start Discovery — final cluster review with the agent.
+                      } @else {
+                        Start Discovery — architecture fan-in pass (JSON import when the agent responds).
+                      }
                     </p>
+                    <div class="discovery-start-actions">
+                      <button type="button" class="ghost" [disabled]="store.busy()" (click)="store.importDiscoveryJsonFromLastAssistant()">Import task graph from last reply</button>
+                    </div>
                   }
                   @if (taskWorkflowHint(task); as hint) {
                     <p class="task-workflow-hint">{{ hint }}</p>
                   }
-                <label class="field task-meta-field grow">
+                <label class="field task-repo-field">
                   <span>Repo folder</span>
                   <input [(ngModel)]="taskRepoPath" [name]="'taskRepoPath-' + task.task_id" placeholder="battleplan/projects/…/tasks/…/outputs/" (blur)="onEditorFieldBlur()" />
                 </label>
@@ -701,7 +707,7 @@
                     </select>
                   </label>
                   @if (taskExecuteMode === 'script') {
-                    <label class="field grow">
+                    <label class="field task-repo-field">
                       <span>Script / command</span>
                       <textarea rows="3" [(ngModel)]="taskExecuteScript" [name]="'taskExecuteScript-' + task.task_id" (blur)="onEditorFieldBlur()"></textarea>
                     </label>
@@ -717,7 +723,17 @@
                     </label>
                   }
                 }
-                  @if (!taskAgentStarted(task)) {
+                  @if (showDiscoverySetup(task)) {
+                    <div class="task-pre-chat discovery-setup">
+                      <label class="field">
+                        <span>Approximate Goal</span>
+                        <textarea rows="3" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Rough goal for discovery; refined as tasks are generated."></textarea>
+                      </label>
+                      <div class="discovery-start-actions">
+                        <button type="button" class="accent" [disabled]="store.busy() || !taskInitialPrompt.trim() || !store.canRunGenerateTasksOnSelectedTask()" (click)="startDiscovery()">Start Discovery</button>
+                      </div>
+                    </div>
+                  } @else if (!taskAgentStarted(task)) {
                     <div class="task-pre-chat">
                       <label class="field">
                         <span>Initial Prompt</span>
@@ -736,8 +752,7 @@
                     </div>
                   }
                 </div>
-                <div class="task-chat-conversation">
-                  <div #chatTranscript class="chat-transcript-scroll transcript" aria-live="polite">
+                <div #chatTranscript class="chat-transcript-scroll transcript task-chat-transcript" aria-live="polite">
                     @for (item of timeline(); track item.id) {
                       @if (item.kind === 'message') {
                         <article class="bubble" [class.user]="item.message.role === 'user'" [class.assistant]="item.message.role === 'assistant'" [class.change]="item.message.role === 'change'">
@@ -762,23 +777,23 @@
                     @if (store.pendingReply()) {
                       <p class="pending">Waiting for Cursor…</p>
                     }
-                  </div>
+                </div>
+                @if (!isDiscoveryRootTask(task) || taskDiscoveryInterviewActive(task)) {
                   <div class="composer task-chat-composer">
                     <label class="sr-only" for="task-chat">Message</label>
-                    <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat." [disabled]="!taskAgentStarted(task)"></textarea>
+                    <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat." [disabled]="!taskChatComposerEnabled(task)"></textarea>
                     <div class="composer-actions">
                       @if (store.chatActionPending() === 'send') {
                         <span class="inline-spinner" aria-label="Sending message"></span>
                       } @else {
-                        <button type="button" class="primary" [disabled]="chatSendDisabled() || !chatDraft.trim() || !taskAgentStarted(task)" (click)="sendChat()">Send</button>
+                        <button type="button" class="primary" [disabled]="chatSendDisabled() || !chatDraft.trim() || !taskChatComposerEnabled(task)" (click)="sendChat()">Send</button>
                         @if (store.chatAgentSyncing()) {
                           <span class="inline-spinner" aria-label="Syncing chat with agent"></span>
                         }
                       }
                     </div>
                   </div>
-                </div>
-              </div>
+                }
             }
 
             @if (taskPageTab() === 'details') {
@@ -1526,6 +1541,35 @@
       <div class="modal-actions">
         <button type="button" class="ghost" (click)="answerExecuteChildren(false)">No</button>
         <button type="button" class="primary" (click)="answerExecuteChildren(true)">Yes</button>
+      </div>
+    </section>
+  </div>
+}
+
+@if (store.discoveryCompleteSummary(); as discoverySummary) {
+  <div class="modal-backdrop" role="presentation">
+    <section class="modal discovery-summary-modal" role="dialog" aria-labelledby="discovery-summary-title">
+      <header class="panel-head">
+        <h2 id="discovery-summary-title">Start Discovery complete</h2>
+        <p class="eyebrow">{{ discoverySummary.sourceTaskTitle }}</p>
+      </header>
+      @if (discoverySummary.partitions.length) {
+        <ul class="discovery-summary-list">
+          @for (part of discoverySummary.partitions; track part.graphId) {
+            <li>
+              <strong>{{ part.partitionTitle }}</strong>
+              — {{ part.taskCount }} task{{ part.taskCount === 1 ? '' : 's' }}
+              @if (part.patterns.length) {
+                <span class="discovery-summary-patterns">Patterns: {{ part.patterns.join(', ') }}</span>
+              }
+            </li>
+          }
+        </ul>
+      } @else {
+        <p>No indexed partition graphs yet.</p>
+      }
+      <div class="modal-actions">
+        <button type="button" class="primary" (click)="store.dismissDiscoveryCompleteSummary()">OK</button>
       </div>
     </section>
   </div>
