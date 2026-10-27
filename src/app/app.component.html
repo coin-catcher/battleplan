@@ -412,7 +412,9 @@
           </div>
         }
       </section>
-    } @else { @switch (store.selection().kind) {
+    } @else {
+      <div class="editor-panel-host">
+        @switch (store.selection().kind) {
       @case ('create') {
         <section class="panel">
           <header class="panel-head">
@@ -622,6 +624,7 @@
               </div>
             }
 
+            <div class="task-page-body">
             @if (taskPageTab() === 'chat') {
               <div class="task-chat-panel">
                 <div class="task-chat-chrome">
@@ -932,6 +935,7 @@
                 </div>
               </div>
             }
+            </div>
           </section>
         }
       }
@@ -1475,7 +1479,9 @@
           <button type="button" class="primary" (click)="store.showCreate()">New project</button>
         </section>
       }
-    } }
+        }
+      </div>
+    }
   </main>
 </div>
 
