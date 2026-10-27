@@ -1,4 +1,5 @@
-import type { ProjectTask, TaskOutputManifest } from './models';
+import type { TaskOutputManifest } from './battleplan-storage';
+import type { ProjectTask } from './models';
 
 export function collectUpstreamTaskIds(task: ProjectTask, all: ProjectTask[]): string[] {
   const byId = new Map(all.map((t) => [t.task_id, t]));

@@ -134,7 +134,6 @@ export class BattleplanApi {
       regenerate_brief: patch['regenerate_brief'] === true ? true : undefined,
       node_kind: patch['node_kind'] as import('../core/task-node-kind').TaskNodeKind | undefined,
       lifecycle_phase: patch['lifecycle_phase'] as import('../core/models').LifecyclePhase | undefined,
-      repo_path: typeof patch['repo_path'] === 'string' ? patch['repo_path'] : undefined,
     });
   }
 
