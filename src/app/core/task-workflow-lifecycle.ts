@@ -31,12 +31,12 @@ export function applyWorkflowKindBriefDefaults(brief: TaskBrief, kind: WorkflowT
         'Interactive brainstorming (Matt-style grilling): multi-round dialogue with the human.',
         'Each round: absorb user feedback and questions, add new ideas and facts (web search, repo data, prior context),',
         'distill an updated shared understanding, then ask focused follow-up questions.',
-        'Stop when the human declares the brainstorm ready to hand off (typically Generate Tasks → task graph).',
+        'Stop when the human declares the brainstorm ready to hand off (typically Start Discovery → task graph).',
       ].join(' ');
       next.acceptance = 'Human agrees the distilled plan is ready; optional task graph generated from this task.';
       next.verify = 'Human marks REVIEW/DONE when satisfied; no code merge from this task.';
       next.forbidden = 'Do not implement product code or open PRs; do not skip human confirmation rounds.';
-      next.report = 'End each round with: distilled understanding, open questions, suggested next step (often Generate Tasks).';
+      next.report = 'End each round with: distilled understanding, open questions, suggested next step (often Start Discovery).';
       break;
     case 'research':
       next.scope = [
@@ -94,8 +94,8 @@ export function workflowExecutionPreamble(
         'You are the first step in idea → task graph → execute tasks → committed PR.',
         'Use the user initial prompt as the seed idea. Expand with web search, repository context, and reasoning.',
         'Each assistant turn must include: (1) distilled understanding, (2) new questions for the user.',
-        'When the user says the brainstorm is ready, summarize handoff context for Generate Tasks (goals, constraints, suggested task breakdown).',
-        'Do not run downstream code tasks yourself; the human uses Generate Tasks on this node.',
+        'When the user says the brainstorm is ready, summarize handoff context for Start Discovery (goals, constraints, suggested task breakdown).',
+        'Do not run downstream code tasks yourself; the human uses Start Discovery on this node.',
       ].join('\n\n');
     case 'research':
       return [
@@ -135,7 +135,7 @@ export function workflowFeedbackPreamble(task: ProjectTask): string | undefined 
     `Continue the ${kind} workflow (grilling round).`,
     'Incorporate the user message, update distilled understanding, and ask any new clarifying questions.',
     kind === 'brainstorming'
-      ? 'If the user signals readiness, produce a handoff summary suitable for Generate Tasks.'
+      ? 'If the user signals readiness, produce a handoff summary suitable for Start Discovery.'
       : kind === 'research'
         ? 'Re-check definition of done; state blockers if deliverables are not yet sufficient.'
         : kind === 'critiquing'
@@ -149,7 +149,7 @@ export function workflowHintForTask(
 ): string | undefined {
   switch (inferWorkflowKindFromTask(task)) {
     case 'brainstorming':
-      return 'Brainstorming: multi-round chat until you are ready, then use Generate Tasks to create the task graph.';
+      return 'Brainstorming: multi-round chat until you are ready, then use Start Discovery to create the task graph.';
     case 'research':
       return 'Research: confirm definition of done in chat before deep research; the agent validates outputs before completion.';
     case 'critiquing':
