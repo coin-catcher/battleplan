@@ -1288,26 +1288,35 @@ export class BattleplanStore {
   }
 
   async deleteTask(taskId: string): Promise<void> {
-    const task = this.tasks().find((item) => item.task_id === taskId);
-    if (!task) return;
-    this.stopDoingBackgroundWatch(taskId);
-    this.taskChatCache.delete(taskId);
+    await this.deleteTasks([taskId]);
+  }
+
+  async deleteTasks(taskIds: readonly string[]): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    const unique = [...new Set(taskIds.map((id) => id.trim()).filter(Boolean))].filter((id) => id !== 'project');
+    if (unique.length === 0) return;
+    for (const taskId of unique) {
+      this.stopDoingBackgroundWatch(taskId);
+      this.taskChatCache.delete(taskId);
+    }
     this.stopWatch();
     await this.run(async () => {
-      await this.api.deleteTask(task.project_id, taskId);
+      for (const taskId of unique) {
+        const task = this.tasks().find((item) => item.task_id === taskId);
+        if (!task) continue;
+        await this.api.deleteTask(task.project_id, taskId);
+      }
       await this.reloadTasks();
       this.selection.set({ kind: 'project' });
       this.messages.set([]);
       this.artifacts.set([]);
-      this.notice.set('Task deleted.');
+      this.notice.set(unique.length === 1 ? 'Task deleted.' : `${unique.length} tasks deleted.`);
     });
-    const projectId = this.projectId();
-    if (projectId) {
-      await this.run(async () => {
-        this.applyConversation(await this.api.listProjectMessages(projectId));
-      });
-      this.continueProjectWatch(projectId);
-    }
+    await this.run(async () => {
+      this.applyConversation(await this.api.listProjectMessages(projectId));
+    });
+    this.continueProjectWatch(projectId);
   }
 
   async saveCodeOutput(output: Omit<TaskCodeOutput, 'task_id'>): Promise<void> {
