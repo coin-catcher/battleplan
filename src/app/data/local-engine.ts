@@ -292,7 +292,7 @@ export class LocalEngine {
     status?: TaskStatus;
     manual?: boolean;
     graph_discovery_index?: Project['graph_discovery_index'];
-    discovery_session?: Project['discovery_session'];
+    discovery_session?: Project['discovery_session'] | null;
     task_templates?: Project['task_templates'];
     workflows?: Project['workflows'];
     template_instance_run?: Project['template_instance_run'];
@@ -354,8 +354,9 @@ export class LocalEngine {
       project.graph_discovery_index = patch.graph_discovery_index;
       changes.push('Task graph index updated.');
     }
-    if (patch.discovery_session !== undefined) {
-      project.discovery_session = patch.discovery_session;
+    if (Object.prototype.hasOwnProperty.call(patch, 'discovery_session')) {
+      if (patch.discovery_session) project.discovery_session = patch.discovery_session;
+      else delete project.discovery_session;
     }
     if (patch.task_templates !== undefined) {
       project.task_templates = patch.task_templates;

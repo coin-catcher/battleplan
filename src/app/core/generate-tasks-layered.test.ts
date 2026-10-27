@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildLayeredGenerateTasksProposalMessage,
+  buildPartitionProposalMessage,
   isGenerateTasksEndCommand,
 } from './generate-tasks-layered';
 import type { ProjectTask } from './models';
@@ -28,14 +28,17 @@ describe('generate-tasks-layered', () => {
   });
 
   it('layer proposal mentions approve/disapprove/change and titles only', () => {
-    const text = buildLayeredGenerateTasksProposalMessage(researchTask(), 1, null, {
+    const text = buildPartitionProposalMessage(researchTask(), null, {
       activeGraphId: 'graph-1',
       activeGraphGoal: 'Plan feature',
     });
+    expect(text).toMatch(/Start Discovery/i);
     expect(text).toMatch(/approve/i);
     expect(text).toMatch(/disapprove/i);
     expect(text).toMatch(/change/i);
     expect(text).toMatch(/titles only/i);
     expect(text).toMatch(/no JSON yet/i);
+    expect(text).toMatch(/partition/i);
+    expect(text).toMatch(/Layer 1/i);
   });
 });
