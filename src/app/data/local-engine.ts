@@ -447,6 +447,8 @@ export class LocalEngine {
     dar?: string;
     initial_prompt?: string;
     output_type?: OutputType;
+    node_kind?: TaskNodeKind;
+    lifecycle_phase?: import('../core/models').LifecyclePhase;
     depends_on?: string;
     map_x?: number;
     map_y?: number;
@@ -481,6 +483,8 @@ export class LocalEngine {
     };
     if (input.map_x !== undefined) task.map_x = input.map_x;
     if (input.map_y !== undefined) task.map_y = input.map_y;
+    if (input.node_kind !== undefined) task.node_kind = input.node_kind;
+    if (input.lifecycle_phase !== undefined) task.lifecycle_phase = input.lifecycle_phase;
     const project = await this.requireProject(projectId);
     if (outputType === 'research' && project.default_research_agent_id) {
       task.research_agent_id = project.default_research_agent_id;

@@ -292,9 +292,15 @@
               [style.top.px]="connectArrowPoint(panel.sourceId, panel.direction).y + 28"
               (pointerdown)="$event.stopPropagation()"
             >
-              <button type="button" class="map-panel-option primary" (click)="confirmAddConnectedTask('code', $event)">Add Code task</button>
-              <button type="button" class="map-panel-option ghost" (click)="confirmAddConnectedTask('research', $event)">Add Research task</button>
-              <button type="button" class="map-panel-option ghost" (click)="confirmAddConnectedTask('subproject', $event)">Add Subproject task</button>
+              @for (kind of mindmapConnectTaskKinds; track kind) {
+                <button
+                  type="button"
+                  class="map-panel-option"
+                  [class.primary]="kind === 'code'"
+                  [class.ghost]="kind !== 'code'"
+                  (click)="confirmAddConnectedTask(kind, $event)"
+                >{{ mindmapConnectTaskLabel(kind) }}</button>
+              }
             </div>
           }
           @if (convertPanel(); as convert) {

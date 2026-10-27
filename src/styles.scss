@@ -598,7 +598,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 168px;
+  min-width: 188px;
+  max-height: min(320px, 52vh);
+  overflow-y: auto;
 }
 .map-panel-option {
   width: 100%;

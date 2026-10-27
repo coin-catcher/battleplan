@@ -21,6 +21,7 @@ import type {
 import { defaultOptionValues, getAgentTypeDefinition } from '../core/agent-types';
 import { isAgentDraftId, newDraftAgentId } from '../core/agent-id';
 import type { AgentEditorSaveInput } from '../api/battleplan-api.service';
+import { fieldsFromTaskEditorKind } from '../core/task-editor-kind';
 import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
 import {
   generateTasksSourceTaskId,
@@ -962,6 +963,7 @@ export class BattleplanStore {
     sourceId: string;
     sourceKind: 'project' | 'task';
     direction: CardinalDirection;
+    taskKind?: import('../core/task-editor-kind').MindmapConnectTaskKind;
     output_type?: OutputType;
   }): Promise<string | null> {
     const projectId = this.projectId();
@@ -982,6 +984,9 @@ export class BattleplanStore {
     const map_x = Math.round(placement.x);
     const map_y = Math.round(placement.y);
     const depends_on = input.sourceKind === 'task' ? input.sourceId : undefined;
+    const taskFields = input.taskKind
+      ? fieldsFromTaskEditorKind(input.taskKind)
+      : { output_type: input.output_type ?? 'research' as OutputType };
     this.stopWatch();
     let taskId = '';
     await this.withEditorLoading(async () => {
@@ -990,7 +995,9 @@ export class BattleplanStore {
           depends_on,
           map_x,
           map_y,
-          output_type: input.output_type ?? 'research',
+          output_type: taskFields.output_type,
+          node_kind: taskFields.node_kind,
+          lifecycle_phase: taskFields.lifecycle_phase,
         });
         taskId = task.task_id;
         await this.reloadProjects();
