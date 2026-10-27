@@ -720,22 +720,22 @@
                     </label>
                   }
                 }
-                  @if (!taskAgentStarted(task)) {
+                  @if (showDiscoverySetup(task)) {
+                    <div class="task-pre-chat discovery-setup">
+                      <label class="field">
+                        <span>Approximate Goal</span>
+                        <textarea rows="3" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Rough goal for discovery; refined as tasks are generated."></textarea>
+                      </label>
+                      <div class="discovery-start-actions">
+                        <button type="button" class="accent" [disabled]="store.busy() || !taskInitialPrompt.trim() || !store.canRunGenerateTasksOnSelectedTask()" (click)="startDiscovery()">Start Discovery</button>
+                      </div>
+                    </div>
+                  } @else if (!taskAgentStarted(task)) {
                     <div class="task-pre-chat">
                       <label class="field">
-                        @if (isDiscoveryRootTask(task)) {
-                          <span>Approximate Goal</span>
-                          <textarea rows="3" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Rough goal for discovery; refined as tasks are generated."></textarea>
-                        } @else {
-                          <span>Initial Prompt</span>
-                          <textarea rows="3" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this task."></textarea>
-                        }
+                        <span>Initial Prompt</span>
+                        <textarea rows="3" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this task."></textarea>
                       </label>
-                      @if (isDiscoveryRootTask(task)) {
-                        <div class="discovery-start-actions">
-                          <button type="button" class="accent" [disabled]="store.busy() || store.generateTasksSessionFor(task.task_id) || !store.canRunGenerateTasksOnSelectedTask()" (click)="store.generateTasks()">Start Discovery</button>
-                        </div>
-                      }
                       <div class="composer-actions">
                         @if (store.chatActionPending() === 'execute') {
                           <span class="inline-spinner" aria-label="Executing task"></span>
@@ -776,20 +776,22 @@
                       <p class="pending">Waiting for Cursor…</p>
                     }
                   </div>
-                  <div class="composer task-chat-composer">
-                    <label class="sr-only" for="task-chat">Message</label>
-                    <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat." [disabled]="!taskAgentStarted(task)"></textarea>
-                    <div class="composer-actions">
-                      @if (store.chatActionPending() === 'send') {
-                        <span class="inline-spinner" aria-label="Sending message"></span>
-                      } @else {
-                        <button type="button" class="primary" [disabled]="chatSendDisabled() || !chatDraft.trim() || !taskAgentStarted(task)" (click)="sendChat()">Send</button>
-                        @if (store.chatAgentSyncing()) {
-                          <span class="inline-spinner" aria-label="Syncing chat with agent"></span>
+                  @if (!isDiscoveryRootTask(task) || taskDiscoveryInterviewActive(task)) {
+                    <div class="composer task-chat-composer">
+                      <label class="sr-only" for="task-chat">Message</label>
+                      <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat." [disabled]="!taskChatComposerEnabled(task)"></textarea>
+                      <div class="composer-actions">
+                        @if (store.chatActionPending() === 'send') {
+                          <span class="inline-spinner" aria-label="Sending message"></span>
+                        } @else {
+                          <button type="button" class="primary" [disabled]="chatSendDisabled() || !chatDraft.trim() || !taskChatComposerEnabled(task)" (click)="sendChat()">Send</button>
+                          @if (store.chatAgentSyncing()) {
+                            <span class="inline-spinner" aria-label="Syncing chat with agent"></span>
+                          }
                         }
-                      }
+                      </div>
                     </div>
-                  </div>
+                  }
                 </div>
               </div>
             }

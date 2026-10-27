@@ -1200,6 +1200,24 @@ export class AppComponent implements OnInit {
     return taskIsDiscoveryRoot(task);
   }
 
+  /** Discovery interview: user may Send after the agent’s first reply. */
+  taskDiscoveryInterviewActive(task: ProjectTask): boolean {
+    if (!taskIsDiscoveryRoot(task)) return false;
+    return this.store.messages().some((message) => message.role === 'assistant');
+  }
+
+  /** Approximate Goal + Start Discovery before the first agent reply. */
+  showDiscoverySetup(task: ProjectTask): boolean {
+    return taskIsDiscoveryRoot(task)
+      && !this.store.generateTasksSessionFor(task.task_id)
+      && !this.taskDiscoveryInterviewActive(task);
+  }
+
+  taskChatComposerEnabled(task: ProjectTask): boolean {
+    if (taskIsDiscoveryRoot(task)) return this.taskDiscoveryInterviewActive(task);
+    return this.taskAgentStarted(task);
+  }
+
   taskAgentStarted(task: ProjectTask): boolean {
     const project = this.store.project();
     if (!project) return Boolean(task.cursor_agent_id);
@@ -1221,6 +1239,15 @@ export class AppComponent implements OnInit {
       if (!this.store.error()) await this.store.executeTask();
     } finally {
       this.store.chatActionPending.set(null);
+    }
+  }
+
+  async startDiscovery(): Promise<void> {
+    try {
+      await this.saveTask();
+      if (!this.store.error()) await this.store.generateTasks();
+    } catch {
+      // saveTask / generateTasks surface errors on the store
     }
   }
 
