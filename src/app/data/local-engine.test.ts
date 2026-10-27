@@ -426,6 +426,42 @@ describe('LocalEngine', () => {
     expect(client.prompts.length).toBe(2);
   });
 
+  it('allows chat after Start Discovery without Execute', async () => {
+    const repo = new MemoryRepository();
+    const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      cursor_agent_id: 'agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+      discovery_session: {
+        source_task_id: 'task-disc',
+        mode: 'depth_first',
+        phase: 'partition',
+        active_graph_id: 'graph-1',
+        active_graph_goal: 'Discovery',
+        layer: 1,
+      },
+    });
+    const task = await engine.createTask('p1', {
+      title: 'Brainstorm feature',
+      output_type: 'research',
+      initial_prompt: 'Rough goal',
+      node_kind: 'brainstorm',
+    });
+    task.task_id = 'task-disc';
+    await repo.saveTask(task);
+    await engine.generateLayeredTaskTasks('task-disc', 1, 'Start Discovery partition pass');
+    const linked = await repo.getTask('task-disc');
+    expect(linked?.cursor_agent_id).toBe('agent-1');
+    expect(linked?.status).toBe('DOING');
+    await expect(engine.sendTaskMessage('task-disc', 'approve 1')).resolves.toBeDefined();
+  });
+
   it('marks a task DOING when chat feedback is sent', async () => {
     const repo = new MemoryRepository();
     const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => 'id-1');
