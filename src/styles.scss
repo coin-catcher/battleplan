@@ -1114,6 +1114,20 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   gap: 10px;
 }
 
+.discovery-summary-list {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.discovery-summary-patterns {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .task-details-panel,
 .task-graph-panel {
   flex: 1 1 0;

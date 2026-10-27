@@ -1,23 +1,25 @@
 import type { ChatArtifact, Project } from './models';
 import type { ProjectTask } from './models';
-import { battleplanTaskRepoPath } from './battleplan-storage';
 import { formatGraphIndexForPrompt } from './graph-discovery';
 import { parseGeneratedTasksFromSources, type ParsedGeneratedTasks } from './parse-tasks';
 import { JSON_TASK_LIST_RULES } from './generate-tasks-shared';
 
-export type DiscoveryPhase = 'partition' | 'depth_first';
+export type DiscoveryPhase = 'partition' | 'depth_first' | 'cluster_review' | 'architecture_pass';
 
 export interface GenerateTasksSessionState {
   sourceTaskId: string;
-  /** partition = Layer-1 problem-space split only; depth_first = complete one partition branch at a time */
   phase: DiscoveryPhase;
   layer: number;
   activeGraphId: string;
   activeGraphGoal: string;
-  /** Layer-1 partition titles after first JSON import */
   partitionTitles: string[];
   partitionIndex: number;
   focusPartitionTitle?: string;
+  /** User sent GRAPH DONE; next JSON import finalizes this partition graph. */
+  awaitingGraphJson?: boolean;
+  /** Process-end orchestration after all partition graphs are indexed. */
+  closingStep?: 'cluster_review' | 'architecture';
+  architecturePromptSent?: boolean;
 }
 
 export function isGenerateTasksEndCommand(message: string): boolean {
@@ -30,22 +32,33 @@ export function isGraphCompleteCommand(message: string): boolean {
   return token === 'GRAPH DONE' || token.startsWith('GRAPH DONE ');
 }
 
-const DEPTH_FIRST_RULES = [
-  'After Layer 1 (partition), switch to **depth-first**: pick one Layer-1 partition and expand its task graph completely before moving to the next partition.',
-  'While expanding a partition, do not propose tasks for other Layer-1 partitions.',
-  'When a partition graph is complete, the user may send GRAPH DONE; Battleplan indexes it and moves to the next partition.',
-  'Graph B may edit tasks from graph A; set cross_graph_edit and cross_graph_edit_rationale on changed tasks and highlight edits in chat.',
-  'Approved research tasks in a graph are **leaves** until executed interactively; they may spawn their own child graph later.',
-  'Task graph patterns: Critique–Retry Loop, Leaf Fan-In Refactor, Template–Instance Cycle (serial instances), Task Templates, Spike–Gate, Parallel Fan-Out/In, Subproject→Brainstorm, Dynamic→Deterministic Converter.',
-].join('\n');
+const PATTERN_CATALOG = [
+  'Critique–Retry Loop',
+  'Leaf Fan-In Refactor',
+  'Template–Instance Cycle',
+  'Task Templates',
+  'Spike–Gate',
+  'Parallel Fan-Out/In',
+  'Subproject→Brainstorm',
+  'Dynamic→Deterministic Converter',
+].join(', ');
 
 const TITLE_REVIEW_RULES = [
   'Discovery session (active).',
   'Respond with a numbered list of suggested task **titles only** (no JSON yet).',
   'The user will reply with approve, disapprove, or change per number.',
-  'When every item is approved, write briefs under battleplan/projects/{project_id}/tasks/{task_id}/outputs/ in git, then reply with **only** valid JSON: { "tasks": [ ... ], "edges": [] }.',
+  'Repeat until every item is approved.',
+  'When approved, write briefs under battleplan/projects/{project_id}/tasks/{task_id}/outputs/ in git, then reply with **only** valid JSON: { "tasks": [ ... ], "edges": [] }.',
   'Do not emit task JSON until titles are approved.',
-  'User may send END to finish discovery.',
+].join('\n');
+
+const DEPTH_FIRST_INTERVIEW_RULES = [
+  '**Depth-first interview** for the active partition only.',
+  'Propose the **next layer** of task titles (numbered). In each round, call out where a **task graph pattern** applies and **highlight** those subgraphs in your reply (pattern name + which titles participate).',
+  'You may suggest **multiple layers in one response** when a pattern spans them; still use titles only until the user sends **GRAPH DONE**.',
+  'When the user sends **GRAPH DONE**, summarize the partition graph, index it in your reply, then emit **only** valid JSON for the **full** task graph for this partition (all layers, edges, pattern_id fields).',
+  'If this is not the first partition graph, **highlight** any tasks from prior graphs that must change, merge, or be removed (set cross_graph_edit and cross_graph_edit_rationale on those tasks in the final JSON).',
+  `Task graph patterns: ${PATTERN_CATALOG}.`,
 ].join('\n');
 
 export function buildPartitionProposalMessage(
@@ -59,14 +72,13 @@ export function buildPartitionProposalMessage(
     `Start Discovery for "${task.title}".`,
     approximateGoal ? `Approximate goal:\n${approximateGoal}` : '',
     `Active graph: \`${session.activeGraphId}\` — ${session.activeGraphGoal}`,
-    DEPTH_FIRST_RULES,
-    TITLE_REVIEW_RULES,
     '',
     '## Completed task graph index',
     formatGraphIndexForPrompt(project?.graph_discovery_index),
     '',
-    '**Phase: partition** — propose **Layer 1** titles only: top-level partitions of the problem space (direct children of this discovery root).',
-    'After Layer 1 JSON is imported, Battleplan will depth-first expand **one partition at a time**.',
+    '**Phase: partition (Layer 1)** — propose top-level **problem-space partition** titles only (direct children of this discovery root).',
+    'Iterate with the user (approve / disapprove / change) until Layer 1 is agreed, then emit JSON for the partition tasks only.',
+    TITLE_REVIEW_RULES,
   ].filter(Boolean).join('\n\n');
 }
 
@@ -75,19 +87,51 @@ export function buildDepthFirstDescentProposalMessage(
   session: GenerateTasksSessionState,
 ): string {
   const focus = session.focusPartitionTitle ?? session.activeGraphGoal;
-  const layerLabel = session.layer === 1
-    ? `Layer 1 under partition "${focus}"`
-    : `Layer ${session.layer} under partition "${focus}"`;
+  const treeLayer = session.layer + 1;
+  const partitionNum = session.partitionIndex + 1;
+  const crossGraphNote = partitionNum > 1
+    ? 'Prior completed graphs are listed below — avoid duplicate work; call out cross-graph edits explicitly.'
+    : '';
   return [
-    `Partition ${session.partitionIndex + 1}/${Math.max(session.partitionTitles.length, 1)}: **${focus}**`,
-    `Active graph: \`${session.activeGraphId}\` — ${session.activeGraphGoal}`,
-    DEPTH_FIRST_RULES,
-    TITLE_REVIEW_RULES,
+    `Start depth-first discovery for partition ${partitionNum}/${Math.max(session.partitionTitles.length, 1)}: **${focus}**.`,
+    `Active graph: \`${session.activeGraphId}\` — ${focus}`,
+    crossGraphNote,
+    DEPTH_FIRST_INTERVIEW_RULES,
     '',
     '## Completed task graph index',
     formatGraphIndexForPrompt(project?.graph_discovery_index),
     '',
-    `**Phase: depth_first** — propose **${layerLabel}** titles only. Complete this partition before the next.`,
+    `Propose **Layer ${treeLayer}** task titles under partition "${focus}" (first tranche of this graph).`,
+    TITLE_REVIEW_RULES,
+  ].filter(Boolean).join('\n\n');
+}
+
+export function buildDiscoveryClusterReviewMessage(
+  project: Project | null,
+  sourceTask: ProjectTask,
+): string {
+  return [
+    '**Start Discovery — process end (cluster review)**',
+    `Review all partitions and completed task graphs for "${sourceTask.title}".`,
+    'Identify clusters of task graphs that are related by **function** (similar problems), **form** (similar solution shape), or **blast radius** (same system components).',
+    'Prefer groups of **3–6** graphs when possible.',
+    'Respond with numbered cluster descriptions (graph_id + rationale). If no clusters apply, say so explicitly.',
+    '',
+    '## Completed task graph index',
+    formatGraphIndexForPrompt(project?.graph_discovery_index),
+  ].join('\n\n');
+}
+
+export function buildDiscoveryArchitectureFanInMessage(project: Project | null): string {
+  return [
+    '**Start Discovery — architecture fan-in (Refactor pattern)**',
+    'For each cluster you identified, propose **Architecture** tasks that fan in to the **final leaf code tasks** of those graphs.',
+    'Goal: review, standardize, and improve code produced across the clustered graphs (Leaf Fan-In Refactor / architect nodes).',
+    'Reply with **only** valid JSON for **new** Architecture tasks (and any edges); use pattern_id `leaf_fan_in_refactor` where appropriate.',
+    '',
+    '## Completed task graph index',
+    formatGraphIndexForPrompt(project?.graph_discovery_index),
+    JSON_TASK_LIST_RULES,
   ].join('\n\n');
 }
 
@@ -122,13 +166,7 @@ export function buildLayeredGenerateTasksNextLayerMessage(
 }
 
 export function buildLeafFanInRefactorPassMessage(project: Project | null): string {
-  return [
-    'Final pass for the active graph: **Leaf Fan-In Refactor**.',
-    'Group 3–6 related leaf code tasks and propose architecture fan-in nodes (pattern: leaf_fan_in_refactor).',
-    'Then emit JSON for any new architecture tasks only.',
-    formatGraphIndexForPrompt(project?.graph_discovery_index),
-    JSON_TASK_LIST_RULES,
-  ].join('\n\n');
+  return buildDiscoveryArchitectureFanInMessage(project);
 }
 
 export function tryParseGeneratedTasksFromSources(

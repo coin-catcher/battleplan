@@ -679,9 +679,13 @@
                   @if (store.generateTasksSessionFor(task.task_id); as gtSession) {
                     <p class="task-workflow-hint generate-tasks-session">
                       @if (gtSession.phase === 'partition') {
-                        Start Discovery — partition phase: reply with approve, disapprove, change (per number), or END to finish.
+                        Start Discovery — Layer 1 partitions: approve / disapprove / change until agreed, then JSON import.
+                      } @else if (gtSession.phase === 'depth_first') {
+                        Start Discovery — depth-first on "{{ gtSession.focusPartitionTitle ?? gtSession.activeGraphGoal }}": approve / disapprove / change; send GRAPH DONE when this partition graph is ready for JSON.
+                      } @else if (gtSession.phase === 'cluster_review') {
+                        Start Discovery — final cluster review with the agent.
                       } @else {
-                        Start Discovery — depth-first on "{{ gtSession.focusPartitionTitle ?? gtSession.activeGraphGoal }}" (layer {{ gtSession.layer }}): approve/disapprove/change, GRAPH DONE when this partition graph is complete, or END.
+                        Start Discovery — architecture fan-in pass (JSON import when the agent responds).
                       }
                     </p>
                     <div class="discovery-start-actions">
@@ -1541,6 +1545,35 @@
       <div class="modal-actions">
         <button type="button" class="ghost" (click)="answerExecuteChildren(false)">No</button>
         <button type="button" class="primary" (click)="answerExecuteChildren(true)">Yes</button>
+      </div>
+    </section>
+  </div>
+}
+
+@if (store.discoveryCompleteSummary(); as discoverySummary) {
+  <div class="modal-backdrop" role="presentation">
+    <section class="modal discovery-summary-modal" role="dialog" aria-labelledby="discovery-summary-title">
+      <header class="panel-head">
+        <h2 id="discovery-summary-title">Start Discovery complete</h2>
+        <p class="eyebrow">{{ discoverySummary.sourceTaskTitle }}</p>
+      </header>
+      @if (discoverySummary.partitions.length) {
+        <ul class="discovery-summary-list">
+          @for (part of discoverySummary.partitions; track part.graphId) {
+            <li>
+              <strong>{{ part.partitionTitle }}</strong>
+              — {{ part.taskCount }} task{{ part.taskCount === 1 ? '' : 's' }}
+              @if (part.patterns.length) {
+                <span class="discovery-summary-patterns">Patterns: {{ part.patterns.join(', ') }}</span>
+              }
+            </li>
+          }
+        </ul>
+      } @else {
+        <p>No indexed partition graphs yet.</p>
+      }
+      <div class="modal-actions">
+        <button type="button" class="primary" (click)="store.dismissDiscoveryCompleteSummary()">OK</button>
       </div>
     </section>
   </div>

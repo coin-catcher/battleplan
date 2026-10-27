@@ -6,18 +6,24 @@ export interface GraphDiscoveryIndexEntry {
   final_goal: string;
   task_summary: string;
   completed_at: string;
+  partition_title?: string;
+  task_count?: number;
+  patterns_used?: string[];
 }
 
 export interface DiscoverySessionState {
   source_task_id: string;
   mode: 'depth_first';
-  phase?: 'partition' | 'depth_first';
+  phase?: 'partition' | 'depth_first' | 'cluster_review' | 'architecture_pass';
   active_graph_id: string;
   active_graph_goal: string;
   layer: number;
   partition_titles?: string[];
   partition_index?: number;
   focus_partition_title?: string;
+  awaiting_graph_json?: boolean;
+  closing_step?: 'cluster_review' | 'architecture';
+  architecture_prompt_sent?: boolean;
 }
 
 export function newDiscoveryGraphId(): string {

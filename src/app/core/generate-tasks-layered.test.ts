@@ -39,5 +39,6 @@ describe('generate-tasks-layered', () => {
     expect(text).toMatch(/titles only/i);
     expect(text).toMatch(/no JSON yet/i);
     expect(text).toMatch(/partition/i);
+    expect(text).toMatch(/Layer 1/i);
   });
 });
