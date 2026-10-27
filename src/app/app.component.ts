@@ -1213,6 +1213,14 @@ export class AppComponent implements OnInit {
       && !this.taskDiscoveryInterviewActive(task);
   }
 
+  /** Discovery root after Start Discovery was clicked (session active or chat underway). */
+  discoveryStarted(task: ProjectTask): boolean {
+    return taskIsDiscoveryRoot(task) && (
+      Boolean(this.store.generateTasksSessionFor(task.task_id))
+      || this.taskDiscoveryInterviewActive(task)
+    );
+  }
+
   taskChatComposerEnabled(task: ProjectTask): boolean {
     if (taskIsDiscoveryRoot(task)) return this.taskDiscoveryInterviewActive(task);
     return this.taskAgentStarted(task);
