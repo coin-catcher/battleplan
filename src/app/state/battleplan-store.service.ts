@@ -164,7 +164,11 @@ export class BattleplanStore {
   }
 
   private messagesForDiscoveryResume(taskId: string): ChatMessage[] {
-    if (this.selection().kind === 'task' && this.selection().taskId === taskId) {
+    const selection = this.selection();
+    if (
+      (selection.kind === 'task' || selection.kind === 'subproject')
+      && selection.taskId === taskId
+    ) {
       return this.messages();
     }
     return this.taskChatCache.get(taskId)?.messages ?? [];
