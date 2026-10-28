@@ -678,6 +678,7 @@
                   @if (store.canResumeStuckDiscovery(task.task_id)) {
                     <div class="discovery-start-actions">
                       <button type="button" class="accent" [disabled]="store.busy()" (click)="store.resumeStuckDiscovery()">Resume Start Discovery</button>
+                      <button type="button" class="ghost" [disabled]="store.busy()" (click)="store.forceResumePartitionFromLastReply()">Import Layer 1 from last reply</button>
                     </div>
                   }
                   @if (store.hasActiveDiscoverySession(task.task_id)) {

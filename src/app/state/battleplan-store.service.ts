@@ -151,10 +151,17 @@ export class BattleplanStore {
     return canOfferLegacyDiscoveryResume(
       task,
       this.messagesForDiscoveryResume(taskId),
-      this.artifacts(),
+      this.artifactsForDiscoveryResume(taskId),
       this.project(),
       this.tasks(),
     );
+  }
+
+  /** Force Layer-1 partition import from the last assistant JSON (stuck legacy tasks). */
+  async forceResumePartitionFromLastReply(): Promise<void> {
+    const task = this.selectedTask();
+    if (!task || !canRunGenerateTasks(task)) return;
+    await this.resumeStuckDiscoveryForTask(task.project_id, task.task_id, { forcePartition: true });
   }
 
   async resumeStuckDiscovery(): Promise<void> {
@@ -174,17 +181,50 @@ export class BattleplanStore {
     return this.taskChatCache.get(taskId)?.messages ?? [];
   }
 
-  private async resumeStuckDiscoveryForTask(projectId: string, taskId: string): Promise<void> {
+  private artifactsForDiscoveryResume(taskId: string): ChatArtifact[] {
+    const selection = this.selection();
+    if (
+      (selection.kind === 'task' || selection.kind === 'subproject')
+      && selection.taskId === taskId
+    ) {
+      return this.artifacts();
+    }
+    return this.taskChatCache.get(taskId)?.artifacts ?? [];
+  }
+
+  private async resumeStuckDiscoveryForTask(
+    projectId: string,
+    taskId: string,
+    options?: { forcePartition?: boolean },
+  ): Promise<void> {
     const task = this.tasks().find((item) => item.task_id === taskId);
     if (!task) return;
-    const messages = this.messagesForDiscoveryResume(taskId);
-    const inferred = inferLegacyDiscoverySession(
-      task,
-      messages,
-      this.artifacts(),
-      this.project(),
-      this.tasks(),
-    );
+    let messages = this.messagesForDiscoveryResume(taskId);
+    let artifacts = this.artifactsForDiscoveryResume(taskId);
+    if (messages.length === 0) {
+      const refreshed = await this.api.listTaskMessages(taskId, { syncAgent: false });
+      messages = refreshed.messages;
+      artifacts = refreshed.artifacts ?? [];
+      this.cacheTaskConversation({ ...refreshed, task: refreshed.task });
+      const selection = this.selection();
+      if (
+        (selection.kind === 'task' || selection.kind === 'subproject')
+        && selection.taskId === taskId
+      ) {
+        this.applyTaskConversation(refreshed);
+      }
+    }
+    const inferred = options?.forcePartition
+      ? {
+        sourceTaskId: taskId,
+        phase: 'partition' as const,
+        layer: 1,
+        activeGraphId: newDiscoveryGraphId(),
+        activeGraphGoal: task.title,
+        partitionTitles: [],
+        partitionIndex: 0,
+      }
+      : inferLegacyDiscoverySession(task, messages, artifacts, this.project(), this.tasks());
     if (!inferred) {
       this.error.set('Could not resume Start Discovery on this task.');
       this.adoptGlobalErrorAsTaskPanel(taskId);

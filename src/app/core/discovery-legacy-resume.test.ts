@@ -62,6 +62,23 @@ describe('discovery-legacy-resume', () => {
     expect(canOfferLegacyDiscoveryResume(root, messages, [], null, [root])).toBe(true);
   });
 
+  it('offers resume for DOING brainstorm with brief_path partition JSON only', () => {
+    const doingRoot: ProjectTask = { ...root, status: 'DOING' };
+    const messages: ChatMessage[] = [{
+      message_id: '2',
+      scope: 'task',
+      project_id: 'p',
+      task_id: 'root',
+      role: 'assistant',
+      content: JSON.stringify({
+        tasks: [{ title: 'MVP Auth', brief_path: 'battleplan/projects/p/tasks/x/outputs/brief.md' }],
+        edges: [],
+      }),
+      created_at: '',
+    }];
+    expect(canOfferLegacyDiscoveryResume(doingRoot, messages, [], null, [doingRoot])).toBe(true);
+  });
+
   it('detects partition tasks already on the mindmap', () => {
     const child: ProjectTask = { ...root, task_id: 'c1', title: 'A', dependencies: [] };
     const rootWithChild: ProjectTask = { ...root, dependencies: ['c1'] };
