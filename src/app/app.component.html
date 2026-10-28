@@ -675,6 +675,11 @@
                       <span class="task-meta-hint">Subproject (no agent)</span>
                     }
                   </div>
+                  @if (store.canResumeStuckDiscovery(task.task_id)) {
+                    <div class="discovery-start-actions">
+                      <button type="button" class="accent" [disabled]="store.busy()" (click)="store.resumeStuckDiscovery()">Resume Start Discovery</button>
+                    </div>
+                  }
                   @if (store.hasActiveDiscoverySession(task.task_id)) {
                     @if (store.discoverySessionHint(task.task_id); as discoveryHint) {
                       <p class="task-workflow-hint discovery-session-hint">{{ discoveryHint }}</p>
