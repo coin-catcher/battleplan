@@ -74,6 +74,7 @@ import {
 import type { MindmapViewState, ProjectWorkspaceUiState } from '../core/project-ui-state';
 import type { MindmapLinkRef } from '../core/link-relocation';
 import { projectWorkspaceUiFromMindmap } from '../core/project-ui-state';
+import { isSubstantiveAgentResponse } from '../core/agent-run-response';
 import { doingBackgroundWatchTaskIds, taskNeedsDoingBackgroundPoll } from './doing-background-watch';
 
 const POLL_INTERVAL_MS = 3000;
@@ -1456,7 +1457,7 @@ export class BattleplanStore {
       const sent = await this.api.executeTask(taskId);
       runId = sent.run_id;
       this.rememberMessage(sent);
-      this.applyTaskConversation(await this.api.listTaskMessages(taskId));
+      this.applyTaskConversation(await this.api.listTaskMessages(taskId, { syncAgent: false }));
     });
     if (this.error()) {
       this.adoptGlobalErrorAsTaskPanel(taskId);
@@ -1555,9 +1556,9 @@ export class BattleplanStore {
       if (task.output_type === 'subproject' && task.subproject_id) {
         watchProjectId = task.subproject_id;
         await this.reloadTasks();
-        this.applyConversation(await this.api.listProjectMessages(task.subproject_id));
+        this.applyConversation(await this.api.listProjectMessages(task.subproject_id, { syncAgent: false }));
       } else {
-        this.applyTaskConversation(await this.api.listTaskMessages(taskId));
+        this.applyTaskConversation(await this.api.listTaskMessages(taskId, { syncAgent: false }));
       }
     });
     if (this.error()) {
@@ -2302,7 +2303,11 @@ export class BattleplanStore {
 }
 
 function unansweredRun(messages: ChatMessage[]): string | undefined {
-  const answered = new Set(messages.filter((message) => message.role === 'assistant' && message.run_id).map((message) => message.run_id));
+  const answered = new Set(
+    messages
+      .filter((message) => message.role === 'assistant' && message.run_id && isSubstantiveAgentResponse(message.content))
+      .map((message) => message.run_id),
+  );
   return [...messages].reverse().find((message) => message.role === 'user' && message.run_id && !answered.has(message.run_id))?.run_id;
 }
 
@@ -2312,7 +2317,11 @@ function unansweredRunForTask(messages: ChatMessage[], taskId: string): string |
 }
 
 function hasAssistant(messages: ChatMessage[], runId: string): boolean {
-  return messages.some((message) => message.run_id === runId && message.role === 'assistant');
+  return messages.some((message) => (
+    message.run_id === runId
+    && message.role === 'assistant'
+    && isSubstantiveAgentResponse(message.content)
+  ));
 }
 
 function hasUserRun(messages: ChatMessage[], runId: string): boolean {
