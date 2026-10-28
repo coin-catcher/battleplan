@@ -5,7 +5,7 @@ import { newDiscoveryGraphId } from './graph-discovery';
 import type { ChatArtifact, ChatMessage, Project, ProjectTask } from './models';
 import { canRunGenerateTasks } from './task-generate-eligibility';
 import { pickPrimaryParentId } from './dependencies';
-import type { ParsedGeneratedTasks } from './parse-tasks';
+import { messageContainsImportableTaskGraph, type ParsedGeneratedTasks } from './parse-tasks';
 
 /** Stuck mid–Start Discovery before project.discovery_session was persisted. */
 export function inferLegacyDiscoverySession(
@@ -18,17 +18,20 @@ export function inferLegacyDiscoverySession(
   if (!canRunGenerateTasks(task)) return null;
   if (project?.discovery_session?.source_task_id === task.task_id) return null;
 
-  const started = messages.some((message) => message.role === 'user' && (
-    message.intent === 'generate_tasks'
-    || /start discovery/i.test(message.content)
-  ));
-  if (!started) return null;
-
-  const graphMessage = findLastAssistantTaskGraph(messages, artifacts);
+  const graphMessage = findLastAssistantTaskGraph(messages, artifacts)
+    ?? findLastAssistantImportableGraph(messages, artifacts);
   let parsed: ParsedGeneratedTasks | null = null;
   if (graphMessage) {
     parsed = tryParseGeneratedTasksFromSources(graphMessage.content, artifacts);
   }
+
+  const started = messages.some((message) => message.role === 'user' && (
+    message.intent === 'generate_tasks'
+    || /start discovery/i.test(message.content)
+  ));
+  const chatUnderway = task.status === 'DOING' || task.status === 'REVIEW';
+  const hasImportableGraph = Boolean(graphMessage && parsed?.tasks.length);
+  if (!started && !chatUnderway && !hasImportableGraph) return null;
 
   const phase = inferLegacyPhase(task, allTasks, parsed);
   if (!phase) return null;
@@ -72,6 +75,18 @@ export function partitionLayerAlreadyImported(
     if (children.some((child) => child.title.trim() === title)) matched += 1;
   }
   return matched >= titles.size;
+}
+
+function findLastAssistantImportableGraph(
+  messages: ChatMessage[],
+  artifacts: ChatArtifact[],
+): ChatMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== 'assistant') continue;
+    if (messageContainsImportableTaskGraph(message.content, artifacts)) return message;
+  }
+  return null;
 }
 
 export function canOfferLegacyDiscoveryResume(
