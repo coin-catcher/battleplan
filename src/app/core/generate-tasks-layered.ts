@@ -20,6 +20,7 @@ export interface GenerateTasksSessionState {
   /** Process-end orchestration after all partition graphs are indexed. */
   closingStep?: 'cluster_review' | 'architecture';
   architecturePromptSent?: boolean;
+  lastImportedMessageKey?: string;
 }
 
 export function isGenerateTasksEndCommand(message: string): boolean {

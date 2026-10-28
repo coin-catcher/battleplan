@@ -1209,14 +1209,14 @@ export class AppComponent implements OnInit {
   /** Approximate Goal + Start Discovery before the first agent reply. */
   showDiscoverySetup(task: ProjectTask): boolean {
     return taskIsDiscoveryRoot(task)
-      && !this.store.generateTasksSessionFor(task.task_id)
+      && !this.store.hasActiveDiscoverySession(task.task_id)
       && !this.taskDiscoveryInterviewActive(task);
   }
 
   /** Discovery root after Start Discovery was clicked (session active or chat underway). */
   discoveryStarted(task: ProjectTask): boolean {
     return taskIsDiscoveryRoot(task) && (
-      Boolean(this.store.generateTasksSessionFor(task.task_id))
+      this.store.hasActiveDiscoverySession(task.task_id)
       || this.taskDiscoveryInterviewActive(task)
     );
   }

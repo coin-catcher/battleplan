@@ -78,6 +78,7 @@ import {
   type TaskBrief,
   type TaskBriefBuildInput,
 } from '../core/task-brief';
+import { AGENT_RESPONSE_PLACEHOLDER, isSubstantiveAgentResponse } from '../core/agent-run-response';
 import { isDispatchableNodeKind } from '../core/task-node-kind';
 import { defaultConnectorForTask } from '../core/connector-defaults';
 import { applyTaskBriefDefaults } from '../core/task-lifecycle';
@@ -114,7 +115,7 @@ import { recordAgentUsageEntry } from '../core/agent-usage-ledger';
 import { researchTurnsFromMessages, sendResearchAgentChat } from './research-agent-client';
 
 const TERMINAL_RUN = new Set(['FINISHED', 'ERROR', 'CANCELLED', 'CANCELED', 'FAILED', 'EXPIRED']);
-const ASSISTANT_PLACEHOLDER = 'The agent finished. Attached files are shown with this conversation.';
+const ASSISTANT_PLACEHOLDER = AGENT_RESPONSE_PLACEHOLDER;
 const TEXT_ARTIFACT = /\.(md|markdown|txt|json|csv|ya?ml|html|log|xml|tsv|rst)$/i;
 const IMAGE_ARTIFACT = /\.(png|jpe?g|gif|webp|svg)$/i;
 const MAX_TEXT_BYTES = 200_000;
@@ -1457,6 +1458,7 @@ export class LocalEngine {
       const assistant = existing.find((message) => message.run_id === run.id && message.role === 'assistant');
       const content = await this.assistantText(agentId, run);
       if (!assistant) {
+        if (!isSubstantiveAgentResponse(content, run)) continue;
         const saved = await this.record({
           scope: target.scope,
           project_id: target.projectId,
@@ -1473,7 +1475,12 @@ export class LocalEngine {
         const index = existing.findIndex((message) => message.message_id === assistant.message_id);
         if (index >= 0) existing[index] = saved;
       }
-      if (target.scope === 'task') await this.applyTaskRun(target.taskId, run);
+      const assistantAfter = existing.find((message) => message.run_id === run.id && message.role === 'assistant');
+      const replyText = assistantAfter?.content ?? content;
+      if (!isSubstantiveAgentResponse(replyText, run)) continue;
+      if (target.scope === 'task') {
+        await this.applyTaskRun(target.taskId, run);
+      }
       else {
         await this.applySubprojectParentRun(target.projectId, run);
         await this.applyRootProjectRun(target.projectId, run);
@@ -1486,8 +1493,11 @@ export class LocalEngine {
     if (!project || project.parent_task_id || project.parent_project_id) return;
     if (project.latest_run_id !== run.id || run.status !== 'FINISHED') return;
     if (rootProjectStatus(project) !== 'DOING') return;
-    const user = (await this.repo.listProjectMessages(projectId))
-      .find((message) => message.run_id === run.id && message.role === 'user');
+    const messages = await this.repo.listProjectMessages(projectId);
+    const assistant = messages.find((message) => message.role === 'assistant' && message.run_id === run.id);
+    const assistantText = assistant?.content ?? await this.assistantText(project.cursor_agent_id!, run);
+    if (!isSubstantiveAgentResponse(assistantText, run)) return;
+    const user = messages.find((message) => message.run_id === run.id && message.role === 'user');
     if (user?.intent === 'release_version_bump') {
       const token = project.github_pat?.trim();
       const slug = projectRepoSlug(project);
@@ -1535,6 +1545,7 @@ export class LocalEngine {
       if (!TERMINAL_RUN.has(run.status)) continue;
       const resolved = await this.resolveTerminalRun(agentId, run);
       const content = await this.assistantText(agentId, resolved);
+      if (!isSubstantiveAgentResponse(content, resolved)) continue;
       const assistant = existing.find((item) => item.role === 'assistant' && item.run_id === resolved.id);
       if (!assistant) {
         existing.push(await this.record({
@@ -1608,6 +1619,9 @@ export class LocalEngine {
     const task = await this.repo.getTask(taskId);
     if (!task || task.latest_run_id !== run.id || run.status !== 'FINISHED') return;
     if (task.output_type === 'subproject') return;
+    const transcript = await this.repo.listTaskMessages(taskId);
+    const assistant = transcript.find((message) => message.role === 'assistant' && message.run_id === run.id);
+    if (!assistant || !isSubstantiveAgentResponse(assistant.content, run)) return;
     const project = await this.requireProject(task.project_id);
     const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
     const existingOutput = task.output_type === 'code'
@@ -1674,6 +1688,10 @@ export class LocalEngine {
     const task = await this.repo.getTask(project.parent_task_id);
     if (!task || task.subproject_id !== projectId || task.output_type !== 'subproject') return;
     if (task.status !== 'DOING') return;
+    const messages = await this.repo.listProjectMessages(projectId);
+    const assistant = messages.find((message) => message.role === 'assistant' && message.run_id === run.id);
+    const content = assistant?.content ?? await this.assistantText(project.cursor_agent_id!, run);
+    if (!isSubstantiveAgentResponse(content, run)) return;
     applyTaskStatusTransition(task, 'REVIEW', 'agent_finished');
     task.updated_at = this.now();
     await this.repo.saveTask(task);

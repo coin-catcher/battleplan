@@ -24,6 +24,10 @@ export interface DiscoverySessionState {
   awaiting_graph_json?: boolean;
   closing_step?: 'cluster_review' | 'architecture';
   architecture_prompt_sent?: boolean;
+  /** Prevents re-importing the same assistant JSON after reload. */
+  last_imported_message_key?: string;
+  /** Human-readable hint for UI / debugging. */
+  next_action?: string;
 }
 
 export function newDiscoveryGraphId(): string {

@@ -44,6 +44,12 @@ import {
   type DiscoveryCompleteSummary,
 } from '../core/discovery-summary';
 import {
+  describeDiscoveryNextAction,
+  discoveryMessageKey,
+  generateTasksSessionFromPersisted,
+  persistedDiscoverySessionFromGenerateTasks,
+} from '../core/discovery-session-persist';
+import {
   appendGraphIndexEntry,
   newDiscoveryGraphId,
   type GraphDiscoveryIndexEntry,
@@ -64,6 +70,7 @@ import {
 import type { MindmapViewState, ProjectWorkspaceUiState } from '../core/project-ui-state';
 import type { MindmapLinkRef } from '../core/link-relocation';
 import { projectWorkspaceUiFromMindmap } from '../core/project-ui-state';
+import { isSubstantiveAgentResponse } from '../core/agent-run-response';
 import { doingBackgroundWatchTaskIds, taskNeedsDoingBackgroundPoll } from './doing-background-watch';
 
 const POLL_INTERVAL_MS = 3000;
@@ -127,6 +134,39 @@ export class BattleplanStore {
 
   dismissDiscoveryCompleteSummary(): void {
     this.discoveryCompleteSummary.set(null);
+  }
+
+  hasActiveDiscoverySession(taskId: string): boolean {
+    return Boolean(this.generateTasksSessionFor(taskId) ?? this.hydratedDiscoverySessionForTask(taskId));
+  }
+
+  discoverySessionHint(taskId: string): string | null {
+    const session = this.generateTasksSessionFor(taskId)
+      ?? this.hydratedDiscoverySessionForTask(taskId);
+    return session ? describeDiscoveryNextAction(session) : null;
+  }
+
+  private hydratedDiscoverySessionForTask(taskId: string): GenerateTasksSessionState | null {
+    const persisted = this.project()?.discovery_session;
+    if (!persisted || persisted.source_task_id !== taskId) return null;
+    return generateTasksSessionFromPersisted(persisted);
+  }
+
+  private hydrateDiscoverySessionFromProject(taskId: string): void {
+    const session = this.hydratedDiscoverySessionForTask(taskId);
+    if (session) {
+      this.generateTasksSession.set(session);
+      return;
+    }
+    if (this.generateTasksSession()?.sourceTaskId === taskId) {
+      this.generateTasksSession.set(null);
+    }
+  }
+
+  private async recoverDiscoveryProgress(projectId: string, taskId: string): Promise<void> {
+    this.hydrateDiscoverySessionFromProject(taskId);
+    if (!this.generateTasksSessionFor(taskId) || this.busy()) return;
+    await this.tryImportDiscoveryJson(projectId, taskId);
   }
 
   readonly project = computed(() => this.projects().find((item) => item.project_id === this.projectId()) ?? null);
@@ -691,35 +731,7 @@ export class BattleplanStore {
           this.replaceTask(await this.api.updateTask(projectId, taskId, { status: 'DOING', manual: true }));
         });
       }
-      await this.run(async () => {
-        this.projects.update((projects) => projects.map((item) => item.project_id === projectId
-          ? {
-            ...item,
-            discovery_session: {
-              source_task_id: taskId,
-              mode: 'depth_first',
-              phase: 'partition',
-              active_graph_id: graphId,
-              active_graph_goal: sourceTask.title,
-              layer: 1,
-              partition_titles: [],
-              partition_index: 0,
-            },
-          }
-          : item));
-        await this.api.updateProject(projectId, {
-          discovery_session: {
-            source_task_id: taskId,
-            mode: 'depth_first',
-            phase: 'partition',
-            active_graph_id: graphId,
-            active_graph_goal: sourceTask.title,
-            layer: 1,
-            partition_titles: [],
-            partition_index: 0,
-          },
-        });
-      });
+      await this.persistDiscoverySession(projectId, session);
     }
     let runId: string | undefined;
     await this.run(async () => {
@@ -773,6 +785,7 @@ export class BattleplanStore {
   async importDiscoveryJsonFromLastAssistant(): Promise<void> {
     const task = this.selectedTask();
     if (!task) return;
+    this.hydrateDiscoverySessionFromProject(task.task_id);
     const session = this.generateTasksSessionFor(task.task_id);
     if (!session) {
       this.error.set('No active Start Discovery session on this task.');
@@ -793,20 +806,7 @@ export class BattleplanStore {
   }
 
   private async persistDiscoverySession(projectId: string, session: GenerateTasksSessionState): Promise<void> {
-    const payload = {
-      source_task_id: session.sourceTaskId,
-      mode: 'depth_first' as const,
-      phase: session.phase,
-      active_graph_id: session.activeGraphId,
-      active_graph_goal: session.activeGraphGoal,
-      layer: session.layer,
-      partition_titles: session.partitionTitles,
-      partition_index: session.partitionIndex,
-      focus_partition_title: session.focusPartitionTitle,
-      awaiting_graph_json: session.awaitingGraphJson,
-      closing_step: session.closingStep,
-      architecture_prompt_sent: session.architecturePromptSent,
-    };
+    const payload = persistedDiscoverySessionFromGenerateTasks(session);
     await this.run(async () => {
       this.projects.update((projects) => projects.map((item) => item.project_id === projectId
         ? { ...item, discovery_session: payload }
@@ -824,6 +824,9 @@ export class BattleplanStore {
     if (!session) return;
     const reply = this.findDiscoveryImportMessage(runId);
     if (!reply || !tryParseGeneratedTasksFromSources(reply.content, this.artifacts())) return;
+
+    const messageKey = discoveryMessageKey(reply);
+    if (session.lastImportedMessageKey === messageKey) return;
 
     const importRunId = reply.run_id ?? runId ?? `discovery-recovery-${Date.now()}`;
     const phaseBefore = session.phase;
@@ -845,6 +848,13 @@ export class BattleplanStore {
     const sessionAfter = this.generateTasksSessionFor(sourceTaskId);
     if (!sessionAfter) return;
 
+    const importedKeySession: GenerateTasksSessionState = {
+      ...sessionAfter,
+      lastImportedMessageKey: messageKey,
+    };
+    this.generateTasksSession.set(importedKeySession);
+    await this.persistDiscoverySession(projectId, importedKeySession);
+
     const parsed = parseGeneratedTasksFromSources(reply.content, this.artifacts());
     const importedTitles = parsed.tasks.map((draft) => draft.title.trim()).filter(Boolean);
 
@@ -852,7 +862,7 @@ export class BattleplanStore {
       const nextGraphId = newDiscoveryGraphId();
       const focus = importedTitles[0];
       const nextSession: GenerateTasksSessionState = {
-        ...sessionAfter,
+        ...importedKeySession,
         phase: 'depth_first',
         partitionTitles: importedTitles,
         partitionIndex: 0,
@@ -874,7 +884,7 @@ export class BattleplanStore {
 
     if (phaseBefore === 'depth_first' && awaitingGraph) {
       await this.finalizePartitionGraph(projectId, sourceTaskId, {
-        ...sessionAfter,
+        ...importedKeySession,
         awaitingGraphJson: false,
       });
       return;
@@ -1163,6 +1173,7 @@ export class BattleplanStore {
     const existing = this.tasks().find((item) => item.task_id === taskId);
     const kind = existing?.output_type === 'subproject' ? 'subproject' : 'task';
     this.selection.set({ kind, taskId });
+    this.hydrateDiscoverySessionFromProject(taskId);
     const generation = ++this.panelRefreshGeneration;
     const cached = this.taskChatCache.get(taskId);
     if (cached) {
@@ -1376,7 +1387,7 @@ export class BattleplanStore {
       const sent = await this.api.executeTask(taskId);
       runId = sent.run_id;
       this.rememberMessage(sent);
-      this.applyTaskConversation(await this.api.listTaskMessages(taskId));
+      this.applyTaskConversation(await this.api.listTaskMessages(taskId, { syncAgent: false }));
     });
     if (this.error()) {
       this.adoptGlobalErrorAsTaskPanel(taskId);
@@ -1475,9 +1486,9 @@ export class BattleplanStore {
       if (task.output_type === 'subproject' && task.subproject_id) {
         watchProjectId = task.subproject_id;
         await this.reloadTasks();
-        this.applyConversation(await this.api.listProjectMessages(task.subproject_id));
+        this.applyConversation(await this.api.listProjectMessages(task.subproject_id, { syncAgent: false }));
       } else {
-        this.applyTaskConversation(await this.api.listTaskMessages(taskId));
+        this.applyTaskConversation(await this.api.listTaskMessages(taskId, { syncAgent: false }));
       }
     });
     if (this.error()) {
@@ -1764,6 +1775,10 @@ export class BattleplanStore {
         this.applyTaskConversation(result);
         await this.refreshOutput(result.task);
         this.continueTaskWatch(taskId);
+        const projectId = this.projectId();
+        if (projectId) {
+          await this.recoverDiscoveryProgress(projectId, taskId);
+        }
       }
       if (generation === this.panelRefreshGeneration) {
         this.clearTaskPanelError(taskId);
@@ -2218,7 +2233,11 @@ export class BattleplanStore {
 }
 
 function unansweredRun(messages: ChatMessage[]): string | undefined {
-  const answered = new Set(messages.filter((message) => message.role === 'assistant' && message.run_id).map((message) => message.run_id));
+  const answered = new Set(
+    messages
+      .filter((message) => message.role === 'assistant' && message.run_id && isSubstantiveAgentResponse(message.content))
+      .map((message) => message.run_id),
+  );
   return [...messages].reverse().find((message) => message.role === 'user' && message.run_id && !answered.has(message.run_id))?.run_id;
 }
 
@@ -2228,7 +2247,11 @@ function unansweredRunForTask(messages: ChatMessage[], taskId: string): string |
 }
 
 function hasAssistant(messages: ChatMessage[], runId: string): boolean {
-  return messages.some((message) => message.run_id === runId && message.role === 'assistant');
+  return messages.some((message) => (
+    message.run_id === runId
+    && message.role === 'assistant'
+    && isSubstantiveAgentResponse(message.content)
+  ));
 }
 
 function hasUserRun(messages: ChatMessage[], runId: string): boolean {

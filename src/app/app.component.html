@@ -675,7 +675,10 @@
                       <span class="task-meta-hint">Subproject (no agent)</span>
                     }
                   </div>
-                  @if (store.generateTasksSessionFor(task.task_id)) {
+                  @if (store.hasActiveDiscoverySession(task.task_id)) {
+                    @if (store.discoverySessionHint(task.task_id); as discoveryHint) {
+                      <p class="task-workflow-hint discovery-session-hint">{{ discoveryHint }}</p>
+                    }
                     <div class="discovery-start-actions">
                       <button type="button" class="ghost" [disabled]="store.busy()" (click)="store.importDiscoveryJsonFromLastAssistant()">Import task graph from last reply</button>
                     </div>
