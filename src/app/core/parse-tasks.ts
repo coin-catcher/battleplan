@@ -91,12 +91,16 @@ function parseGeneratedTaskRecords(parsed: unknown[]): TaskDraft[] {
     }
     const record = item as Record<string, unknown>;
     const title = requiredText(record['title'], `Task ${index + 1} title`);
-    const prompt = requiredText(record['prompt'], `Task ${index + 1} prompt`);
+    const briefPath = optionalText(record['brief_path']);
+    const prompt = optionalText(record['prompt'])
+      ?? optionalText(record['initial_prompt'])
+      ?? (briefPath ? `Follow the brief at ${briefPath}` : undefined)
+      ?? title;
     const workflowFields = resolveDraftFieldsFromWorkflow(record);
-    const output = workflowFields.output_type ?? record['output_type'];
-    if (typeof output !== 'string' || !output.trim()) {
-      throw new Error(`Task ${index + 1} output_type or task_kind is required.`);
-    }
+    const outputRaw = workflowFields.output_type ?? record['output_type'] ?? record['task_kind'];
+    const output = typeof outputRaw === 'string' && outputRaw.trim()
+      ? outputRaw.trim()
+      : 'research';
     const depends = record['depends_on'] ?? record['dependencies'] ?? [];
     if (!Array.isArray(depends) || depends.some((entry) => typeof entry !== 'string')) {
       throw new Error(`Task ${index + 1} depends_on must be an array of task titles.`);
@@ -117,7 +121,7 @@ function parseGeneratedTaskRecords(parsed: unknown[]): TaskDraft[] {
       ?? normalizeLifecyclePhase(record['lifecycle_phase']);
     const repoPath = typeof record['repo_path'] === 'string' && record['repo_path'].trim()
       ? record['repo_path'].trim()
-      : undefined;
+      : repoPathFromBriefPath(briefPath);
     const patternId = typeof record['pattern_id'] === 'string' ? record['pattern_id'].trim() : undefined;
     const graphId = typeof record['graph_id'] === 'string' ? record['graph_id'].trim() : undefined;
     const crossGraph = record['cross_graph_edit'] === true ? true : undefined;
@@ -161,4 +165,32 @@ function requiredText(value: unknown, label: string): string {
     throw new Error(`${label} is required.`);
   }
   return value.trim();
+}
+
+function optionalText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+/** battleplan/.../outputs/brief.md → battleplan/.../outputs/ */
+function repoPathFromBriefPath(briefPath: string | undefined): string | undefined {
+  if (!briefPath) return undefined;
+  const normalized = briefPath.replace(/\\/g, '/');
+  if (normalized.endsWith('/brief.md')) {
+    return normalized.slice(0, -'brief.md'.length);
+  }
+  if (normalized.endsWith('brief.md')) {
+    return normalized.slice(0, -'brief.md'.length);
+  }
+  return undefined;
+}
+
+export function messageContainsImportableTaskGraph(text: string, artifacts: ChatArtifact[] = []): boolean {
+  try {
+    parseGeneratedTasksFromSources(text, artifacts);
+    return true;
+  } catch {
+    return false;
+  }
 }
