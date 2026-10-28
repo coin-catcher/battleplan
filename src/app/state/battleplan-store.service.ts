@@ -50,6 +50,10 @@ import {
   persistedDiscoverySessionFromGenerateTasks,
 } from '../core/discovery-session-persist';
 import {
+  canOfferLegacyDiscoveryResume,
+  inferLegacyDiscoverySession,
+} from '../core/discovery-legacy-resume';
+import {
   appendGraphIndexEntry,
   newDiscoveryGraphId,
   type GraphDiscoveryIndexEntry,
@@ -140,6 +144,56 @@ export class BattleplanStore {
     return Boolean(this.generateTasksSessionFor(taskId) ?? this.hydratedDiscoverySessionForTask(taskId));
   }
 
+  canResumeStuckDiscovery(taskId: string): boolean {
+    if (this.hasActiveDiscoverySession(taskId)) return false;
+    const task = this.tasks().find((item) => item.task_id === taskId);
+    if (!task) return false;
+    return canOfferLegacyDiscoveryResume(
+      task,
+      this.messagesForDiscoveryResume(taskId),
+      this.artifacts(),
+      this.project(),
+      this.tasks(),
+    );
+  }
+
+  async resumeStuckDiscovery(): Promise<void> {
+    const task = this.selectedTask();
+    if (!task) return;
+    await this.resumeStuckDiscoveryForTask(task.project_id, task.task_id);
+  }
+
+  private messagesForDiscoveryResume(taskId: string): ChatMessage[] {
+    if (this.selection().kind === 'task' && this.selection().taskId === taskId) {
+      return this.messages();
+    }
+    return this.taskChatCache.get(taskId)?.messages ?? [];
+  }
+
+  private async resumeStuckDiscoveryForTask(projectId: string, taskId: string): Promise<void> {
+    const task = this.tasks().find((item) => item.task_id === taskId);
+    if (!task) return;
+    const messages = this.messagesForDiscoveryResume(taskId);
+    const inferred = inferLegacyDiscoverySession(
+      task,
+      messages,
+      this.artifacts(),
+      this.project(),
+      this.tasks(),
+    );
+    if (!inferred) {
+      this.error.set('Could not resume Start Discovery on this task.');
+      this.adoptGlobalErrorAsTaskPanel(taskId);
+      return;
+    }
+    this.clearTaskPanelError(taskId);
+    this.generateTasksSession.set(inferred);
+    await this.persistDiscoverySession(projectId, inferred);
+    await this.tryImportDiscoveryJson(projectId, taskId);
+    if (this.error()) this.adoptGlobalErrorAsTaskPanel(taskId);
+    else this.notice.set('Start Discovery resumed from this task’s chat history.');
+  }
+
   discoverySessionHint(taskId: string): string | null {
     const session = this.generateTasksSessionFor(taskId)
       ?? this.hydratedDiscoverySessionForTask(taskId);
@@ -165,7 +219,16 @@ export class BattleplanStore {
 
   private async recoverDiscoveryProgress(projectId: string, taskId: string): Promise<void> {
     this.hydrateDiscoverySessionFromProject(taskId);
-    if (!this.generateTasksSessionFor(taskId) || this.busy()) return;
+    if (!this.generateTasksSessionFor(taskId)) {
+      if (!this.canResumeStuckDiscovery(taskId)) return;
+      const previousError = this.error();
+      await this.resumeStuckDiscoveryForTask(projectId, taskId);
+      if (this.error() && !previousError) {
+        this.error.set(null);
+      }
+      return;
+    }
+    if (this.busy()) return;
     await this.tryImportDiscoveryJson(projectId, taskId);
   }
 
@@ -786,6 +849,13 @@ export class BattleplanStore {
     const task = this.selectedTask();
     if (!task) return;
     this.hydrateDiscoverySessionFromProject(task.task_id);
+    if (!this.generateTasksSessionFor(task.task_id) && this.canResumeStuckDiscovery(task.task_id)) {
+      await this.resumeStuckDiscoveryForTask(task.project_id, task.task_id);
+      if (this.error()) {
+        this.adoptGlobalErrorAsTaskPanel(task.task_id);
+      }
+      return;
+    }
     const session = this.generateTasksSessionFor(task.task_id);
     if (!session) {
       this.error.set('No active Start Discovery session on this task.');
