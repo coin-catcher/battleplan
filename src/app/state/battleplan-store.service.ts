@@ -1253,7 +1253,11 @@ export class BattleplanStore {
     const createdCount = drafts.length;
     const updatedCount = updates.length;
     if (!createdCount && !updatedCount) return;
-    const note = `Discovery import: ${createdCount} created${updatedCount ? `, ${updatedCount} updated` : ''}.`;
+    const needsGitMirror = drafts.some((draft) => draft.brief_path || draft.repo_path || draft.git_paths?.length);
+    const mirrorHint = needsGitMirror && !this.project()?.github_pat?.trim()
+      ? ' Add a GitHub PAT on the project to mirror battleplan/ files from the agent branch into local storage.'
+      : '';
+    const note = `Discovery import: ${createdCount} created${updatedCount ? `, ${updatedCount} updated` : ''}.${mirrorHint}`;
     const saved = taskId ? await this.api.noteTask(taskId, note) : await this.api.noteProject(projectId, note);
     this.rememberMessage(saved);
     this.notice.set(note);

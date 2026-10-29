@@ -125,4 +125,12 @@ export class IpcRepository implements BattleplanRepository {
   ): Promise<void> {
     return bridge().invoke('repo:saveProjectUiState', projectId, state);
   }
+
+  writeGitMirrorFile(projectId: string, gitRelativePath: string, content: string): Promise<void> {
+    return bridge().invoke('repo:writeGitMirrorFile', projectId, gitRelativePath, content);
+  }
+
+  readGitMirrorFile(projectId: string, gitRelativePath: string): Promise<string | null> {
+    return bridge().invoke('repo:readGitMirrorFile', projectId, gitRelativePath);
+  }
 }

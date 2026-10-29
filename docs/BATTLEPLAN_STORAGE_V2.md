@@ -16,6 +16,10 @@ battleplan/projects/{PROJECT_ID}/
 
 On project load, tasks with legacy `research/{project_id}/{task_id}/` paths are rewritten to `battleplan/projects/{project_id}/tasks/{task_id}/outputs/` and `battleplan_storage_version` is set to **2** (see `battleplan-storage-migrate.ts`).
 
+## Git mirror
+
+On **Start Discovery** import, Battleplan downloads each task’s `repo_path` folder (and optional `git_paths`) from the discovery agent’s GitHub branch into `{BATTLEPLAN_ROOT}/{project_id}/battleplan/...`, matching the linked repository layout.
+
 ## Execution
 
 When a task starts, upstream **output manifests** and `repo_path` folders are injected as **INPUT DOCUMENTS** in the agent prompt (`input-documents.ts`).

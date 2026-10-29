@@ -133,6 +133,11 @@ function registerRepositoryHandlers(): void {
     'repo:saveCodeOutput': (output) => repo().saveCodeOutput(output as TaskCodeOutput),
     'repo:getResearchOutput': (taskId) => repo().getResearchOutput(taskId as string),
     'repo:saveResearchOutput': (output) => repo().saveResearchOutput(output as TaskResearchOutput),
+    'repo:writeGitMirrorFile': async (projectId, gitRelativePath, content) => {
+      await repo().writeGitMirrorFile(projectId as string, gitRelativePath as string, content as string);
+    },
+    'repo:readGitMirrorFile': (projectId, gitRelativePath) =>
+      repo().readGitMirrorFile(projectId as string, gitRelativePath as string),
     'repo:listProjectMessages': (projectId) => repo().listProjectMessages(projectId as string),
     'repo:listTaskMessages': (taskId) => repo().listTaskMessages(taskId as string),
     'repo:saveMessage': (message) => repo().saveMessage(message as ChatMessage),

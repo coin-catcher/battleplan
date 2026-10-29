@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { taskBriefFromGitFileContent } from './discovery-git-import';
+import { pickBriefPathFromSynced, taskBriefFromGitFileContent } from './discovery-git-import';
 
 describe('discovery-git-import brief parsing', () => {
   it('parses markdown section headings into a task brief', () => {
@@ -27,6 +27,14 @@ describe('discovery-git-import brief parsing', () => {
     expect(brief?.goal).toBe('Ship auth.');
     expect(brief?.scope).toBe('Login only.');
     expect(brief?.forbidden).toBe('No PRs.');
+  });
+
+  it('picks brief.md from synced paths', () => {
+    const paths = [
+      'battleplan/projects/p/tasks/a/outputs/README.md',
+      'battleplan/projects/p/tasks/a/outputs/brief.md',
+    ];
+    expect(pickBriefPathFromSynced(paths)).toBe(paths[1]);
   });
 
   it('parses task-brief.json', () => {

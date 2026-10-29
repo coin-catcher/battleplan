@@ -131,6 +131,10 @@ function parseGeneratedTaskRecords(parsed: unknown[]): TaskDraft[] {
     const templateIds = Array.isArray(record['template_ids'])
       ? record['template_ids'].filter((v): v is string => typeof v === 'string').map((v) => v.trim()).filter(Boolean)
       : undefined;
+    const gitPathsRaw = record['git_paths'] ?? record['collateral_paths'];
+    const gitPaths = Array.isArray(gitPathsRaw)
+      ? gitPathsRaw.filter((v): v is string => typeof v === 'string').map((v) => v.trim()).filter(Boolean)
+      : undefined;
     return {
       title,
       prompt,
@@ -144,6 +148,7 @@ function parseGeneratedTaskRecords(parsed: unknown[]): TaskDraft[] {
       lifecycle_phase: lifecyclePhase,
       ...(repoPath ? { repo_path: repoPath } : {}),
       ...(briefPath ? { brief_path: briefPath } : {}),
+      ...(gitPaths?.length ? { git_paths: gitPaths } : {}),
       ...(patternId ? { pattern_id: patternId } : {}),
       ...(graphId ? { graph_id: graphId } : {}),
       ...(templateIds?.length ? { template_ids: templateIds } : {}),

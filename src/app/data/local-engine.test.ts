@@ -71,6 +71,13 @@ class MemoryRepository implements BattleplanRepository {
   ): Promise<void> {
     this.ui.set(projectId, state);
   }
+  gitMirror = new Map<string, string>();
+  async writeGitMirrorFile(projectId: string, gitRelativePath: string, content: string): Promise<void> {
+    this.gitMirror.set(`${projectId}:${gitRelativePath}`, content);
+  }
+  async readGitMirrorFile(projectId: string, gitRelativePath: string): Promise<string | null> {
+    return this.gitMirror.get(`${projectId}:${gitRelativePath}`) ?? null;
+  }
 }
 
 function cursor(): CursorClient & { prompts: string[] } {

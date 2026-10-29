@@ -16,6 +16,7 @@ import { readJsonFile, writeFileAtomic } from './atomic-write';
 import { normalizeProjectWorkspaceUiState, type ProjectWorkspaceUiState } from '../src/app/core/project-ui-state';
 import type { AppConfigDocument, ProjectDocument, ProjectUiState, StoredArtifact, TaskDocument } from './document-types';
 import { DEFAULT_APP_CONFIG } from './document-types';
+import { assertBattleplanGitMirrorPath } from '../src/app/core/git-mirror-path';
 
 const PROJECT_FILE = 'project_config.json';
 const TASK_FILE = 'task_config.json';
@@ -132,6 +133,23 @@ export class FileRepository implements BattleplanRepository {
     const located = await this.requireTask(output.task_id);
     const next: TaskDocument = { ...located.doc, research_output: output };
     await this.writeTaskDocument(located.projectId, output.task_id, next);
+  }
+
+  async writeGitMirrorFile(projectId: string, gitRelativePath: string, content: string): Promise<void> {
+    const relative = assertBattleplanGitMirrorPath(gitRelativePath);
+    const filePath = path.join(this.projectDir(projectId), ...relative.split('/'));
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await writeFileAtomic(filePath, content);
+  }
+
+  async readGitMirrorFile(projectId: string, gitRelativePath: string): Promise<string | null> {
+    const relative = assertBattleplanGitMirrorPath(gitRelativePath);
+    const filePath = path.join(this.projectDir(projectId), ...relative.split('/'));
+    try {
+      return await fs.readFile(filePath, 'utf8');
+    } catch {
+      return null;
+    }
   }
 
   async listProjectMessages(projectId: string): Promise<ChatMessage[]> {

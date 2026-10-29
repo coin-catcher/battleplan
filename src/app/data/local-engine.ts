@@ -44,10 +44,14 @@ import {
 import { TASK_STATUSES } from '../core/models';
 import { battleplanTaskRepoPath } from '../core/battleplan-storage';
 import {
+  collateralFolderForDraft,
   fetchGithubRepositoryFile,
+  pickBriefPathFromSynced,
   resolveDiscoveryAgentBranch,
+  syncGithubBattleplanFolder,
   taskBriefFromGitFileContent,
 } from '../core/discovery-git-import';
+import { assertBattleplanGitMirrorPath } from '../core/git-mirror-path';
 import { mergeOutputManifest } from '../core/input-documents';
 import { migrateProjectStorageToV2 } from '../core/battleplan-storage-migrate';
 import { buildInputDocumentsSection } from '../core/input-documents';
@@ -151,6 +155,7 @@ interface NormalizedDraft {
   lifecycle_phase?: import('../core/models').LifecyclePhase;
   repo_path?: string;
   brief_path?: string;
+  git_paths?: string[];
   graph_id?: string;
   pattern_id?: string;
   template_ids?: string[];
@@ -623,7 +628,7 @@ export class LocalEngine {
         });
       }
     }
-    await this.hydrateImportedBriefsFromGit(project, created, normalized, agentBranch);
+    await this.syncDiscoveryCollateralFromGit(project, created, normalized, agentBranch);
     const legacyEdges = rebuildGraphEdgesFromLegacy(allTasks);
     const advancedEdges = graphEdgeDrafts?.length
       ? buildGraphEdgesFromDrafts(existing, created, graphEdgeDrafts)
@@ -639,7 +644,7 @@ export class LocalEngine {
     return created;
   }
 
-  private async hydrateImportedBriefsFromGit(
+  private async syncDiscoveryCollateralFromGit(
     project: Project,
     created: ProjectTask[],
     normalized: NormalizedDraft[],
@@ -648,42 +653,61 @@ export class LocalEngine {
     const token = project.github_pat?.trim();
     const slug = projectRepoSlug(project);
     if (!token || !slug) return;
+    const writeMirrorFile = (gitRelativePath: string, content: string) =>
+      this.repo.writeGitMirrorFile(project.project_id, gitRelativePath, content);
     for (let index = 0; index < created.length; index++) {
       const task = created[index];
       const draft = normalized[index];
-      const briefPath = draft?.brief_path?.trim();
-      if (!briefPath || draft.brief) continue;
-      let path = briefPath;
-      let content = await fetchGithubRepositoryFile({
-        token,
-        owner: slug.owner,
-        repo: slug.repo,
-        path,
-        ref: agentBranch,
-      });
-      if (!content) {
-        const alt = path.toLowerCase().endsWith('brief.md')
-          ? path.replace(/brief\.md$/i, 'task-brief.json')
-          : `${path.replace(/\/?$/, '/')}brief.md`;
-        if (alt !== path) {
-          path = alt;
-          content = await fetchGithubRepositoryFile({
+      if (!draft) continue;
+      const folder = collateralFolderForDraft(draft);
+      const extraPaths = draft.git_paths ?? [];
+      if (!folder && extraPaths.length === 0) continue;
+
+      const synced = new Set<string>();
+      if (folder) {
+        for (const path of await syncGithubBattleplanFolder({
+          token,
+          owner: slug.owner,
+          repo: slug.repo,
+          ref: agentBranch,
+          folderPath: folder,
+          writeMirrorFile,
+        })) {
+          synced.add(path);
+        }
+      }
+      for (const rawPath of extraPaths) {
+        try {
+          const path = assertBattleplanGitMirrorPath(rawPath);
+          if (synced.has(path)) continue;
+          const content = await fetchGithubRepositoryFile({
             token,
             owner: slug.owner,
             repo: slug.repo,
             path,
             ref: agentBranch,
           });
+          if (content === null) continue;
+          await writeMirrorFile(path, content);
+          synced.add(path);
+        } catch {
+          continue;
         }
       }
-      if (!content) continue;
-      const fromGit = taskBriefFromGitFileContent(content, path);
-      if (!fromGit) continue;
-      task.brief = completeBriefForTask(task, project, fromGit);
-      task.output_manifest = mergeOutputManifest(task.output_manifest, [{
+      if (synced.size === 0) continue;
+
+      const manifestEntries = [...synced].map((path) => ({
         path,
-        description: 'Discovery brief imported from git',
-      }]);
+        description: 'Mirrored from discovery agent branch',
+      }));
+      task.output_manifest = mergeOutputManifest(task.output_manifest, manifestEntries);
+
+      const briefPath = pickBriefPathFromSynced([...synced], draft.brief_path);
+      if (briefPath && !draft.brief) {
+        const localBrief = await this.repo.readGitMirrorFile(project.project_id, briefPath);
+        const fromGit = localBrief ? taskBriefFromGitFileContent(localBrief, briefPath) : undefined;
+        if (fromGit) task.brief = completeBriefForTask(task, project, fromGit);
+      }
       task.updated_at = this.now();
       await this.repo.saveTask(task);
     }
@@ -2362,6 +2386,7 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
       lifecycle_phase: item.lifecycle_phase,
       repo_path: item.repo_path,
       brief_path: item.brief_path,
+      git_paths: item.git_paths,
     };
     if (types.length === 1) {
       normalized.push({ title, prompt, output_type: types[0], depends_on: depends, sequential_with: sequential, ...meta });

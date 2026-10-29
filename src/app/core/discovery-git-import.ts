@@ -3,9 +3,18 @@ import { branchNamesFromRun, pickTaskAgentBranch } from './agent-branch';
 import type { Project, ProjectTask } from './models';
 import { parseReleaseVersionBranch } from './release-version';
 import { projectRepoSlug } from './pending-changes';
+import { assertBattleplanGitMirrorPath, normalizeGitMirrorRelativePath, repoFolderFromDraftPaths } from './git-mirror-path';
 import { normalizeTaskBrief, TASK_BRIEF_FIELDS, type TaskBrief, type TaskBriefField } from './task-brief';
 
 const DEFAULT_DEVELOP_BRANCH = 'develop';
+
+type GithubContentsEntry = {
+  path?: string;
+  type?: 'file' | 'dir' | 'symlink' | 'submodule';
+  content?: string;
+  encoding?: string;
+  download_url?: string;
+};
 
 const HEADING_FIELD: Record<string, TaskBriefField> = {
   goal: 'goal',
@@ -19,6 +28,32 @@ const HEADING_FIELD: Record<string, TaskBriefField> = {
   standing: 'standing',
 };
 
+function githubContentsUrl(owner: string, repo: string, filePath: string, ref: string): string {
+  const path = normalizeGitMirrorRelativePath(filePath);
+  return `https://api.github.com/repos/${owner}/${repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(ref)}`;
+}
+
+function githubAuthHeaders(token: string): HeadersInit {
+  return {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${token.trim()}`,
+    'User-Agent': 'battleplan-desktop',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+}
+
+function decodeGithubBase64Content(content: string): string | null {
+  const raw = content.replace(/\n/g, '');
+  try {
+    const binary = atob(raw);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
 /** GitHub Contents API — returns decoded UTF-8 or null when missing / unreadable. */
 export async function fetchGithubRepositoryFile(input: {
   token: string;
@@ -30,28 +65,93 @@ export async function fetchGithubRepositoryFile(input: {
   const path = input.path.replace(/^\/+/, '');
   const ref = input.ref.trim();
   if (!path || !ref) return null;
-  const url = `https://api.github.com/repos/${input.owner}/${input.repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(ref)}`;
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${input.token.trim()}`,
-      'User-Agent': 'battleplan-desktop',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
+  const response = await fetch(githubContentsUrl(input.owner, input.repo, path, ref), {
+    headers: githubAuthHeaders(input.token),
   });
   if (response.status === 404) return null;
   if (!response.ok) return null;
-  const data = await response.json() as { content?: string; encoding?: string };
+  const data = await response.json() as GithubContentsEntry;
   if (data.encoding !== 'base64' || typeof data.content !== 'string') return null;
-  const raw = data.content.replace(/\n/g, '');
-  try {
-    const binary = atob(raw);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return new TextDecoder().decode(bytes);
-  } catch {
-    return null;
+  return decodeGithubBase64Content(data.content);
+}
+
+async function listGithubRepositoryFiles(input: {
+  token: string;
+  owner: string;
+  repo: string;
+  folderPath: string;
+  ref: string;
+}): Promise<string[]> {
+  const folder = input.folderPath.replace(/^\/+/, '').replace(/\/?$/, '');
+  if (!folder) return [];
+  const response = await fetch(githubContentsUrl(input.owner, input.repo, folder, input.ref), {
+    headers: githubAuthHeaders(input.token),
+  });
+  if (response.status === 404) return [];
+  if (!response.ok) return [];
+  const data = await response.json();
+  if (!Array.isArray(data)) {
+    return typeof (data as GithubContentsEntry)?.path === 'string' ? [(data as GithubContentsEntry).path!] : [];
   }
+  const paths: string[] = [];
+  for (const entry of data as GithubContentsEntry[]) {
+    if (!entry.path) continue;
+    if (entry.type === 'file') paths.push(entry.path);
+    else if (entry.type === 'dir') {
+      paths.push(...await listGithubRepositoryFiles({ ...input, folderPath: entry.path }));
+    }
+  }
+  return paths;
+}
+
+export interface SyncGithubBattleplanFolderInput {
+  token: string;
+  owner: string;
+  repo: string;
+  ref: string;
+  folderPath: string;
+  writeMirrorFile: (gitRelativePath: string, content: string) => Promise<void>;
+}
+
+/** Download every file under a git folder and write into the local battleplan/ mirror. */
+export async function syncGithubBattleplanFolder(input: SyncGithubBattleplanFolderInput): Promise<string[]> {
+  const folder = assertBattleplanGitMirrorPath(input.folderPath.replace(/\/?$/, ''));
+  const filePaths = await listGithubRepositoryFiles({
+    token: input.token,
+    owner: input.owner,
+    repo: input.repo,
+    folderPath: folder,
+    ref: input.ref,
+  });
+  const synced: string[] = [];
+  for (const filePath of filePaths) {
+    const normalized = assertBattleplanGitMirrorPath(filePath);
+    if (!normalized.startsWith(folder)) continue;
+    const content = await fetchGithubRepositoryFile({
+      token: input.token,
+      owner: input.owner,
+      repo: input.repo,
+      path: normalized,
+      ref: input.ref,
+    });
+    if (content === null) continue;
+    await input.writeMirrorFile(normalized, content);
+    synced.push(normalized);
+  }
+  return synced;
+}
+
+export function pickBriefPathFromSynced(syncedPaths: string[], briefPathHint?: string): string | undefined {
+  const hint = briefPathHint?.trim();
+  if (hint && syncedPaths.includes(hint.replace(/\\/g, '/'))) return hint.replace(/\\/g, '/');
+  const lower = syncedPaths.map((p) => p.toLowerCase());
+  const briefMd = syncedPaths.find((_, i) => lower[i]?.endsWith('/brief.md') || lower[i]?.endsWith('brief.md'));
+  if (briefMd) return briefMd;
+  return syncedPaths.find((p) => p.toLowerCase().endsWith('task-brief.json'));
+}
+
+export function collateralFolderForDraft(draft: { repo_path?: string; brief_path?: string }): string | undefined {
+  return repoFolderFromDraftPaths(draft.repo_path, draft.brief_path);
 }
 
 export function taskBriefFromGitFileContent(content: string, filePath: string): TaskBrief | undefined {

@@ -137,4 +137,14 @@ describe('FileRepository', () => {
     expect(raw.agents).toHaveLength(1);
     expect(raw.agent_usage_ledger.a1.tokens_period).toBe(100);
   });
+
+  it('mirrors git-relative battleplan paths under the project workspace', async () => {
+    const repo = await makeRepo();
+    await repo.saveProject(project('p1'));
+    const gitPath = 'battleplan/projects/p1/tasks/partition-a/outputs/brief.md';
+    await repo.writeGitMirrorFile('p1', gitPath, '## Goal\nShip it.\n');
+    const absolute = path.join(await repo.root(), 'p1', ...gitPath.split('/'));
+    expect(await fs.readFile(absolute, 'utf8')).toContain('Ship it.');
+    expect(await repo.readGitMirrorFile('p1', gitPath)).toContain('Ship it.');
+  });
 });
