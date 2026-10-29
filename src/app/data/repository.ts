@@ -49,4 +49,10 @@ export interface BattleplanRepository {
   /** Write a git-relative battleplan/ path under the project workspace (mirrors GitHub layout). */
   writeGitMirrorFile(projectId: string, gitRelativePath: string, content: string): Promise<void>;
   readGitMirrorFile(projectId: string, gitRelativePath: string): Promise<string | null>;
+  ensureLocalWorkspaceLayout(): Promise<void>;
+  stageUpstreamInputsForTask(
+    projectId: string,
+    taskId: string,
+    upstream: Array<{ task_id: string; title: string; repo_path?: string }>,
+  ): Promise<number>;
 }

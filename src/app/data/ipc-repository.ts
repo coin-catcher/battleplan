@@ -133,4 +133,16 @@ export class IpcRepository implements BattleplanRepository {
   readGitMirrorFile(projectId: string, gitRelativePath: string): Promise<string | null> {
     return bridge().invoke('repo:readGitMirrorFile', projectId, gitRelativePath);
   }
+
+  ensureLocalWorkspaceLayout(): Promise<void> {
+    return bridge().invoke('repo:ensureLocalWorkspaceLayout');
+  }
+
+  stageUpstreamInputsForTask(
+    projectId: string,
+    taskId: string,
+    upstream: Array<{ task_id: string; title: string; repo_path?: string }>,
+  ): Promise<number> {
+    return bridge().invoke('repo:stageUpstreamInputsForTask', projectId, taskId, upstream);
+  }
 }

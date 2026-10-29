@@ -271,6 +271,10 @@ export class IdbRepository implements BattleplanRepository {
     return this.gitMirror.get(`${projectId}:${gitRelativePath.replace(/\\/g, '/')}`) ?? null;
   }
 
+  async ensureLocalWorkspaceLayout(): Promise<void> { return; }
+
+  async stageUpstreamInputsForTask(): Promise<number> { return 0; }
+
   private async requireProjectRecord(projectId: string): Promise<ProjectStoreRecord> {
     const record = await this.get<ProjectStoreRecord>('projects', projectId);
     if (!record) throw new Error(`Project ${projectId} was not found.`);

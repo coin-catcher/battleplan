@@ -53,8 +53,9 @@ import {
 } from '../core/discovery-git-import';
 import { assertBattleplanGitMirrorPath } from '../core/git-mirror-path';
 import { mergeOutputManifest } from '../core/input-documents';
+import { BATTLEPLAN_STORAGE_VERSION } from '../core/battleplan-storage';
 import { migrateProjectStorageToV2 } from '../core/battleplan-storage-migrate';
-import { buildInputDocumentsSection } from '../core/input-documents';
+import { buildInputDocumentsSection, collectUpstreamTaskIds } from '../core/input-documents';
 import type { N8nWorkflowDefinition } from '../core/n8n-workflow';
 import type { CursorClient, CursorRun } from './cursor-browser';
 import { normalizeRepoUrl } from './cursor-browser';
@@ -433,12 +434,13 @@ export class LocalEngine {
     }
     const storage = migrateProjectStorageToV2(project, tasks);
     let workingTasks = tasks;
-    if (storage.migratedTasks > 0 || (project.battleplan_storage_version ?? 1) < 2) {
+    if (storage.migratedTasks > 0 || (project.battleplan_storage_version ?? 1) < BATTLEPLAN_STORAGE_VERSION) {
       await this.repo.saveProject(storage.project);
       await this.repo.saveTasks(storage.tasks);
       project = storage.project;
       workingTasks = storage.tasks;
     }
+    await this.repo.ensureLocalWorkspaceLayout();
     if (!project.task_graph_edges?.length) {
       project.task_graph_edges = rebuildGraphEdgesFromLegacy(workingTasks);
       project.updated_at = this.now();
@@ -1213,6 +1215,22 @@ export class LocalEngine {
     if (!initial) throw new Error('Initial prompt is required.');
     await this.assertDependenciesDone(task);
     const project = await this.requireProject(task.project_id);
+    const projectTasks = await this.listTasks(task.project_id);
+    const upstreamIds = collectUpstreamTaskIds(task, projectTasks);
+    if (upstreamIds.length) {
+      await this.repo.stageUpstreamInputsForTask(
+        task.project_id,
+        task.task_id,
+        upstreamIds.map((upstreamId) => {
+          const upstream = projectTasks.find((item) => item.task_id === upstreamId)!;
+          return {
+            task_id: upstream.task_id,
+            title: upstream.title,
+            repo_path: upstream.repo_path,
+          };
+        }),
+      );
+    }
     await this.seedAgentLibraryForProject(task.project_id);
     const agents = await this.repo.listProjectAgents(task.project_id);
     const researchAgent = findProjectAgent(agents, resolveResearchAgentId(task, project));
