@@ -16,16 +16,35 @@ import { readJsonFile, writeFileAtomic } from './atomic-write';
 import { normalizeProjectWorkspaceUiState, type ProjectWorkspaceUiState } from '../src/app/core/project-ui-state';
 import type { AppConfigDocument, ProjectDocument, ProjectUiState, StoredArtifact, TaskDocument } from './document-types';
 import { DEFAULT_APP_CONFIG } from './document-types';
+import { assertBattleplanGitMirrorPath } from '../src/app/core/git-mirror-path';
+import { userDataRootFromProjectsDataRoot } from '../src/app/core/local-workspace-layout';
+import { migrateLocalWorkspaceLayout } from './local-workspace-migrate';
+import { stageUpstreamInputsForTask, type UpstreamInputSpec } from './task-workspace-staging';
 
 const PROJECT_FILE = 'project_config.json';
 const TASK_FILE = 'task_config.json';
 const APP_CONFIG_FILE = 'app_config.json';
 
 export class FileRepository implements BattleplanRepository {
-  constructor(private readonly rootDir: string) {}
+  private readonly userDataRoot: string;
+  private layoutMigrated = false;
+
+  constructor(private readonly rootDir: string) {
+    this.userDataRoot = userDataRootFromProjectsDataRoot(rootDir);
+  }
 
   root(): string {
     return this.rootDir;
+  }
+
+  userData(): string {
+    return this.userDataRoot;
+  }
+
+  async ensureLocalWorkspaceLayout(): Promise<void> {
+    if (this.layoutMigrated) return;
+    await migrateLocalWorkspaceLayout(this.rootDir);
+    this.layoutMigrated = true;
   }
 
   async readAppConfig(): Promise<AppConfigDocument> {
@@ -95,12 +114,13 @@ export class FileRepository implements BattleplanRepository {
   }
 
   async listTasks(projectId: string): Promise<ProjectTask[]> {
-    const projectPath = this.projectDir(projectId);
-    const entries = await this.safeReadDir(projectPath);
+    await this.ensureLocalWorkspaceLayout();
     const tasks: ProjectTask[] = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const doc = await this.readTaskDocument(projectId, entry.name);
+    const seen = new Set<string>();
+    for (const taskId of await this.listTaskIds(projectId)) {
+      if (seen.has(taskId)) continue;
+      seen.add(taskId);
+      const doc = await this.readTaskDocument(projectId, taskId);
       if (doc?.task) tasks.push(doc.task);
     }
     return tasks.sort((left, right) => left.order - right.order || left.created_at.localeCompare(right.created_at));
@@ -132,6 +152,34 @@ export class FileRepository implements BattleplanRepository {
     const located = await this.requireTask(output.task_id);
     const next: TaskDocument = { ...located.doc, research_output: output };
     await this.writeTaskDocument(located.projectId, output.task_id, next);
+  }
+
+  async writeGitMirrorFile(projectId: string, gitRelativePath: string, content: string): Promise<void> {
+    await this.ensureLocalWorkspaceLayout();
+    const relative = assertBattleplanGitMirrorPath(gitRelativePath);
+    const filePath = path.join(this.userDataRoot, ...relative.split('/'));
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await writeFileAtomic(filePath, content);
+  }
+
+  async readGitMirrorFile(projectId: string, gitRelativePath: string): Promise<string | null> {
+    await this.ensureLocalWorkspaceLayout();
+    const relative = assertBattleplanGitMirrorPath(gitRelativePath);
+    const filePath = path.join(this.userDataRoot, ...relative.split('/'));
+    try {
+      return await fs.readFile(filePath, 'utf8');
+    } catch {
+      return null;
+    }
+  }
+
+  async stageUpstreamInputsForTask(
+    projectId: string,
+    taskId: string,
+    upstream: UpstreamInputSpec[],
+  ): Promise<number> {
+    await this.ensureLocalWorkspaceLayout();
+    return stageUpstreamInputsForTask(this.rootDir, projectId, taskId, upstream);
   }
 
   async listProjectMessages(projectId: string): Promise<ChatMessage[]> {
@@ -299,8 +347,37 @@ export class FileRepository implements BattleplanRepository {
     return path.join(this.rootDir, projectId);
   }
 
+  private tasksCollectionDir(projectId: string): string {
+    return path.join(this.projectDir(projectId), 'tasks');
+  }
+
   private taskDir(projectId: string, taskId: string): string {
+    return path.join(this.tasksCollectionDir(projectId), taskId);
+  }
+
+  private legacyTaskDir(projectId: string, taskId: string): string {
     return path.join(this.projectDir(projectId), taskId);
+  }
+
+  private async listTaskIds(projectId: string): Promise<string[]> {
+    const ids: string[] = [];
+    const projectPath = this.projectDir(projectId);
+    const tasksPath = this.tasksCollectionDir(projectId);
+    for (const entry of await this.safeReadDir(tasksPath)) {
+      if (entry.isDirectory()) ids.push(entry.name);
+    }
+    for (const entry of await this.safeReadDir(projectPath)) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === 'tasks' || entry.name === 'battleplan') continue;
+      const config = path.join(projectPath, entry.name, TASK_FILE);
+      try {
+        await fs.access(config);
+        ids.push(entry.name);
+      } catch {
+        continue;
+      }
+    }
+    return ids;
   }
 
   private projectConfigPath(projectId: string): string {
@@ -321,12 +398,18 @@ export class FileRepository implements BattleplanRepository {
   }
 
   private async readTaskDocument(projectId: string, taskId: string): Promise<TaskDocument | null> {
-    return readJsonFile<TaskDocument>(this.taskConfigPath(projectId, taskId));
+    const primary = await readJsonFile<TaskDocument>(this.taskConfigPath(projectId, taskId));
+    if (primary) return primary;
+    return readJsonFile<TaskDocument>(this.legacyTaskConfigPath(projectId, taskId));
   }
 
   private async writeTaskDocument(projectId: string, taskId: string, doc: TaskDocument): Promise<void> {
     await fs.mkdir(this.taskDir(projectId, taskId), { recursive: true });
     await writeFileAtomic(this.taskConfigPath(projectId, taskId), JSON.stringify(doc, null, 2));
+  }
+
+  private legacyTaskConfigPath(projectId: string, taskId: string): string {
+    return path.join(this.legacyTaskDir(projectId, taskId), TASK_FILE);
   }
 
   private async requireProjectDocument(projectId: string): Promise<ProjectDocument> {
@@ -342,11 +425,12 @@ export class FileRepository implements BattleplanRepository {
   }
 
   private async locateTask(taskId: string): Promise<{ projectId: string; doc: TaskDocument } | null> {
+    await this.ensureLocalWorkspaceLayout();
     const projects = await this.safeReadDir(this.rootDir);
     for (const projectEntry of projects) {
       if (!projectEntry.isDirectory()) continue;
       const projectId = projectEntry.name;
-      if (projectId === APP_CONFIG_FILE) continue;
+      if (!(await readJsonFile<ProjectDocument>(this.projectConfigPath(projectId)))) continue;
       const doc = await this.readTaskDocument(projectId, taskId);
       if (doc?.task) return { projectId, doc };
     }

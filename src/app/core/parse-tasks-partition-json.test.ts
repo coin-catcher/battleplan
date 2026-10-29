@@ -28,5 +28,6 @@ describe('parse-tasks partition agent JSON', () => {
     expect(parsed.tasks[0]?.repo_path).toBe(
       'battleplan/projects/switch-to-supabase/tasks/partition-01-supabase-backend-foundation/outputs/',
     );
+    expect(parsed.tasks[0]?.brief_path).toContain('brief.md');
   });
 });

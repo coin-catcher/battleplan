@@ -137,4 +137,29 @@ describe('FileRepository', () => {
     expect(raw.agents).toHaveLength(1);
     expect(raw.agent_usage_ledger.a1.tokens_period).toBe(100);
   });
+
+  it('mirrors git-relative battleplan paths under userData/battleplan', async () => {
+    const repo = await makeRepo();
+    await repo.saveProject(project('p1'));
+    const gitPath = 'battleplan/projects/p1/tasks/partition-a/outputs/brief.md';
+    await repo.writeGitMirrorFile('p1', gitPath, '## Goal\nShip it.\n');
+    const absolute = path.join(repo.userData(), ...gitPath.split('/'));
+    expect(await fs.readFile(absolute, 'utf8')).toContain('Ship it.');
+    expect(await repo.readGitMirrorFile('p1', gitPath)).toContain('Ship it.');
+  });
+
+  it('migrates legacy task metadata into projects/{id}/tasks/{taskId}', async () => {
+    const repo = await makeRepo();
+    const root = await repo.root();
+    const userData = repo.userData();
+    await fs.mkdir(path.join(root, 'p1', 'legacy-task'), { recursive: true });
+    await fs.writeFile(
+      path.join(root, 'p1', 'legacy-task', 'task_config.json'),
+      JSON.stringify({ task: task('legacy-task', 'p1') }),
+    );
+    await repo.ensureLocalWorkspaceLayout();
+    expect(await fs.readFile(path.join(root, 'p1', 'tasks', 'legacy-task', 'task_config.json'), 'utf8')).toContain('legacy-task');
+    expect(await fs.access(path.join(root, 'p1', 'legacy-task')).then(() => true).catch(() => false)).toBe(false);
+    void userData;
+  });
 });

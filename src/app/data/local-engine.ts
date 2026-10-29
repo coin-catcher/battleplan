@@ -43,8 +43,19 @@ import {
 } from '../core/github-client';
 import { TASK_STATUSES } from '../core/models';
 import { battleplanTaskRepoPath } from '../core/battleplan-storage';
+import {
+  collateralFolderForDraft,
+  fetchGithubRepositoryFile,
+  pickBriefPathFromSynced,
+  resolveDiscoveryAgentBranch,
+  syncGithubBattleplanFolder,
+  taskBriefFromGitFileContent,
+} from '../core/discovery-git-import';
+import { assertBattleplanGitMirrorPath } from '../core/git-mirror-path';
+import { mergeOutputManifest } from '../core/input-documents';
+import { BATTLEPLAN_STORAGE_VERSION } from '../core/battleplan-storage';
 import { migrateProjectStorageToV2 } from '../core/battleplan-storage-migrate';
-import { buildInputDocumentsSection } from '../core/input-documents';
+import { buildInputDocumentsSection, collectUpstreamTaskIds } from '../core/input-documents';
 import type { N8nWorkflowDefinition } from '../core/n8n-workflow';
 import type { CursorClient, CursorRun } from './cursor-browser';
 import { normalizeRepoUrl } from './cursor-browser';
@@ -144,10 +155,19 @@ interface NormalizedDraft {
   connector_kind?: TaskConnectorKind;
   lifecycle_phase?: import('../core/models').LifecyclePhase;
   repo_path?: string;
+  brief_path?: string;
+  git_paths?: string[];
   graph_id?: string;
   pattern_id?: string;
   template_ids?: string[];
   cross_graph_edit_rationale?: string;
+}
+
+export interface CreateTasksOptions {
+  /** Discovery root task — used to resolve the agent branch for git brief hydration. */
+  sourceTaskId?: string;
+  agentBranchHint?: string;
+  assistantReplyText?: string;
 }
 
 function briefBuildInput(
@@ -414,12 +434,13 @@ export class LocalEngine {
     }
     const storage = migrateProjectStorageToV2(project, tasks);
     let workingTasks = tasks;
-    if (storage.migratedTasks > 0 || (project.battleplan_storage_version ?? 1) < 2) {
+    if (storage.migratedTasks > 0 || (project.battleplan_storage_version ?? 1) < BATTLEPLAN_STORAGE_VERSION) {
       await this.repo.saveProject(storage.project);
       await this.repo.saveTasks(storage.tasks);
       project = storage.project;
       workingTasks = storage.tasks;
     }
+    await this.repo.ensureLocalWorkspaceLayout();
     if (!project.task_graph_edges?.length) {
       project.task_graph_edges = rebuildGraphEdgesFromLegacy(workingTasks);
       project.updated_at = this.now();
@@ -534,6 +555,7 @@ export class LocalEngine {
     drafts: TaskDraft[],
     parentTaskId?: string,
     graphEdgeDrafts?: GeneratedTaskEdgeDraft[],
+    options?: CreateTasksOptions,
   ): Promise<ProjectTask[]> {
     await this.requireProject(projectId);
     const normalized = normalizeDrafts(drafts);
@@ -578,18 +600,6 @@ export class LocalEngine {
         cross_graph_edit_rationale: draft.cross_graph_edit_rationale,
       };
     });
-    for (const task of created) {
-      if (task.output_type === 'research' && task.repo_path) {
-        await this.repo.saveResearchOutput({
-          task_id: task.task_id,
-          repo: normalizeRepoUrl(project.repo_url || ''),
-          branch: project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH,
-          pr_message: task.title.slice(0, 500),
-          pr_link: '',
-          path: task.repo_path,
-        });
-      }
-    }
     bindDraftDependsOn(existing, created, normalized);
     bindSequentialDraftLinks(existing, created, normalized);
     if (parentTaskId) {
@@ -597,6 +607,30 @@ export class LocalEngine {
     }
     const allTasks = [...existing, ...created];
     await this.repo.saveTasks(allTasks);
+    const sourceTask = options?.sourceTaskId
+      ? allTasks.find((item) => item.task_id === options.sourceTaskId)
+        ?? await this.repo.getTask(options.sourceTaskId)
+      : null;
+    const agentBranch = await resolveDiscoveryAgentBranch({
+      project,
+      sourceTask,
+      cursor: this.cursor,
+      replyText: options?.assistantReplyText,
+      branchHint: options?.agentBranchHint,
+    });
+    for (const task of created) {
+      if (task.output_type === 'research' && task.repo_path) {
+        await this.repo.saveResearchOutput({
+          task_id: task.task_id,
+          repo: normalizeRepoUrl(project.repo_url || ''),
+          branch: agentBranch,
+          pr_message: task.title.slice(0, 500),
+          pr_link: '',
+          path: task.repo_path,
+        });
+      }
+    }
+    await this.syncDiscoveryCollateralFromGit(project, created, normalized, agentBranch);
     const legacyEdges = rebuildGraphEdgesFromLegacy(allTasks);
     const advancedEdges = graphEdgeDrafts?.length
       ? buildGraphEdgesFromDrafts(existing, created, graphEdgeDrafts)
@@ -610,6 +644,75 @@ export class LocalEngine {
     project.updated_at = this.now();
     await this.repo.saveProject(project);
     return created;
+  }
+
+  private async syncDiscoveryCollateralFromGit(
+    project: Project,
+    created: ProjectTask[],
+    normalized: NormalizedDraft[],
+    agentBranch: string,
+  ): Promise<void> {
+    const token = project.github_pat?.trim();
+    const slug = projectRepoSlug(project);
+    if (!token || !slug) return;
+    const writeMirrorFile = (gitRelativePath: string, content: string) =>
+      this.repo.writeGitMirrorFile(project.project_id, gitRelativePath, content);
+    for (let index = 0; index < created.length; index++) {
+      const task = created[index];
+      const draft = normalized[index];
+      if (!draft) continue;
+      const folder = collateralFolderForDraft(draft);
+      const extraPaths = draft.git_paths ?? [];
+      if (!folder && extraPaths.length === 0) continue;
+
+      const synced = new Set<string>();
+      if (folder) {
+        for (const path of await syncGithubBattleplanFolder({
+          token,
+          owner: slug.owner,
+          repo: slug.repo,
+          ref: agentBranch,
+          folderPath: folder,
+          writeMirrorFile,
+        })) {
+          synced.add(path);
+        }
+      }
+      for (const rawPath of extraPaths) {
+        try {
+          const path = assertBattleplanGitMirrorPath(rawPath);
+          if (synced.has(path)) continue;
+          const content = await fetchGithubRepositoryFile({
+            token,
+            owner: slug.owner,
+            repo: slug.repo,
+            path,
+            ref: agentBranch,
+          });
+          if (content === null) continue;
+          await writeMirrorFile(path, content);
+          synced.add(path);
+        } catch {
+          continue;
+        }
+      }
+      if (synced.size === 0) continue;
+
+      const manifestEntries = [...synced].map((path) => ({
+        path,
+        description: 'Mirrored from discovery agent branch',
+      }));
+      task.output_manifest = mergeOutputManifest(task.output_manifest, manifestEntries);
+
+      const briefPath = pickBriefPathFromSynced([...synced], draft.brief_path);
+      if (briefPath && !draft.brief) {
+        const localBrief = await this.repo.readGitMirrorFile(project.project_id, briefPath);
+        const fromGit = localBrief ? taskBriefFromGitFileContent(localBrief, briefPath) : undefined;
+        if (fromGit) task.brief = completeBriefForTask(task, project, fromGit);
+      }
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
+    }
   }
 
   async relocateMindmapLink(
@@ -1112,6 +1215,22 @@ export class LocalEngine {
     if (!initial) throw new Error('Initial prompt is required.');
     await this.assertDependenciesDone(task);
     const project = await this.requireProject(task.project_id);
+    const projectTasks = await this.listTasks(task.project_id);
+    const upstreamIds = collectUpstreamTaskIds(task, projectTasks);
+    if (upstreamIds.length) {
+      await this.repo.stageUpstreamInputsForTask(
+        task.project_id,
+        task.task_id,
+        upstreamIds.map((upstreamId) => {
+          const upstream = projectTasks.find((item) => item.task_id === upstreamId)!;
+          return {
+            task_id: upstream.task_id,
+            title: upstream.title,
+            repo_path: upstream.repo_path,
+          };
+        }),
+      );
+    }
     await this.seedAgentLibraryForProject(task.project_id);
     const agents = await this.repo.listProjectAgents(task.project_id);
     const researchAgent = findProjectAgent(agents, resolveResearchAgentId(task, project));
@@ -2284,6 +2403,8 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
       connector_kind: item.connector_kind,
       lifecycle_phase: item.lifecycle_phase,
       repo_path: item.repo_path,
+      brief_path: item.brief_path,
+      git_paths: item.git_paths,
     };
     if (types.length === 1) {
       normalized.push({ title, prompt, output_type: types[0], depends_on: depends, sequential_with: sequential, ...meta });
