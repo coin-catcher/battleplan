@@ -43,6 +43,12 @@ import {
 } from '../core/github-client';
 import { TASK_STATUSES } from '../core/models';
 import { battleplanTaskRepoPath } from '../core/battleplan-storage';
+import {
+  fetchGithubRepositoryFile,
+  resolveDiscoveryAgentBranch,
+  taskBriefFromGitFileContent,
+} from '../core/discovery-git-import';
+import { mergeOutputManifest } from '../core/input-documents';
 import { migrateProjectStorageToV2 } from '../core/battleplan-storage-migrate';
 import { buildInputDocumentsSection } from '../core/input-documents';
 import type { N8nWorkflowDefinition } from '../core/n8n-workflow';
@@ -144,10 +150,18 @@ interface NormalizedDraft {
   connector_kind?: TaskConnectorKind;
   lifecycle_phase?: import('../core/models').LifecyclePhase;
   repo_path?: string;
+  brief_path?: string;
   graph_id?: string;
   pattern_id?: string;
   template_ids?: string[];
   cross_graph_edit_rationale?: string;
+}
+
+export interface CreateTasksOptions {
+  /** Discovery root task — used to resolve the agent branch for git brief hydration. */
+  sourceTaskId?: string;
+  agentBranchHint?: string;
+  assistantReplyText?: string;
 }
 
 function briefBuildInput(
@@ -534,6 +548,7 @@ export class LocalEngine {
     drafts: TaskDraft[],
     parentTaskId?: string,
     graphEdgeDrafts?: GeneratedTaskEdgeDraft[],
+    options?: CreateTasksOptions,
   ): Promise<ProjectTask[]> {
     await this.requireProject(projectId);
     const normalized = normalizeDrafts(drafts);
@@ -585,18 +600,30 @@ export class LocalEngine {
     }
     const allTasks = [...existing, ...created];
     await this.repo.saveTasks(allTasks);
+    const sourceTask = options?.sourceTaskId
+      ? allTasks.find((item) => item.task_id === options.sourceTaskId)
+        ?? await this.repo.getTask(options.sourceTaskId)
+      : null;
+    const agentBranch = await resolveDiscoveryAgentBranch({
+      project,
+      sourceTask,
+      cursor: this.cursor,
+      replyText: options?.assistantReplyText,
+      branchHint: options?.agentBranchHint,
+    });
     for (const task of created) {
       if (task.output_type === 'research' && task.repo_path) {
         await this.repo.saveResearchOutput({
           task_id: task.task_id,
           repo: normalizeRepoUrl(project.repo_url || ''),
-          branch: project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH,
+          branch: agentBranch,
           pr_message: task.title.slice(0, 500),
           pr_link: '',
           path: task.repo_path,
         });
       }
     }
+    await this.hydrateImportedBriefsFromGit(project, created, normalized, agentBranch);
     const legacyEdges = rebuildGraphEdgesFromLegacy(allTasks);
     const advancedEdges = graphEdgeDrafts?.length
       ? buildGraphEdgesFromDrafts(existing, created, graphEdgeDrafts)
@@ -610,6 +637,56 @@ export class LocalEngine {
     project.updated_at = this.now();
     await this.repo.saveProject(project);
     return created;
+  }
+
+  private async hydrateImportedBriefsFromGit(
+    project: Project,
+    created: ProjectTask[],
+    normalized: NormalizedDraft[],
+    agentBranch: string,
+  ): Promise<void> {
+    const token = project.github_pat?.trim();
+    const slug = projectRepoSlug(project);
+    if (!token || !slug) return;
+    for (let index = 0; index < created.length; index++) {
+      const task = created[index];
+      const draft = normalized[index];
+      const briefPath = draft?.brief_path?.trim();
+      if (!briefPath || draft.brief) continue;
+      let path = briefPath;
+      let content = await fetchGithubRepositoryFile({
+        token,
+        owner: slug.owner,
+        repo: slug.repo,
+        path,
+        ref: agentBranch,
+      });
+      if (!content) {
+        const alt = path.toLowerCase().endsWith('brief.md')
+          ? path.replace(/brief\.md$/i, 'task-brief.json')
+          : `${path.replace(/\/?$/, '/')}brief.md`;
+        if (alt !== path) {
+          path = alt;
+          content = await fetchGithubRepositoryFile({
+            token,
+            owner: slug.owner,
+            repo: slug.repo,
+            path,
+            ref: agentBranch,
+          });
+        }
+      }
+      if (!content) continue;
+      const fromGit = taskBriefFromGitFileContent(content, path);
+      if (!fromGit) continue;
+      task.brief = completeBriefForTask(task, project, fromGit);
+      task.output_manifest = mergeOutputManifest(task.output_manifest, [{
+        path,
+        description: 'Discovery brief imported from git',
+      }]);
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
+    }
   }
 
   async relocateMindmapLink(
@@ -2284,6 +2361,7 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
       connector_kind: item.connector_kind,
       lifecycle_phase: item.lifecycle_phase,
       repo_path: item.repo_path,
+      brief_path: item.brief_path,
     };
     if (types.length === 1) {
       normalized.push({ title, prompt, output_type: types[0], depends_on: depends, sequential_with: sequential, ...meta });

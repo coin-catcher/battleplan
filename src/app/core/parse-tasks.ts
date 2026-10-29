@@ -143,6 +143,7 @@ function parseGeneratedTaskRecords(parsed: unknown[]): TaskDraft[] {
       connector_kind: connector,
       lifecycle_phase: lifecyclePhase,
       ...(repoPath ? { repo_path: repoPath } : {}),
+      ...(briefPath ? { brief_path: briefPath } : {}),
       ...(patternId ? { pattern_id: patternId } : {}),
       ...(graphId ? { graph_id: graphId } : {}),
       ...(templateIds?.length ? { template_ids: templateIds } : {}),

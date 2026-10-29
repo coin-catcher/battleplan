@@ -49,7 +49,8 @@ const TITLE_REVIEW_RULES = [
   'Respond with a numbered list of suggested task **titles only** (no JSON yet).',
   'The user will reply with approve, disapprove, or change per number.',
   'Repeat until every item is approved.',
-  'When approved, write briefs under battleplan/projects/{project_id}/tasks/{task_id}/outputs/ in git, then reply with **only** valid JSON: { "tasks": [ ... ], "edges": [] }.',
+  'When approved, write briefs under battleplan/projects/{project_id}/tasks/{task_id}/outputs/ in git on your agent branch, then reply with **only** valid JSON: { "tasks": [ ... ], "edges": [] }.',
+  'Each task object must include "brief_path" pointing at the committed brief.md (or task-brief.json). Battleplan creates local mindmap tasks from JSON and hydrates briefs from GitHub (project PAT + agent branch); it does not git-pull the repo locally.',
   'Do not emit task JSON until titles are approved.',
 ].join('\n');
 

@@ -1239,8 +1239,15 @@ export class BattleplanStore {
     }
     const drafts = prepareGeneratedDraftsForDiscovery(creates, sourceTask, discoverySession);
     const parentTaskId = session?.phase === 'partition' ? taskId : undefined;
+    const importReply = assistantOverride
+      ?? this.messages().find((message) => message.run_id === runId && message.role === 'assistant')
+      ?? findLastAssistantTaskGraph(this.messages(), this.artifacts());
     if (drafts.length) {
-      await this.api.createTasks(projectId, drafts, parentTaskId, validation.payload.edges);
+      await this.api.createTasks(projectId, drafts, parentTaskId, validation.payload.edges, {
+        sourceTaskId: taskId,
+        agentBranchHint: taskId ? this.researchOutputs()[taskId]?.branch ?? undefined : undefined,
+        assistantReplyText: importReply?.content,
+      });
       await this.reloadTasks();
     }
     const createdCount = drafts.length;

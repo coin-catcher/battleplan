@@ -211,6 +211,8 @@ export interface TaskDraft {
   connector_kind?: TaskConnectorKind;
   lifecycle_phase?: LifecyclePhase;
   repo_path?: string;
+  /** Git path to brief.md / task-brief.json on the discovery agent branch (hydrated on import). */
+  brief_path?: string;
   graph_id?: string;
   pattern_id?: string;
   template_ids?: string[];
