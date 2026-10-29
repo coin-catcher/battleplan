@@ -1,0 +1,76 @@
+# High-level organization for the BattlePlan Skills Library browser.
+# Each category maps to catalog entries via `categories[]` on skill records.
+
+version: 1
+categories:
+  - id: featured
+    label: Featured
+    description: Editor's picks and BattlePlan defaults for new projects.
+    sort: 0
+
+  - id: engineering-rigor
+    label: Engineering rigor
+    description: Playbooks, review, TDD, shipping, and quality bars (e.g. pstack).
+    sort: 10
+
+  - id: shipping-and-ci
+    label: Shipping & CI/CD
+    description: PR workflows, releases, GitHub Actions, Terraform, verification.
+    sort: 20
+
+  - id: web-frontend
+    label: Web & frontend
+    description: SPA frameworks, design systems, accessibility, E2E testing.
+    sort: 30
+
+  - id: backend-api
+    label: Backend & API
+    description: REST/GraphQL, serverless, databases, observability.
+    sort: 40
+
+  - id: cloud-infra
+    label: Cloud & infrastructure
+    description: AWS, IaC, environments, secrets, cost controls.
+    sort: 50
+
+  - id: mobile-desktop
+    label: Mobile & desktop
+    description: iOS, Android, Electron, cross-platform tooling.
+    sort: 60
+
+  - id: cms-commerce
+    label: CMS & commerce
+    description: WordPress, Shopify, content and storefront workflows.
+    sort: 70
+
+  - id: integrations
+    label: Integrations & MCP
+    description: GitHub, Playwright, SaaS MCP plugins from cursor/plugins.
+    sort: 80
+
+  - id: battleplan
+    label: BattlePlan & Cloud Agents
+    description: Skills tuned for BattlePlan execution, env setup, walkthroughs.
+    sort: 90
+
+  - id: learning
+    label: Learning & docs
+    description: Teaching, documentation canvases, technical writing.
+    sort: 100
+
+filters:
+  - id: cloud-agent-compatible
+    label: Cloud Agent compatible
+    description: Skill works without local-only paths or undisclosed secrets.
+
+  - id: plugin-bundle
+    label: Plugin bundle
+    description: Installed as a Cursor plugin (skills + optional rules/MCP).
+
+  - id: single-skill
+    label: Single skill
+    description: One SKILL.md folder vendored into the repo.
+
+  - id: requires-mcp-auth
+    label: Requires MCP authentication
+    description: Third-party plugin; user must connect OAuth in Cursor.

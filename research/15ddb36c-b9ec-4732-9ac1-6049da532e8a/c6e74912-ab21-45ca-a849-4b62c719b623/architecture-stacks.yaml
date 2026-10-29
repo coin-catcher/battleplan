@@ -1,0 +1,159 @@
+# Opinionated architecture stacks for BattlePlan code tasks.
+# Each stack provides: metadata for UI, default skill bundle IDs, and DAR text
+# merged into project or task Data and Rules when selected.
+
+version: 1
+stacks:
+  - id: existing-codebase
+    label: Extend existing codebase
+    summary: Discover the repo's stack and conventions; do not introduce a new framework without explicit approval.
+    categories: [web-frontend, backend-api]
+    recommended_when:
+      - repo already has application source
+      - task title mentions fix refactor or feature in existing app
+    default_skill_ids:
+      - pstack-poteto-mode
+      - cursor-github
+      - battleplan-walkthrough-artifacts
+    dar: |
+      ### Architecture stack: Extend existing codebase
+
+      Before writing code, inventory the repository: package managers, frameworks, test commands, lint/format, folder layout, and deployment path. Match existing patterns for naming, state management, API clients, and error handling.
+
+      Do not add a parallel stack (new SPA framework, new ORM, new cloud provider) unless the task DAR explicitly requests it.
+
+      Verification: run the repo's existing test and lint scripts; extend tests in the same style as neighboring files.
+
+  - id: basic-website-wordpress
+    label: Basic website (WordPress + PHP)
+    summary: Content-focused marketing or brochure site on WordPress.
+    categories: [cms-commerce]
+    default_skill_ids:
+      - wordpress-agent-skills
+      - cursor-playwright
+    dar: |
+      ### Architecture stack: WordPress + PHP
+
+      Target stack: WordPress (latest stable), PHP 8.x, standard theme or child theme under wp-content/themes/.
+
+      Prefer block themes and native blocks over heavy page-builder plugins unless specified. Keep custom logic in a child theme or small must-use plugin.
+
+      Security: escape output, capability checks for admin actions, no secrets in repo.
+
+      Deployment: document hosting assumptions (managed WP, Docker, or LAMP) in README; use environment-specific wp-config patterns.
+
+  - id: ecommerce-shopify
+    label: Ecommerce (Shopify + UI)
+    summary: Shopify storefront with theme customization and Shopify APIs where needed.
+    categories: [cms-commerce]
+    default_skill_ids:
+      - shopify-store-plugin
+      - cursor-playwright
+    dar: |
+      ### Architecture stack: Shopify + UI
+
+      Storefront: Shopify Online Store 2.0 theme (Liquid + JSON templates). Customize via theme app extensions only when required.
+
+      Use Shopify CLI for theme dev; keep theme assets organized (sections, snippets, locales).
+
+      For admin/automation tasks prefer Shopify Admin API via small backend or Shopify Functions—not scraping the admin UI.
+
+      UI: follow Shopify Polaris patterns for any embedded admin UI; mobile-first storefront CSS.
+
+  - id: webapp-angular-s3
+    label: Webapp (Angular + AWS S3)
+    summary: Static Angular SPA hosted on S3 (optionally CloudFront).
+    categories: [web-frontend, cloud-infra]
+    default_skill_ids:
+      - pstack-poteto-mode
+      - vercel-web-quality
+    dar: |
+      ### Architecture stack: Angular + S3 static hosting
+
+      Frontend: Angular (match BattlePlan's major version when this repo is the template), standalone components, SCSS, Vitest or Karma per repo template.
+
+      Hosting: build output to dist/; deploy to S3 bucket with public read blocked except via CloudFront OAI/OAC when used.
+
+      Infrastructure as code: prefer Terraform modules under infra/ with npm scripts wrapping plan/apply.
+
+      No server-side secrets in the browser bundle; use environment.ts patterns for public config only.
+
+  - id: webapp-angular-serverless
+    label: Webapp + cloud API (Angular + Lambda + DynamoDB + S3)
+    summary: Angular SPA with Node.js Lambdas, DynamoDB, and S3.
+    categories: [web-frontend, backend-api, cloud-infra]
+    default_skill_ids:
+      - pstack-poteto-mode
+      - cursor-github
+      - hashicorp-terraform
+    dar: |
+      ### Architecture stack: Angular + AWS serverless
+
+      Frontend: Angular SPA deployed to S3/CloudFront.
+
+      API: AWS API Gateway HTTP API → Lambda (Node.js 20+, TypeScript). Handlers thin; business logic in shared lib/.
+
+      Data: DynamoDB single-table or documented multi-table schema; use GSIs intentionally.
+
+      Assets: S3 buckets with least-privilege IAM per Lambda.
+
+      IaC: Terraform for API, Lambdas, tables, buckets, IAM; wire URLs into Angular environment files via build-time config.
+
+      Testing: unit tests for handlers; optional integration tests with LocalStack or deployed dev stack.
+
+  - id: native-mobile
+    label: Native app (iOS + Android)
+    summary: Platform-native or Kotlin/Swift first; shared API contract documented.
+    categories: [mobile-desktop]
+    default_skill_ids:
+      - expo-skills
+      - pstack-poteto-mode
+    dar: |
+      ### Architecture stack: Native mobile (iOS + Android)
+
+      Default: native projects (Swift/SwiftUI, Kotlin/Jetpack Compose) in ios/ and android/ OR Expo managed workflow if task specifies cross-platform speed.
+
+      Shared: OpenAPI or protobuf contract for backend; no duplicated business rules across platforms without tests.
+
+      Release: document signing, TestFlight/Play internal track, and minimum OS versions.
+
+      Use platform HIG/Material guidelines; accessibility required.
+
+  - id: desktop-electron-angular
+    label: Desktop app (Angular + Electron)
+    summary: Same pattern as BattlePlan desktop—Angular UI in Electron shell.
+    categories: [mobile-desktop, web-frontend]
+    default_skill_ids:
+      - battleplan-electron-patterns
+      - pstack-poteto-mode
+    dar: |
+      ### Architecture stack: Angular + Electron
+
+      Structure: electron/ main process + preload; Angular app in src/; IPC via typed channels in electron/preload.ts.
+
+      Security: contextIsolation true; no nodeIntegration in renderer; validate all IPC payloads.
+
+      Packaging: follow existing electron-builder or equivalent; separate dev and prod configs.
+
+      Reuse BattlePlan patterns from coin-catcher/battleplan where applicable.
+
+  - id: cicd-github-terraform
+    label: CI/CD (GitHub Actions + Terraform)
+    summary: Application pipelines in GitHub Actions; cloud infra in Terraform invoked via package.json scripts.
+    categories: [shipping-and-ci]
+    default_skill_ids:
+      - cursor-team-kit
+      - cursor-github
+      - hashicorp-terraform
+    dar: |
+      ### Architecture stack: CI/CD (GitHub Actions + Terraform)
+
+      CI: GitHub Actions workflows under .github/workflows/; reusable workflows for build test lint.
+
+      CD: environment-specific Terraform workspaces or directories (dev/staging/prod); never apply prod from feature branches.
+
+      Developer UX: npm scripts such as `npm run tf:plan`, `npm run tf:apply`, `npm run deploy` documented in README.
+
+      Secrets: GitHub Actions secrets + OIDC to cloud; no long-lived keys in repo.
+
+      BattlePlan alignment: PR required for infra changes; research tasks must not mutate application source.
