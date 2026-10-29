@@ -299,6 +299,34 @@ describe('LocalEngine', () => {
     expect(project?.task_graph_edges?.some((edge) => edge.kind === 'fork')).toBe(true);
   });
 
+  it('createTasks persists tasks before research output (matches file repo requireTask)', async () => {
+    class FileLikeRepository extends MemoryRepository {
+      override async saveResearchOutput(output: TaskResearchOutput): Promise<void> {
+        if (!(await this.getTask(output.task_id))) {
+          throw new Error(`Task ${output.task_id} was not found.`);
+        }
+        return super.saveResearchOutput(output);
+      }
+    }
+    const repo = new FileLikeRepository();
+    let tick = 0;
+    const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => `id-${tick++}`);
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const created = await engine.createTasks('p1', [
+      { title: 'Layer 1 partition A', prompt: 'Research brief', output_type: 'research', depends_on: [] },
+    ]);
+    expect(created).toHaveLength(1);
+    const output = await repo.getResearchOutput(created[0].task_id);
+    expect(output?.path).toBeTruthy();
+  });
+
   it('splits a both-output draft into research then code', async () => {
     const repo = new MemoryRepository();
     let tick = 0;

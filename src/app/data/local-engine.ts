@@ -578,6 +578,13 @@ export class LocalEngine {
         cross_graph_edit_rationale: draft.cross_graph_edit_rationale,
       };
     });
+    bindDraftDependsOn(existing, created, normalized);
+    bindSequentialDraftLinks(existing, created, normalized);
+    if (parentTaskId) {
+      linkCreatedTasksUnderParent(existing, created, parentTaskId);
+    }
+    const allTasks = [...existing, ...created];
+    await this.repo.saveTasks(allTasks);
     for (const task of created) {
       if (task.output_type === 'research' && task.repo_path) {
         await this.repo.saveResearchOutput({
@@ -590,13 +597,6 @@ export class LocalEngine {
         });
       }
     }
-    bindDraftDependsOn(existing, created, normalized);
-    bindSequentialDraftLinks(existing, created, normalized);
-    if (parentTaskId) {
-      linkCreatedTasksUnderParent(existing, created, parentTaskId);
-    }
-    const allTasks = [...existing, ...created];
-    await this.repo.saveTasks(allTasks);
     const legacyEdges = rebuildGraphEdgesFromLegacy(allTasks);
     const advancedEdges = graphEdgeDrafts?.length
       ? buildGraphEdgesFromDrafts(existing, created, graphEdgeDrafts)
