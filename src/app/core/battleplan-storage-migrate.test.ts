@@ -33,19 +33,19 @@ describe('migrateProjectStorageToV2', () => {
       task({ task_id: 't2', repo_path: 'battleplan/projects/p1/tasks/t2/outputs/' }),
     ];
     const result = migrateProjectStorageToV2(project, tasks);
-    expect(result.project.battleplan_storage_version).toBe(2);
+    expect(result.project.battleplan_storage_version).toBe(3);
     expect(result.migratedTasks).toBe(1);
     expect(result.tasks[0].repo_path).toBe('battleplan/projects/p1/tasks/t1/outputs/');
     expect(result.tasks[1].repo_path).toContain('battleplan/projects');
   });
 
-  it('is idempotent when already on v2', () => {
+  it('is idempotent when already on current storage version', () => {
     const project: Project = {
       project_id: 'p1',
       title: 'P',
       initial_prompt: '',
       cursor_chat_link: '',
-      battleplan_storage_version: 2,
+      battleplan_storage_version: 3,
       created_at: '',
       updated_at: '',
     };

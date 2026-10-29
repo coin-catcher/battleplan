@@ -1239,14 +1239,25 @@ export class BattleplanStore {
     }
     const drafts = prepareGeneratedDraftsForDiscovery(creates, sourceTask, discoverySession);
     const parentTaskId = session?.phase === 'partition' ? taskId : undefined;
+    const importReply = assistantOverride
+      ?? this.messages().find((message) => message.run_id === runId && message.role === 'assistant')
+      ?? findLastAssistantTaskGraph(this.messages(), this.artifacts());
     if (drafts.length) {
-      await this.api.createTasks(projectId, drafts, parentTaskId, validation.payload.edges);
+      await this.api.createTasks(projectId, drafts, parentTaskId, validation.payload.edges, {
+        sourceTaskId: taskId,
+        agentBranchHint: taskId ? this.researchOutputs()[taskId]?.branch ?? undefined : undefined,
+        assistantReplyText: importReply?.content,
+      });
       await this.reloadTasks();
     }
     const createdCount = drafts.length;
     const updatedCount = updates.length;
     if (!createdCount && !updatedCount) return;
-    const note = `Discovery import: ${createdCount} created${updatedCount ? `, ${updatedCount} updated` : ''}.`;
+    const needsGitMirror = drafts.some((draft) => draft.brief_path || draft.repo_path || draft.git_paths?.length);
+    const mirrorHint = needsGitMirror && !this.project()?.github_pat?.trim()
+      ? ' Add a GitHub PAT on the project to mirror battleplan/ files from the agent branch into local storage.'
+      : '';
+    const note = `Discovery import: ${createdCount} created${updatedCount ? `, ${updatedCount} updated` : ''}.${mirrorHint}`;
     const saved = taskId ? await this.api.noteTask(taskId, note) : await this.api.noteProject(projectId, note);
     this.rememberMessage(saved);
     this.notice.set(note);

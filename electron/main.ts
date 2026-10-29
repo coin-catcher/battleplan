@@ -133,6 +133,18 @@ function registerRepositoryHandlers(): void {
     'repo:saveCodeOutput': (output) => repo().saveCodeOutput(output as TaskCodeOutput),
     'repo:getResearchOutput': (taskId) => repo().getResearchOutput(taskId as string),
     'repo:saveResearchOutput': (output) => repo().saveResearchOutput(output as TaskResearchOutput),
+    'repo:writeGitMirrorFile': async (projectId, gitRelativePath, content) => {
+      await repo().writeGitMirrorFile(projectId as string, gitRelativePath as string, content as string);
+    },
+    'repo:readGitMirrorFile': (projectId, gitRelativePath) =>
+      repo().readGitMirrorFile(projectId as string, gitRelativePath as string),
+    'repo:ensureLocalWorkspaceLayout': () => repo().ensureLocalWorkspaceLayout(),
+    'repo:stageUpstreamInputsForTask': (projectId, taskId, upstream) =>
+      repo().stageUpstreamInputsForTask(
+        projectId as string,
+        taskId as string,
+        upstream as import('./task-workspace-staging').UpstreamInputSpec[],
+      ),
     'repo:listProjectMessages': (projectId) => repo().listProjectMessages(projectId as string),
     'repo:listTaskMessages': (taskId) => repo().listTaskMessages(taskId as string),
     'repo:saveMessage': (message) => repo().saveMessage(message as ChatMessage),
@@ -377,6 +389,7 @@ async function checkForUpdatesOnStartup(): Promise<void> {
 
 app.whenReady().then(async () => {
   registerRepositoryHandlers();
+  await repo().ensureLocalWorkspaceLayout();
   buildApplicationMenu(() => mainWindow);
   await createWindow();
   void checkForUpdatesOnStartup();

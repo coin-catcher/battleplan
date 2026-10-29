@@ -1,6 +1,6 @@
 /** Git-relative Battleplan storage layout (v2). Local BATTLEPLAN_ROOT mirrors these paths under each project workspace. */
 
-export const BATTLEPLAN_STORAGE_VERSION = 2;
+export const BATTLEPLAN_STORAGE_VERSION = 3;
 
 export function battleplanProjectsRoot(): string {
   return 'battleplan/projects';
@@ -12,6 +12,10 @@ export function battleplanProjectDir(projectId: string): string {
 
 export function battleplanTaskDir(projectId: string, taskId: string): string {
   return `${battleplanProjectDir(projectId)}/tasks/${taskId}`;
+}
+
+export function battleplanTaskInputsDir(projectId: string, taskId: string): string {
+  return `${battleplanTaskDir(projectId, taskId)}/inputs`;
 }
 
 export function battleplanTaskOutputsDir(projectId: string, taskId: string): string {

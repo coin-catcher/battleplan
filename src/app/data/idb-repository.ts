@@ -54,6 +54,7 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 }
 
 export class IdbRepository implements BattleplanRepository {
+  private readonly gitMirror = new Map<string, string>();
   private database: Promise<IDBDatabase> | null = null;
 
   private open(): Promise<IDBDatabase> {
@@ -261,6 +262,18 @@ export class IdbRepository implements BattleplanRepository {
     const record = await this.requireProjectRecord(projectId);
     await this.put('projects', { ...record, ui: normalized });
   }
+
+  async writeGitMirrorFile(projectId: string, gitRelativePath: string, content: string): Promise<void> {
+    this.gitMirror.set(`${projectId}:${gitRelativePath.replace(/\\/g, '/')}`, content);
+  }
+
+  async readGitMirrorFile(projectId: string, gitRelativePath: string): Promise<string | null> {
+    return this.gitMirror.get(`${projectId}:${gitRelativePath.replace(/\\/g, '/')}`) ?? null;
+  }
+
+  async ensureLocalWorkspaceLayout(): Promise<void> { return; }
+
+  async stageUpstreamInputsForTask(): Promise<number> { return 0; }
 
   private async requireProjectRecord(projectId: string): Promise<ProjectStoreRecord> {
     const record = await this.get<ProjectStoreRecord>('projects', projectId);
