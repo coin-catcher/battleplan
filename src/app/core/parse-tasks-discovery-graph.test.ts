@@ -51,4 +51,13 @@ describe('parse-tasks discovery partition graph JSON', () => {
     expect(parsed.edges[1]?.kind).toBe('ordering');
   });
 
+  it('defaults layer-2 brief_path tasks to code when task_kind omitted', () => {
+    const payload = {
+      ...SAMPLE,
+      tasks: SAMPLE.tasks.map((task) => ({ ...task, layer: 2, task_kind: undefined })),
+    };
+    const parsed = parseGeneratedTasksPayload(JSON.stringify(payload));
+    expect(parsed.tasks.every((task) => task.output_type === 'code')).toBe(true);
+  });
+
 });

@@ -123,6 +123,7 @@ import {
   usesResearchChatAdapter,
 } from '../core/agent-bindings';
 import { migrateAgentLibrary } from '../core/agent-library-migrate';
+import { migrateTaskGraphTypeSchema } from '../core/task-graph-type-migrate';
 import { recordAgentUsageEntry } from '../core/agent-usage-ledger';
 import { researchTurnsFromMessages, sendResearchAgentChat } from './research-agent-client';
 
@@ -163,6 +164,10 @@ interface NormalizedDraft {
   pattern_id?: string;
   template_ids?: string[];
   cross_graph_edit_rationale?: string;
+  graph_type?: import('../core/task-graph-type').TaskGraphType;
+  research_mode?: import('../core/task-graph-type').ResearchOutputMode;
+  decision_mode?: import('../core/task-graph-type').CritiqueDecisionMode;
+  discovery_outputs?: string[];
 }
 
 export interface CreateTasksOptions {
@@ -442,6 +447,13 @@ export class LocalEngine {
       project = storage.project;
       workingTasks = storage.tasks;
     }
+    const graphTypeMigrate = migrateTaskGraphTypeSchema(project, workingTasks);
+    if (graphTypeMigrate.changed) {
+      await this.repo.saveProject(graphTypeMigrate.project);
+      await this.repo.saveTasks(graphTypeMigrate.tasks);
+      project = graphTypeMigrate.project;
+      workingTasks = graphTypeMigrate.tasks;
+    }
     await this.repo.ensureLocalWorkspaceLayout();
     if (!project.task_graph_edges?.length) {
       project.task_graph_edges = rebuildGraphEdgesFromLegacy(workingTasks);
@@ -603,6 +615,10 @@ export class LocalEngine {
         pattern_id: draft.pattern_id,
         template_ids: draft.template_ids,
         cross_graph_edit_rationale: draft.cross_graph_edit_rationale,
+        graph_type: draft.graph_type,
+        research_mode: draft.research_mode,
+        decision_mode: draft.decision_mode,
+        discovery_outputs: draft.discovery_outputs?.length ? [...draft.discovery_outputs] : undefined,
       };
     });
     bindDraftDependsOn(existing, created, normalized);
@@ -2411,6 +2427,10 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
       brief_path: item.brief_path,
       git_paths: item.git_paths,
       discovery_task_slug: item.discovery_task_slug,
+      graph_type: item.graph_type,
+      research_mode: item.research_mode,
+      decision_mode: item.decision_mode,
+      discovery_outputs: item.discovery_outputs,
     };
     if (types.length === 1) {
       normalized.push({ title, prompt, output_type: types[0], depends_on: depends, sequential_with: sequential, ...meta });

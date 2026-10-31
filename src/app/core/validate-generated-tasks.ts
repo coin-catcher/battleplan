@@ -13,6 +13,7 @@ import type { ProjectTask, TaskDraft } from './models';
 import { rebuildGraphEdgesFromLegacy, validateTaskGraphEdges } from './task-graph';
 import { validateTaskBrief } from './task-brief';
 import { validateDiscoveryTaskCollateral } from './discovery-task-schema';
+import { validateDiscoveryTaskDraft } from './task-graph-type';
 import { validateCritiqueRetryEdges } from './task-patterns';
 
 export interface GeneratedTasksValidationIssue {
@@ -115,6 +116,7 @@ export function validateAndRepairGeneratedTasks(
     }
     if (options?.projectId && (draft.brief_path || draft.discovery_task_slug || draft.git_paths?.length)) {
       issues.push(...validateDiscoveryTaskCollateral(options.projectId, draft, index));
+      issues.push(...validateDiscoveryTaskDraft(draft, index));
     }
   });
 
@@ -179,7 +181,9 @@ export function buildGenerateTasksRepairUserMessage(issues: GeneratedTasksValida
     '- Intentional rework loops must use edge kind "cycle" (alias "loop") with break_condition (e.g. human:REVIEW).',
     '- Do not create accidental cycles using only tree, ordering, fork, or join edges.',
     '- Every task needs title, prompt, and a complete brief (all pstack fields) unless discovery brief_path is used.',
-    '- Discovery: each task needs stable id, brief_path = battleplan/projects/{project_id}/tasks/{id}/outputs/brief.md, and matching git_paths.',
+    '- Discovery: each task needs stable id, type (research|code|critique), brief_path, and matching git_paths.',
+    '- research: research_mode subgraph|document; name discovery artifacts in outputs for child inputs.',
+    '- critique: decision_mode yes_no|one_of|multi; ≥2 outputs with justification; gates use cycle edges + break_condition.',
   ].join('\n');
 }
 
