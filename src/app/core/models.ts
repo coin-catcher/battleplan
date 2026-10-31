@@ -151,6 +151,14 @@ export interface ProjectTask {
   handoff?: TaskHandoff;
   /** Explicit context inclusion (git + Mnemosyne pointers). */
   context_manifest?: TaskContextManifest;
+  /** Canonical graph type (research | code | critique) for discovery / mindmap semantics. */
+  graph_type?: import('./task-graph-type').TaskGraphType;
+  /** When graph_type is research. */
+  research_mode?: import('./task-graph-type').ResearchOutputMode;
+  /** When graph_type is critique. */
+  decision_mode?: import('./task-graph-type').CritiqueDecisionMode;
+  /** Named discovery artifacts or decision branches (from agent JSON). */
+  discovery_outputs?: string[];
   created_at: string;
   updated_at: string;
 }
