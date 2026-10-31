@@ -44,6 +44,7 @@ import {
   pendingDiscoveryImportMessage,
   reconcileDiscoverySessionFromChat,
 } from '../core/discovery-session-recovery';
+import { discoverySessionAfterPartitionGraphImport } from '../core/discovery-session-advance';
 import {
   buildDiscoveryCompleteSummary,
   type DiscoveryCompleteSummary,
@@ -1147,31 +1148,22 @@ export class BattleplanStore {
     session: GenerateTasksSessionState,
   ): Promise<void> {
     await this.completeActiveDiscoveryGraph(projectId, session);
-    const nextPartitionIndex = session.partitionIndex + 1;
-    if (session.partitionTitles.length > 0 && nextPartitionIndex < session.partitionTitles.length) {
-      const focus = session.partitionTitles[nextPartitionIndex];
-      const nextGraphId = newDiscoveryGraphId();
-      const nextSession: GenerateTasksSessionState = {
-        ...session,
-        partitionIndex: nextPartitionIndex,
-        focusPartitionTitle: focus,
-        layer: 1,
-        activeGraphId: nextGraphId,
-        activeGraphGoal: focus,
-        awaitingGraphJson: false,
-      };
-      this.generateTasksSession.set(nextSession);
-      await this.persistDiscoverySession(projectId, nextSession);
-      await this.run(async () => {
-        const text = buildDepthFirstDescentProposalMessage(this.project(), nextSession);
-        const sent = await this.api.generateLayeredTaskTasks(sourceTaskId, 1, text);
-        this.rememberMessage(sent);
-      });
-      this.notice.set(`Partition graph saved. Depth-first discovery for "${focus}".`);
+    const advanced = discoverySessionAfterPartitionGraphImport({
+      ...session,
+      awaitingGraphJson: false,
+    });
+    if (advanced.phase === 'cluster_review') {
+      await this.startDiscoveryClosing(projectId, sourceTaskId, advanced);
       return;
     }
-
-    await this.startDiscoveryClosing(projectId, sourceTaskId, session);
+    this.generateTasksSession.set(advanced);
+    await this.persistDiscoverySession(projectId, advanced);
+    await this.run(async () => {
+      const text = buildDepthFirstDescentProposalMessage(this.project(), advanced);
+      const sent = await this.api.generateLayeredTaskTasks(sourceTaskId, 1, text);
+      this.rememberMessage(sent);
+    });
+    this.notice.set(`Partition graph saved. Depth-first discovery for "${advanced.focusPartitionTitle}".`);
   }
 
   private async startDiscoveryClosing(
