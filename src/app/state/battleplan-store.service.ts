@@ -1256,7 +1256,9 @@ export class BattleplanStore {
     const needsGitMirror = drafts.some((draft) => draft.brief_path || draft.repo_path || draft.git_paths?.length);
     const mirrorHint = needsGitMirror && !this.project()?.github_pat?.trim()
       ? ' Add a GitHub PAT on the project to mirror battleplan/ files from the agent branch into local storage.'
-      : '';
+      : needsGitMirror
+        ? ' Git collateral will mirror when paths match each task id under battleplan/projects/{project_id}/tasks/{id}/.'
+        : '';
     const note = `Discovery import: ${createdCount} created${updatedCount ? `, ${updatedCount} updated` : ''}.${mirrorHint}`;
     const saved = taskId ? await this.api.noteTask(taskId, note) : await this.api.noteProject(projectId, note);
     this.rememberMessage(saved);
@@ -1286,9 +1288,10 @@ export class BattleplanStore {
     const parsed = parseGeneratedTasksFromSources(reply.content, this.artifacts());
     const drafts = prepareGeneratedDraftsForDiscovery(parsed.tasks, sourceTask, discoverySession);
     const anchorParentId = session?.phase === 'partition' ? parentTaskId : undefined;
+    const projectId = sourceTask?.project_id ?? existingTasks[0]?.project_id;
     return validateAndRepairGeneratedTasks(
       { tasks: drafts, edges: parsed.edges },
-      { existingTasks, parentTaskId: anchorParentId },
+      { existingTasks, parentTaskId: anchorParentId, projectId },
     );
   }
 

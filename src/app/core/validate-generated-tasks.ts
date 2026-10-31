@@ -12,6 +12,7 @@ import type { ParsedGeneratedTasks } from './parse-tasks';
 import type { ProjectTask, TaskDraft } from './models';
 import { rebuildGraphEdgesFromLegacy, validateTaskGraphEdges } from './task-graph';
 import { validateTaskBrief } from './task-brief';
+import { validateDiscoveryTaskCollateral } from './discovery-task-schema';
 import { validateCritiqueRetryEdges } from './task-patterns';
 
 export interface GeneratedTasksValidationIssue {
@@ -92,6 +93,7 @@ export function validateAndRepairGeneratedTasks(
     existingTasks?: ProjectTask[];
     parentTaskId?: string;
     requireCompleteBrief?: boolean;
+    projectId?: string;
   },
 ): GeneratedTasksValidationResult {
   const issues: GeneratedTasksValidationIssue[] = [];
@@ -110,6 +112,9 @@ export function validateAndRepairGeneratedTasks(
       for (const item of validateTaskBrief(draft.brief)) {
         issues.push({ path: `${prefix}.brief.${item.field}`, message: item.message });
       }
+    }
+    if (options?.projectId && (draft.brief_path || draft.discovery_task_slug || draft.git_paths?.length)) {
+      issues.push(...validateDiscoveryTaskCollateral(options.projectId, draft, index));
     }
   });
 
@@ -173,7 +178,8 @@ export function buildGenerateTasksRepairUserMessage(issues: GeneratedTasksValida
     'Graph rules:',
     '- Intentional rework loops must use edge kind "cycle" (alias "loop") with break_condition (e.g. human:REVIEW).',
     '- Do not create accidental cycles using only tree, ordering, fork, or join edges.',
-    '- Every task needs title, prompt, and a complete brief (all pstack fields).',
+    '- Every task needs title, prompt, and a complete brief (all pstack fields) unless discovery brief_path is used.',
+    '- Discovery: each task needs stable id, brief_path = battleplan/projects/{project_id}/tasks/{id}/outputs/brief.md, and matching git_paths.',
   ].join('\n');
 }
 

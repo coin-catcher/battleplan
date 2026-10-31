@@ -43,6 +43,7 @@ import {
 } from '../core/github-client';
 import { TASK_STATUSES } from '../core/models';
 import { battleplanTaskRepoPath } from '../core/battleplan-storage';
+import { expectedDiscoveryRepoPath } from '../core/discovery-task-schema';
 import {
   collateralFolderForDraft,
   fetchGithubRepositoryFile,
@@ -157,6 +158,7 @@ interface NormalizedDraft {
   repo_path?: string;
   brief_path?: string;
   git_paths?: string[];
+  discovery_task_slug?: string;
   graph_id?: string;
   pattern_id?: string;
   template_ids?: string[];
@@ -586,7 +588,9 @@ export class LocalEngine {
         created_at: timestamp,
         updated_at: timestamp,
       };
+      const discoverySlug = draft.discovery_task_slug?.trim();
       const repoPath = (draft.repo_path?.trim()
+        || (discoverySlug ? expectedDiscoveryRepoPath(projectId, discoverySlug) : undefined)
         || battleplanTaskRepoPath(projectId, taskId)).replace(/\/?$/, '/');
       return {
         ...skeleton,
@@ -594,6 +598,7 @@ export class LocalEngine {
         connector_kind: draft.connector_kind ?? defaultConnectorForTask({ ...skeleton, lifecycle_phase: draft.lifecycle_phase } as ProjectTask, project),
         lifecycle_phase: draft.lifecycle_phase,
         repo_path: repoPath,
+        discovery_task_slug: discoverySlug || undefined,
         graph_id: draft.graph_id,
         pattern_id: draft.pattern_id,
         template_ids: draft.template_ids,
@@ -2405,6 +2410,7 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
       repo_path: item.repo_path,
       brief_path: item.brief_path,
       git_paths: item.git_paths,
+      discovery_task_slug: item.discovery_task_slug,
     };
     if (types.length === 1) {
       normalized.push({ title, prompt, output_type: types[0], depends_on: depends, sequential_with: sequential, ...meta });

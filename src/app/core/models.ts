@@ -134,6 +134,8 @@ export interface ProjectTask {
   lifecycle_phase?: LifecyclePhase;
   /** Git folder for task briefs and collateral (trailing slash). */
   repo_path?: string;
+  /** Agent-stable slug; same as git folder under battleplan/projects/…/tasks/{slug}/. */
+  discovery_task_slug?: string;
   /** Depth-first discovery graph membership. */
   graph_id?: string;
   /** Named task graph pattern (see task-patterns.ts). */
@@ -213,6 +215,8 @@ export interface TaskDraft {
   repo_path?: string;
   /** Git path to brief.md / task-brief.json on the discovery agent branch (hydrated on import). */
   brief_path?: string;
+  /** Agent-stable slug; matches git folder `battleplan/projects/…/tasks/{slug}/`. */
+  discovery_task_slug?: string;
   /** Extra git-relative battleplan/ files to mirror locally on import. */
   git_paths?: string[];
   graph_id?: string;

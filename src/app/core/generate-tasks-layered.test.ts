@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildDepthFirstDescentProposalMessage,
   buildPartitionProposalMessage,
   isGenerateTasksEndCommand,
 } from './generate-tasks-layered';
+import type { GenerateTasksSessionState } from './generate-tasks-layered';
 import type { ProjectTask } from './models';
 
 function researchTask(): ProjectTask {
@@ -40,5 +42,26 @@ describe('generate-tasks-layered', () => {
     expect(text).toMatch(/no JSON yet/i);
     expect(text).toMatch(/partition/i);
     expect(text).toMatch(/Layer 1/i);
+  });
+
+  it('depth-first prompt requires linked graphs with inputs, outputs, and edges', () => {
+    const session: GenerateTasksSessionState = {
+      sourceTaskId: 't1',
+      phase: 'depth_first',
+      layer: 1,
+      activeGraphId: 'graph-partition-1',
+      activeGraphGoal: 'Supabase backend foundation',
+      partitionTitles: ['Supabase backend foundation', 'MVP Auth'],
+      partitionIndex: 0,
+      focusPartitionTitle: 'Supabase backend foundation',
+    };
+    const text = buildDepthFirstDescentProposalMessage(null, session);
+    expect(text).toMatch(/directed graph/i);
+    expect(text).toMatch(/not a flat checklist/i);
+    expect(text).toMatch(/Outputs/i);
+    expect(text).toMatch(/Inputs/i);
+    expect(text).toMatch(/Spike–Gate/i);
+    expect(text).toMatch(/GRAPH DONE/i);
+    expect(text).not.toMatch(/titles only/i);
   });
 });

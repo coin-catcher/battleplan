@@ -2,6 +2,7 @@ import type { ChatArtifact, Project } from './models';
 import type { ProjectTask } from './models';
 import { formatGraphIndexForPrompt } from './graph-discovery';
 import { parseGeneratedTasksFromSources, type ParsedGeneratedTasks } from './parse-tasks';
+import { DISCOVERY_TASK_JSON_CONTRACT } from './discovery-task-schema';
 import { JSON_TASK_LIST_RULES } from './generate-tasks-shared';
 
 export type DiscoveryPhase = 'partition' | 'depth_first' | 'cluster_review' | 'architecture_pass';
@@ -49,19 +50,56 @@ const TITLE_REVIEW_RULES = [
   'Respond with a numbered list of suggested task **titles only** (no JSON yet).',
   'The user will reply with approve, disapprove, or change per number.',
   'Repeat until every item is approved.',
-  'When approved, write briefs under battleplan/projects/{project_id}/tasks/{task_id}/outputs/ in git on your agent branch, then reply with **only** valid JSON: { "tasks": [ ... ], "edges": [] }.',
-  'Each task object must include "brief_path" (and optional "git_paths") pointing at files under battleplan/ on your agent branch.',
+  'When approved, assign each task a stable `id` slug and write briefs under battleplan/projects/{project_id}/tasks/{id}/outputs/brief.md on your agent branch, then reply with **only** valid JSON: { "tasks": [ ... ], "edges": [] }.',
+  DISCOVERY_TASK_JSON_CONTRACT,
   'Battleplan creates local mindmap tasks from JSON, then mirrors those git paths into `{BATTLEPLAN_ROOT}/battleplan/projects/…/tasks/…/` (same layout as GitHub) using the project PAT and your agent branch — no full-repo git pull.',
   'Do not emit task JSON until titles are approved.',
 ].join('\n');
 
-const DEPTH_FIRST_INTERVIEW_RULES = [
-  '**Depth-first interview** for the active partition only.',
-  'Propose the **next layer** of task titles (numbered). In each round, call out where a **task graph pattern** applies and **highlight** those subgraphs in your reply (pattern name + which titles participate).',
-  'You may suggest **multiple layers in one response** when a pattern spans them; still use titles only until the user sends **GRAPH DONE**.',
-  'When the user sends **GRAPH DONE**, summarize the partition graph, index it in your reply, then emit **only** valid JSON for the **full** task graph for this partition (all layers, edges, pattern_id fields).',
-  'If this is not the first partition graph, **highlight** any tasks from prior graphs that must change, merge, or be removed (set cross_graph_edit and cross_graph_edit_rationale on those tasks in the final JSON).',
-  `Task graph patterns: ${PATTERN_CATALOG}.`,
+const DEPTH_FIRST_LINKED_GRAPH_RULES = [
+  '## Discovery session: linked task graphs (depth-first)',
+  '',
+  'You are facilitating discovery for **one active partition**. Propose tasks as a **directed graph**, not a flat checklist or a single “Layer 2” sibling list. Prefer **deep chains** where downstream work consumes upstream **artifacts**.',
+  '',
+  '### Task definition format (each proposed task)',
+  '- **Brief title (3–5 words)** — scannable; parallel naming for siblings (e.g. Create / Reconcile allowlist, Inventory / Standard edge functions).',
+  '- **Outcomes** — bullets for what “done” means.',
+  '- **Outputs** — named artifacts (docs, specs, files, decisions) other tasks can reference.',
+  '- **Inputs** — which upstream **outputs** this task requires or strongly benefits from.',
+  'Do not duplicate scope: merge or split so one task owns policy and another owns execution.',
+  '',
+  '### Prefer series over flat lists',
+  'Before proposing a tranche, ask: Does B only make sense after artifact A? Can parallel branches **fan-in** to C? Is there a **gate** (spike/audit) before implementation? If yes, state **parent/child** or **fan-in** edges explicitly. Default to **depth** when uncertainty is high (schema, auth, deploy).',
+  '',
+  '### Task graph patterns',
+  `Catalog: ${PATTERN_CATALOG}.`,
+  '- **Spike–Gate** — audit/spike → go/no-go before implementation.',
+  '- **Template–Instance Cycle** — standard/template task, then per-entity instances.',
+  '- **Critique–Retry Loop** — review → fix (often deeper layers).',
+  '- **Leaf Fan-In Refactor** — prerequisites merge into one integration task.',
+  '- **Parallel Fan-Out/In** — only when branches are truly independent; **avoid** if the user wants a linear CI/CD pipeline.',
+  '- **Subproject→Brainstorm**, **Task Templates**, **Dynamic→Deterministic Converter** — only when the user confirms; do not assume.',
+  'Name the pattern and task numbers in your reply. If the user rejects a pattern for specific tasks, drop it from the graph.',
+  '',
+  '### Multi-pass graph optimization (do this before each reply)',
+  '1. **Dependency pass** — every input has a producing task; no cycles unless Critique–Retry is explicit.',
+  '2. **Atomicity pass** — one primary deliverable per task; no duplicate outputs.',
+  '3. **Now vs Later pass** — align with the partition brief; defer aspirational work to the end of the chain.',
+  'Then adjust edges and titles (3–5 words).',
+  '',
+  '### Interview rounds',
+  '- Propose numbered tasks with titles, outcomes, outputs, inputs, **edges** (who feeds whom), and patterns. **No JSON** until the user sends **GRAPH DONE** and every task is approved.',
+  '- User: approve / disapprove / change per number.',
+  '- On full approval: write briefs under battleplan/projects/{project_id}/tasks/{task_id}/outputs/ on your agent branch, commit, push.',
+  DISCOVERY_TASK_JSON_CONTRACT,
+  '',
+  '### On GRAPH DONE',
+  'Summarize the partition graph, index it in your reply, then emit **only** valid JSON: full subgraph (all layers), `edges`, `brief_path`, optional `pattern_id`.',
+  'Use cross_graph_edit and cross_graph_edit_rationale when later partitions supersede earlier tasks.',
+  'Each task object must include brief_path (and optional git_paths). Battleplan mirrors battleplan/ paths locally from GitHub (project PAT + agent branch).',
+  '',
+  '### Example spine (illustration — use full task format in interview rounds)',
+  '1. Create MVP allowlist → 2. Reconcile MVP allowlist (Spike–Gate); 3. Edge function inventory → 4. Edge function standard (Template–Instance); 5. Local workflow (fan-in 1–4) → 6. CI → 7. CD → 8. Post-MVP.',
 ].join('\n');
 
 export function buildPartitionProposalMessage(
@@ -98,14 +136,14 @@ export function buildDepthFirstDescentProposalMessage(
   return [
     `Start depth-first discovery for partition ${partitionNum}/${Math.max(session.partitionTitles.length, 1)}: **${focus}**.`,
     `Active graph: \`${session.activeGraphId}\` — ${focus}`,
+    `Mindmap tree layer for new nodes under this partition: **${treeLayer}** (structure is a **graph**, not a flat layer-${treeLayer} checklist).`,
     crossGraphNote,
-    DEPTH_FIRST_INTERVIEW_RULES,
+    DEPTH_FIRST_LINKED_GRAPH_RULES,
     '',
     '## Completed task graph index',
     formatGraphIndexForPrompt(project?.graph_discovery_index),
     '',
-    `Propose **Layer ${treeLayer}** task titles under partition "${focus}" (first tranche of this graph).`,
-    TITLE_REVIEW_RULES,
+    `Propose the next **tranche** of the **linked** task graph for partition "${focus}" (edges and artifact flow required).`,
   ].filter(Boolean).join('\n\n');
 }
 
