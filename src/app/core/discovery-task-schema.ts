@@ -1,6 +1,7 @@
 import { battleplanTaskOutputsDir } from './battleplan-storage';
 import type { GeneratedTasksValidationIssue } from './validate-generated-tasks';
 import type { TaskDraft } from './models';
+import { discoveryTaskKindContractLines } from './discovery-task-kind';
 
 /** Stable agent-chosen slug; folder paths and JSON `id` must match. */
 export function expectedDiscoveryBriefPath(projectId: string, agentTaskId: string): string {
@@ -85,6 +86,7 @@ export const DISCOVERY_TASK_JSON_CONTRACT = [
   '- `brief_path`: `battleplan/projects/{repo_project_slug}/tasks/{id}/outputs/brief.md` (slug may differ from Battleplan UUID project_id)',
   '- `git_paths`: include at least that brief_path after commit',
   '- `inputs` and/or `depends_on`: upstream task **id** slugs (or titles)',
+  ...discoveryTaskKindContractLines(),
   '- Optional: `pattern_id`, `outputs` (artifact names for humans; files still live under outputs/)',
   '',
   'Before JSON: commit `brief.md` (pstack fields) under each task’s `outputs/` folder on the agent branch.',

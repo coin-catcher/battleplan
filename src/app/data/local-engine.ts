@@ -123,6 +123,7 @@ import {
   usesResearchChatAdapter,
 } from '../core/agent-bindings';
 import { migrateAgentLibrary } from '../core/agent-library-migrate';
+import { migrateTaskGraphTypeSchema } from '../core/task-graph-type-migrate';
 import { recordAgentUsageEntry } from '../core/agent-usage-ledger';
 import { researchTurnsFromMessages, sendResearchAgentChat } from './research-agent-client';
 
@@ -442,6 +443,13 @@ export class LocalEngine {
       project = storage.project;
       workingTasks = storage.tasks;
     }
+    const graphTypeMigrate = migrateTaskGraphTypeSchema(project, workingTasks);
+    if (graphTypeMigrate.changed) {
+      await this.repo.saveProject(graphTypeMigrate.project);
+      await this.repo.saveTasks(graphTypeMigrate.tasks);
+      project = graphTypeMigrate.project;
+      workingTasks = graphTypeMigrate.tasks;
+    }
     await this.repo.ensureLocalWorkspaceLayout();
     if (!project.task_graph_edges?.length) {
       project.task_graph_edges = rebuildGraphEdgesFromLegacy(workingTasks);
@@ -603,6 +611,10 @@ export class LocalEngine {
         pattern_id: draft.pattern_id,
         template_ids: draft.template_ids,
         cross_graph_edit_rationale: draft.cross_graph_edit_rationale,
+        graph_type: draft.graph_type,
+        research_mode: draft.research_mode,
+        decision_mode: draft.decision_mode,
+        discovery_outputs: draft.discovery_outputs?.length ? [...draft.discovery_outputs] : undefined,
       };
     });
     bindDraftDependsOn(existing, created, normalized);

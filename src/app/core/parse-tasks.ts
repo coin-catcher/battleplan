@@ -5,7 +5,8 @@ import { taskBriefFromDraftRecord } from './task-brief';
 import { normalizeLoopMode, normalizeTaskNodeKind } from './task-node-kind';
 import { normalizeLifecyclePhase } from './task-lifecycle';
 import { normalizeDiscoveryAgentTaskId } from './discovery-task-schema';
-import { resolveDraftFieldsFromWorkflow } from './workflow-task-kind';
+import { resolveDiscoveryTaskDraftFields } from './discovery-task-kind';
+import { parseCritiqueDecisionMode, parseStringList } from './task-graph-type';
 
 export interface ParsedGeneratedTasks {
   tasks: TaskDraft[];
@@ -147,11 +148,8 @@ function parseGeneratedTaskRecords(
       ?? optionalText(record['initial_prompt'])
       ?? (briefPath ? `Follow the brief at ${briefPath}` : undefined)
       ?? title;
-    const workflowFields = resolveDraftFieldsFromWorkflow(record);
-    const outputRaw = workflowFields.output_type ?? record['output_type'] ?? record['task_kind'];
-    const output = typeof outputRaw === 'string' && outputRaw.trim()
-      ? outputRaw.trim()
-      : 'research';
+    const discoveryFields = resolveDiscoveryTaskDraftFields(record);
+    const output = discoveryFields.output_type.trim() || 'research';
     const dependsRaw = record['depends_on'] ?? record['dependencies'] ?? [];
     const inputsRaw = record['inputs'] ?? [];
     if (!Array.isArray(dependsRaw) || dependsRaw.some((entry) => typeof entry !== 'string')) {
@@ -169,11 +167,11 @@ function parseGeneratedTaskRecords(
       throw new Error(`Task ${index + 1} sequential_with must be an array of task titles.`);
     }
     const brief = taskBriefFromDraftRecord(record);
-    const nodeKind = workflowFields.node_kind
+    const nodeKind = discoveryFields.node_kind
       ?? (record['node_kind'] !== undefined ? normalizeTaskNodeKind(record['node_kind']) : undefined);
     const loopMode = normalizeLoopMode(record['loop_mode']);
     const connector = parseConnectorKind(record['connector_kind']);
-    const lifecyclePhase = workflowFields.lifecycle_phase
+    const lifecyclePhase = discoveryFields.lifecycle_phase
       ?? normalizeLifecyclePhase(record['lifecycle_phase']);
     const repoPath = typeof record['repo_path'] === 'string' && record['repo_path'].trim()
       ? record['repo_path'].trim()
@@ -198,6 +196,8 @@ function parseGeneratedTaskRecords(
       ? gitPathsRaw.filter((v): v is string => typeof v === 'string').map((v) => v.trim()).filter(Boolean)
       : undefined;
     const discoverySlug = normalizeDiscoveryAgentTaskId(record['id']);
+    const discoveryOutputs = parseStringList(record['outputs']);
+    const decisionMode = parseCritiqueDecisionMode(record);
     return {
       title,
       prompt,
@@ -218,6 +218,11 @@ function parseGeneratedTaskRecords(
       ...(templateIds?.length ? { template_ids: templateIds } : {}),
       ...(crossGraph ? { cross_graph_edit: true } : {}),
       ...(crossRationale ? { cross_graph_edit_rationale: crossRationale } : {}),
+      ...(discoveryFields.graph_type ? { graph_type: discoveryFields.graph_type } : {}),
+      ...(discoveryFields.research_mode ? { research_mode: discoveryFields.research_mode } : {}),
+      ...(discoveryOutputs.length ? { discovery_outputs: discoveryOutputs } : {}),
+      ...(decisionMode ? { decision_mode: decisionMode } : {}),
+      ...(discoveryFields.type_explicit ? { graph_type_explicit: true } : {}),
     };
   });
 }

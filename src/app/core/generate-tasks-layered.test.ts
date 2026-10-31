@@ -71,5 +71,8 @@ describe('generate-tasks-layered', () => {
     expect(text).toMatch(/Spike–Gate/i);
     expect(text).toMatch(/GRAPH DONE/i);
     expect(text).not.toMatch(/titles only/i);
+    expect(text).toMatch(/\*\*Type\*\*/i);
+    expect(text).toMatch(/critique/i);
+    expect(text).toMatch(/research_mode/i);
   });
 });

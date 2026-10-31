@@ -151,6 +151,14 @@ export interface ProjectTask {
   handoff?: TaskHandoff;
   /** Explicit context inclusion (git + Mnemosyne pointers). */
   context_manifest?: TaskContextManifest;
+  /** Canonical graph type (research | code | critique) for discovery / mindmap semantics. */
+  graph_type?: import('./task-graph-type').TaskGraphType;
+  /** When graph_type is research. */
+  research_mode?: import('./task-graph-type').ResearchOutputMode;
+  /** When graph_type is critique. */
+  decision_mode?: import('./task-graph-type').CritiqueDecisionMode;
+  /** Named discovery artifacts or decision branches (from agent JSON). */
+  discovery_outputs?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -225,6 +233,16 @@ export interface TaskDraft {
   cross_graph_edit?: boolean;
   cross_graph_edit_rationale?: string;
   execute_config?: ExecuteTaskConfig;
+  /** Canonical discovery type from JSON `type` (research | code | critique). */
+  graph_type?: import('./task-graph-type').TaskGraphType;
+  /** Research deliverable shape when graph_type is research. */
+  research_mode?: import('./task-graph-type').ResearchOutputMode;
+  /** Agent-declared artifact / decision branch names. */
+  discovery_outputs?: string[];
+  /** Critique decision shape when graph_type is critique. */
+  decision_mode?: import('./task-graph-type').CritiqueDecisionMode;
+  /** True when JSON included explicit `type` (or alias). */
+  graph_type_explicit?: boolean;
 }
 
 /** Execution backend for released tasks (see agent-connector.ts). */

@@ -73,6 +73,7 @@ const DEPTH_FIRST_LINKED_GRAPH_RULES = [
   '- **Outcomes** — bullets for what “done” means.',
   '- **Outputs** — named artifacts (docs, specs, files, decisions) other tasks can reference.',
   '- **Inputs** — which upstream **outputs** this task requires or strongly benefits from.',
+  '- **Type** — `research` (unknown frontier: Discovery Session → collect/distill/interpret → propose child graph when `research_mode` **subgraph**; shared artifacts in `outputs` for **all** downstream `inputs`) | `code` (codebase changes + summary + branch) | `critique` (`decision_mode` **yes_no** | **one_of** | **multi**; decision + justification in brief; named `outputs`; fork/join/cycle edges match branches). Most partition **subgraph** tasks are **code**.',
   'Do not duplicate scope: merge or split so one task owns policy and another owns execution.',
   '',
   '### Prefer series over flat lists',
