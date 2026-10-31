@@ -930,7 +930,11 @@ export class BattleplanStore {
     await this.run(async () => {
       const refreshed = await this.api.listTaskMessages(task.task_id, { syncAgent: false });
       this.cacheTaskConversation({ ...refreshed, task: refreshed.task });
-      if (this.selection().taskId === task.task_id) {
+      const selection = this.selection();
+      if (
+        (selection.kind === 'task' || selection.kind === 'subproject' || selection.kind === 'code' || selection.kind === 'research')
+        && selection.taskId === task.task_id
+      ) {
         this.applyTaskConversation(refreshed);
       }
     });
@@ -1039,7 +1043,6 @@ export class BattleplanStore {
     this.generateTasksSession.set(importedKeySession);
     await this.persistDiscoverySession(projectId, importedKeySession);
 
-    const parsed = parseGeneratedTasksFromSources(reply.content, this.artifacts());
     const importedTitles = parsed.tasks.map((draft) => draft.title.trim()).filter(Boolean);
 
     if (phaseBefore === 'partition' && importedTitles.length > 0) {
