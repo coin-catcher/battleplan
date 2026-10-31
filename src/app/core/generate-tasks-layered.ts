@@ -30,8 +30,15 @@ export function isGenerateTasksEndCommand(message: string): boolean {
 }
 
 export function isGraphCompleteCommand(message: string): boolean {
-  const token = message.trim().toUpperCase();
-  return token === 'GRAPH DONE' || token.startsWith('GRAPH DONE ');
+  const trimmed = message.trim();
+  if (!trimmed) return false;
+  const whole = trimmed.toUpperCase();
+  if (whole === 'GRAPH DONE' || whole.startsWith('GRAPH DONE ')) return true;
+  for (const line of trimmed.split(/\r?\n/)) {
+    const token = line.trim().toUpperCase();
+    if (token === 'GRAPH DONE' || token.startsWith('GRAPH DONE ')) return true;
+  }
+  return false;
 }
 
 const PATTERN_CATALOG = [
