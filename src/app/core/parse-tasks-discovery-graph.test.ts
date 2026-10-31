@@ -50,4 +50,5 @@ describe('parse-tasks discovery partition graph JSON', () => {
     expect(parsed.edges[0]?.kind).toBe('ordering');
     expect(parsed.edges[1]?.kind).toBe('ordering');
   });
+
 });

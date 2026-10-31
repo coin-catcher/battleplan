@@ -3,7 +3,9 @@ import {
   buildDepthFirstDescentProposalMessage,
   buildPartitionProposalMessage,
   isGenerateTasksEndCommand,
+  isGraphCompleteCommand,
 } from './generate-tasks-layered';
+import { SUPABASE_GRAPH_DONE_USER_MESSAGE } from './fixtures/supabase-partition-graph-messages';
 import type { GenerateTasksSessionState } from './generate-tasks-layered';
 import type { ProjectTask } from './models';
 
@@ -27,6 +29,12 @@ describe('generate-tasks-layered', () => {
     expect(isGenerateTasksEndCommand('END')).toBe(true);
     expect(isGenerateTasksEndCommand('end')).toBe(true);
     expect(isGenerateTasksEndCommand('approve 1')).toBe(false);
+  });
+
+  it('detects GRAPH DONE on its own line after numbered approvals', () => {
+    expect(isGraphCompleteCommand('GRAPH DONE')).toBe(true);
+    expect(isGraphCompleteCommand(SUPABASE_GRAPH_DONE_USER_MESSAGE)).toBe(true);
+    expect(isGraphCompleteCommand('1. approve\n2. approve\nnot done')).toBe(false);
   });
 
   it('layer proposal mentions approve/disapprove/change and titles only', () => {
