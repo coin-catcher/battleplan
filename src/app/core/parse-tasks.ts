@@ -4,6 +4,7 @@ import { parseGeneratedEdgeList, type GeneratedTaskEdgeDraft } from './generate-
 import { taskBriefFromDraftRecord } from './task-brief';
 import { normalizeLoopMode, normalizeTaskNodeKind } from './task-node-kind';
 import { normalizeLifecyclePhase } from './task-lifecycle';
+import { normalizeDiscoveryAgentTaskId } from './discovery-task-schema';
 import { resolveDraftFieldsFromWorkflow } from './workflow-task-kind';
 
 export interface ParsedGeneratedTasks {
@@ -196,6 +197,7 @@ function parseGeneratedTaskRecords(
     const gitPaths = Array.isArray(gitPathsRaw)
       ? gitPathsRaw.filter((v): v is string => typeof v === 'string').map((v) => v.trim()).filter(Boolean)
       : undefined;
+    const discoverySlug = normalizeDiscoveryAgentTaskId(record['id']);
     return {
       title,
       prompt,
@@ -209,6 +211,7 @@ function parseGeneratedTaskRecords(
       lifecycle_phase: lifecyclePhase,
       ...(repoPath ? { repo_path: repoPath } : {}),
       ...(briefPath ? { brief_path: briefPath } : {}),
+      ...(discoverySlug ? { discovery_task_slug: discoverySlug } : {}),
       ...(gitPaths?.length ? { git_paths: gitPaths } : {}),
       ...(patternId ? { pattern_id: patternId } : {}),
       ...(graphId ? { graph_id: graphId } : {}),

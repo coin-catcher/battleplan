@@ -2,6 +2,7 @@ import type { ChatArtifact, Project } from './models';
 import type { ProjectTask } from './models';
 import { formatGraphIndexForPrompt } from './graph-discovery';
 import { parseGeneratedTasksFromSources, type ParsedGeneratedTasks } from './parse-tasks';
+import { DISCOVERY_TASK_JSON_CONTRACT } from './discovery-task-schema';
 import { JSON_TASK_LIST_RULES } from './generate-tasks-shared';
 
 export type DiscoveryPhase = 'partition' | 'depth_first' | 'cluster_review' | 'architecture_pass';
@@ -49,8 +50,8 @@ const TITLE_REVIEW_RULES = [
   'Respond with a numbered list of suggested task **titles only** (no JSON yet).',
   'The user will reply with approve, disapprove, or change per number.',
   'Repeat until every item is approved.',
-  'When approved, write briefs under battleplan/projects/{project_id}/tasks/{task_id}/outputs/ in git on your agent branch, then reply with **only** valid JSON: { "tasks": [ ... ], "edges": [] }.',
-  'Each task object must include "brief_path" (and optional "git_paths") pointing at files under battleplan/ on your agent branch.',
+  'When approved, assign each task a stable `id` slug and write briefs under battleplan/projects/{project_id}/tasks/{id}/outputs/brief.md on your agent branch, then reply with **only** valid JSON: { "tasks": [ ... ], "edges": [] }.',
+  DISCOVERY_TASK_JSON_CONTRACT,
   'Battleplan creates local mindmap tasks from JSON, then mirrors those git paths into `{BATTLEPLAN_ROOT}/battleplan/projects/…/tasks/…/` (same layout as GitHub) using the project PAT and your agent branch — no full-repo git pull.',
   'Do not emit task JSON until titles are approved.',
 ].join('\n');
@@ -90,7 +91,7 @@ const DEPTH_FIRST_LINKED_GRAPH_RULES = [
   '- Propose numbered tasks with titles, outcomes, outputs, inputs, **edges** (who feeds whom), and patterns. **No JSON** until the user sends **GRAPH DONE** and every task is approved.',
   '- User: approve / disapprove / change per number.',
   '- On full approval: write briefs under battleplan/projects/{project_id}/tasks/{task_id}/outputs/ on your agent branch, commit, push.',
-  '- JSON may use task `id` slugs in `edges.from` / `edges.to` and in `inputs`; edge `kind` may be `hard` (ordering) or `soft` (fork). Include top-level `graph_id` and per-task `brief_path`.',
+  DISCOVERY_TASK_JSON_CONTRACT,
   '',
   '### On GRAPH DONE',
   'Summarize the partition graph, index it in your reply, then emit **only** valid JSON: full subgraph (all layers), `edges`, `brief_path`, optional `pattern_id`.',
