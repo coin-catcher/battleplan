@@ -1,6 +1,6 @@
 import { findLastAssistantTaskGraph } from './generate-task-links';
 import type { GenerateTasksSessionState } from './generate-tasks-layered';
-import { tryParseGeneratedTasksFromSources } from './generate-tasks-layered';
+import { isGraphCompleteCommand, tryParseGeneratedTasksFromSources } from './generate-tasks-layered';
 import { newDiscoveryGraphId } from './graph-discovery';
 import type { ChatArtifact, ChatMessage, Project, ProjectTask } from './models';
 import { canRunGenerateTasks } from './task-generate-eligibility';
@@ -44,8 +44,20 @@ export function inferLegacyDiscoverySession(
     activeGraphGoal: task.title,
     partitionTitles: [],
     partitionIndex: 0,
-    awaitingGraphJson: phase === 'depth_first' ? false : undefined,
+    awaitingGraphJson: phase === 'depth_first'
+      ? discoveryAwaitingPartitionGraphJson(messages, parsed)
+      : undefined,
   };
+}
+
+/** User sent GRAPH DONE and the latest assistant message contains importable partition graph JSON. */
+function discoveryAwaitingPartitionGraphJson(
+  messages: ChatMessage[],
+  parsed: ParsedGeneratedTasks | null,
+): boolean {
+  if (!parsed?.tasks.length) return false;
+  const sentGraphDone = messages.some((message) => message.role === 'user' && isGraphCompleteCommand(message.content));
+  return sentGraphDone;
 }
 
 function inferLegacyPhase(
