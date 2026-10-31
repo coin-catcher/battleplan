@@ -18,6 +18,7 @@ export const SUPABASE_PARTITION_GRAPH_JSON = {
     {
       id: 'sbf-create-mvp-allowlist',
       title: 'Create MVP allowlist',
+      task_kind: 'code',
       layer: 2,
       brief_path: 'battleplan/projects/switch-to-supabase/tasks/sbf-create-mvp-allowlist/outputs/brief.md',
       git_paths: ['battleplan/projects/switch-to-supabase/tasks/sbf-create-mvp-allowlist/outputs/brief.md'],
@@ -28,6 +29,7 @@ export const SUPABASE_PARTITION_GRAPH_JSON = {
     {
       id: 'sbf-reconcile-mvp-allowlist',
       title: 'Reconcile MVP allowlist',
+      task_kind: 'code',
       layer: 2,
       brief_path: 'battleplan/projects/switch-to-supabase/tasks/sbf-reconcile-mvp-allowlist/outputs/brief.md',
       git_paths: ['battleplan/projects/switch-to-supabase/tasks/sbf-reconcile-mvp-allowlist/outputs/brief.md'],
@@ -38,6 +40,7 @@ export const SUPABASE_PARTITION_GRAPH_JSON = {
     {
       id: 'sbf-edge-function-inventory',
       title: 'Edge function inventory',
+      task_kind: 'code',
       layer: 2,
       brief_path: 'battleplan/projects/switch-to-supabase/tasks/sbf-edge-function-inventory/outputs/brief.md',
       git_paths: ['battleplan/projects/switch-to-supabase/tasks/sbf-edge-function-inventory/outputs/brief.md'],
@@ -48,6 +51,7 @@ export const SUPABASE_PARTITION_GRAPH_JSON = {
     {
       id: 'sbf-edge-function-standard',
       title: 'Edge function standard',
+      task_kind: 'code',
       layer: 2,
       brief_path: 'battleplan/projects/switch-to-supabase/tasks/sbf-edge-function-standard/outputs/brief.md',
       git_paths: ['battleplan/projects/switch-to-supabase/tasks/sbf-edge-function-standard/outputs/brief.md'],
@@ -58,6 +62,7 @@ export const SUPABASE_PARTITION_GRAPH_JSON = {
     {
       id: 'sbf-local-workflow',
       title: 'Local workflow',
+      task_kind: 'code',
       layer: 2,
       brief_path: 'battleplan/projects/switch-to-supabase/tasks/sbf-local-workflow/outputs/brief.md',
       git_paths: ['battleplan/projects/switch-to-supabase/tasks/sbf-local-workflow/outputs/brief.md'],
@@ -73,6 +78,7 @@ export const SUPABASE_PARTITION_GRAPH_JSON = {
     {
       id: 'sbf-continuous-integration',
       title: 'Continuous Integration',
+      task_kind: 'code',
       layer: 2,
       brief_path: 'battleplan/projects/switch-to-supabase/tasks/sbf-continuous-integration/outputs/brief.md',
       git_paths: ['battleplan/projects/switch-to-supabase/tasks/sbf-continuous-integration/outputs/brief.md'],
@@ -83,6 +89,7 @@ export const SUPABASE_PARTITION_GRAPH_JSON = {
     {
       id: 'sbf-continuous-delivery',
       title: 'Continuous Delivery',
+      task_kind: 'code',
       layer: 2,
       brief_path: 'battleplan/projects/switch-to-supabase/tasks/sbf-continuous-delivery/outputs/brief.md',
       git_paths: ['battleplan/projects/switch-to-supabase/tasks/sbf-continuous-delivery/outputs/brief.md'],
@@ -93,6 +100,7 @@ export const SUPABASE_PARTITION_GRAPH_JSON = {
     {
       id: 'sbf-post-mvp',
       title: 'Post-MVP',
+      task_kind: 'code',
       layer: 2,
       brief_path: 'battleplan/projects/switch-to-supabase/tasks/sbf-post-mvp/outputs/brief.md',
       git_paths: ['battleplan/projects/switch-to-supabase/tasks/sbf-post-mvp/outputs/brief.md'],

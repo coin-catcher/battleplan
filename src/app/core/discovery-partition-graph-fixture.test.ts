@@ -97,6 +97,11 @@ describe('Supabase partition graph chat fixture', () => {
     expect(softEdge?.kind).toBe('fork');
     const allowlist = parsed.tasks.find((task) => task.title === 'Create MVP allowlist');
     expect(allowlist?.discovery_task_slug).toBe('sbf-create-mvp-allowlist');
+    expect(allowlist?.output_type).toBe('code');
+    expect(allowlist?.node_kind).toBe('work');
+    const reconcile = parsed.tasks.find((task) => task.title === 'Reconcile MVP allowlist');
+    expect(reconcile?.output_type).toBe('code');
+    expect(reconcile?.node_kind).toBe('work');
   });
 
   it('reconciles depth_first session to awaitingGraphJson after GRAPH DONE + JSON', () => {

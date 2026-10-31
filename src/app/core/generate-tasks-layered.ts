@@ -73,6 +73,7 @@ const DEPTH_FIRST_LINKED_GRAPH_RULES = [
   '- **Outcomes** — bullets for what “done” means.',
   '- **Outputs** — named artifacts (docs, specs, files, decisions) other tasks can reference.',
   '- **Inputs** — which upstream **outputs** this task requires or strongly benefits from.',
+  '- **Task kind** — `code` (implement/configure) vs `critiquing` (review/gate) vs `research` (read-only discovery only). Most partition subgraph tasks should be **code**; use **critiquing** for explicit review/gate steps (Spike–Gate decision, critique loops).',
   'Do not duplicate scope: merge or split so one task owns policy and another owns execution.',
   '',
   '### Prefer series over flat lists',
