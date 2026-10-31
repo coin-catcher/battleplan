@@ -225,6 +225,14 @@ export interface TaskDraft {
   cross_graph_edit?: boolean;
   cross_graph_edit_rationale?: string;
   execute_config?: ExecuteTaskConfig;
+  /** Canonical discovery type from JSON `type` (research | code | critique). */
+  graph_type?: import('./task-graph-type').TaskGraphType;
+  /** Research deliverable shape when graph_type is research. */
+  research_mode?: import('./task-graph-type').ResearchOutputMode;
+  /** Agent-declared artifact names (critique tasks need ≥2). */
+  discovery_outputs?: string[];
+  /** True when JSON included explicit `type` (or alias). */
+  graph_type_explicit?: boolean;
 }
 
 /** Execution backend for released tasks (see agent-connector.ts). */

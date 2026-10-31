@@ -1,39 +1,48 @@
 import type { LifecyclePhase } from './models';
 import type { TaskNodeKind } from './task-node-kind';
 import {
-  normalizeWorkflowTaskKind,
-  resolveDraftFieldsFromWorkflow,
-  workflowKindToTaskFields,
-  type WorkflowTaskKind,
-} from './workflow-task-kind';
+  discoveryTaskTypeContractLines,
+  normalizeTaskGraphType,
+  parseResearchOutputMode,
+  taskGraphTypeFromRecord,
+  taskGraphTypeToMindmapFields,
+  type ResearchOutputMode,
+  type TaskGraphType,
+} from './task-graph-type';
+import { normalizeWorkflowTaskKind, type WorkflowTaskKind } from './workflow-task-kind';
 
 export interface DiscoveryTaskDraftFields {
   output_type: string;
   node_kind?: TaskNodeKind;
   lifecycle_phase?: LifecyclePhase;
-  workflow_kind?: WorkflowTaskKind;
-  task_kind_explicit: boolean;
+  graph_type?: TaskGraphType;
+  research_mode?: ResearchOutputMode;
+  type_explicit: boolean;
 }
 
 function optionalText(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-/** Infer workflow stencil when the agent omitted task_kind (legacy JSON). */
-export function inferDiscoveryWorkflowKind(record: Record<string, unknown>): WorkflowTaskKind {
+/** Infer graph type when the agent omitted `type` (legacy JSON). */
+export function inferDiscoveryGraphType(record: Record<string, unknown>): TaskGraphType {
   const title = optionalText(record['title'])?.toLowerCase() ?? '';
   if (/\b(critique|review|audit|verify|gate check)\b/.test(title)) {
-    return 'critiquing';
+    return 'critique';
   }
   const pattern = optionalText(record['pattern_id'])?.toLowerCase();
   if (pattern === 'critique-retry' || pattern === 'critique_retry_loop') {
-    return 'critiquing';
+    return 'critique';
   }
   const layer = record['layer'];
   if (typeof layer === 'number' && layer >= 2) {
     return 'code';
   }
-  if (optionalText(record['brief_path'])) {
+  const id = optionalText(record['id'])?.toLowerCase() ?? '';
+  if (id.startsWith('partition-')) {
+    return 'research';
+  }
+  if (optionalText(record['brief_path']) && id) {
     return 'code';
   }
   return 'research';
@@ -48,41 +57,45 @@ function isDiscoveryGraphTaskRow(record: Record<string, unknown>): boolean {
   return Boolean(id && optionalText(record['brief_path']));
 }
 
-/** Resolve mindmap output_type + node_kind for a discovery JSON task row. */
+/** Resolve mindmap fields from canonical `type` (+ legacy aliases). */
 export function resolveDiscoveryTaskDraftFields(record: Record<string, unknown>): DiscoveryTaskDraftFields {
-  const explicitRaw = record['task_kind']
-    ?? record['workflow_kind']
-    ?? record['task_type']
-    ?? record['type'];
-  const explicit = normalizeWorkflowTaskKind(explicitRaw);
+  const explicit = taskGraphTypeFromRecord(record);
   const discoveryRow = isDiscoveryGraphTaskRow(record);
-  const enriched = explicit
-    ? record
-    : discoveryRow
-      ? { ...record, task_kind: inferDiscoveryWorkflowKind(record) }
-      : record;
-  const workflow = resolveDraftFieldsFromWorkflow(enriched);
-  const inferred = discoveryRow && !explicit
-    ? normalizeWorkflowTaskKind(enriched['task_kind'])
-    : undefined;
-  const output_type = workflow.output_type
+  const id = optionalText(record['id'])?.toLowerCase() ?? '';
+  const partitionRow = id.startsWith('partition-') && Boolean(optionalText(record['brief_path']));
+  const graphType = explicit ?? ((discoveryRow || partitionRow) ? inferDiscoveryGraphType(record) : undefined);
+  const mapped = graphType ? taskGraphTypeToMindmapFields(graphType) : undefined;
+  const output_type = mapped?.output_type
     ?? optionalText(record['output_type'])
-    ?? (inferred ? workflowKindToTaskFields(inferred).output_type : 'research');
+    ?? 'research';
+  let research_mode = graphType === 'research' ? parseResearchOutputMode(record) : undefined;
+  if (graphType === 'research' && !research_mode) {
+    const id = optionalText(record['id'])?.toLowerCase() ?? '';
+    research_mode = id.startsWith('partition-') ? 'subgraph' : 'document';
+  }
+  const nodeKindOverride = record['node_kind'] !== undefined
+    ? undefined
+    : mapped?.node_kind;
   return {
     output_type,
-    node_kind: workflow.node_kind,
-    lifecycle_phase: workflow.lifecycle_phase,
-    workflow_kind: explicit ?? inferred,
-    task_kind_explicit: Boolean(explicit),
+    node_kind: nodeKindOverride ?? mapped?.node_kind,
+    lifecycle_phase: mapped?.lifecycle_phase,
+    graph_type: graphType,
+    research_mode,
+    type_explicit: Boolean(explicit),
   };
 }
 
-export function discoveryTaskKindContractLines(): string[] {
-  return [
-    '- **`task_kind`** (required): one of `code` | `critiquing` | `research` | `architect` | `brainstorming`',
-    '  - **code** — implement, configure, migrate, inventory, CI/CD, most partition subgraph work',
-    '  - **critiquing** — review upstream artifacts, spike/gate decisions, acceptance checks (mindmap diamond)',
-    '  - **research** — only for pure discovery/spike read-only work with no implementation deliverable',
-    '  You may set `output_type` + `node_kind` instead; `task_kind` is preferred.',
-  ];
+/** @deprecated use inferDiscoveryGraphType */
+export function inferDiscoveryWorkflowKind(record: Record<string, unknown>): WorkflowTaskKind {
+  const type = inferDiscoveryGraphType(record);
+  if (type === 'code') return 'code';
+  if (type === 'critique') return 'critiquing';
+  return 'research';
 }
+
+export function discoveryTaskKindContractLines(): string[] {
+  return discoveryTaskTypeContractLines();
+}
+
+export { normalizeTaskGraphType };

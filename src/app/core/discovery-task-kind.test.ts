@@ -18,30 +18,43 @@ describe('discovery-task-kind', () => {
     });
     expect(fields.output_type).toBe('research');
     expect(fields.node_kind).toBe('critique');
-    expect(fields.task_kind_explicit).toBe(false);
+    expect(fields.graph_type).toBe('critique');
+    expect(fields.type_explicit).toBe(false);
   });
 
-  it('honors explicit task_kind code', () => {
+  it('honors explicit type code', () => {
     const fields = resolveDiscoveryTaskDraftFields({
       title: 'Edge function inventory',
-      task_kind: 'code',
+      type: 'code',
       layer: 2,
       brief_path: 'battleplan/projects/p/tasks/x/outputs/brief.md',
     });
     expect(fields.output_type).toBe('code');
     expect(fields.node_kind).toBe('work');
-    expect(fields.task_kind_explicit).toBe(true);
+    expect(fields.graph_type).toBe('code');
+    expect(fields.type_explicit).toBe(true);
   });
 
-  it('honors explicit task_kind critiquing for review steps', () => {
+  it('honors explicit type critique for review steps', () => {
     const fields = resolveDiscoveryTaskDraftFields({
       title: 'Review migration plan',
-      task_kind: 'critiquing',
+      type: 'critique',
       id: 'review-migration',
       layer: 2,
       brief_path: 'battleplan/projects/p/tasks/review-migration/outputs/brief.md',
     });
     expect(fields.output_type).toBe('research');
     expect(fields.node_kind).toBe('critique');
+    expect(fields.graph_type).toBe('critique');
+  });
+
+  it('defaults inferred research on partition rows to subgraph mode', () => {
+    const fields = resolveDiscoveryTaskDraftFields({
+      id: 'partition-01-x',
+      title: 'Partition',
+      brief_path: 'battleplan/projects/p/tasks/partition-01-x/outputs/brief.md',
+    });
+    expect(fields.graph_type).toBe('research');
+    expect(fields.research_mode).toBe('subgraph');
   });
 });

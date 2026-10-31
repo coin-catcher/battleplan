@@ -6,6 +6,7 @@ import { normalizeLoopMode, normalizeTaskNodeKind } from './task-node-kind';
 import { normalizeLifecyclePhase } from './task-lifecycle';
 import { normalizeDiscoveryAgentTaskId } from './discovery-task-schema';
 import { resolveDiscoveryTaskDraftFields } from './discovery-task-kind';
+import { parseStringList } from './task-graph-type';
 
 export interface ParsedGeneratedTasks {
   tasks: TaskDraft[];
@@ -195,6 +196,7 @@ function parseGeneratedTaskRecords(
       ? gitPathsRaw.filter((v): v is string => typeof v === 'string').map((v) => v.trim()).filter(Boolean)
       : undefined;
     const discoverySlug = normalizeDiscoveryAgentTaskId(record['id']);
+    const discoveryOutputs = parseStringList(record['outputs']);
     return {
       title,
       prompt,
@@ -215,6 +217,10 @@ function parseGeneratedTaskRecords(
       ...(templateIds?.length ? { template_ids: templateIds } : {}),
       ...(crossGraph ? { cross_graph_edit: true } : {}),
       ...(crossRationale ? { cross_graph_edit_rationale: crossRationale } : {}),
+      ...(discoveryFields.graph_type ? { graph_type: discoveryFields.graph_type } : {}),
+      ...(discoveryFields.research_mode ? { research_mode: discoveryFields.research_mode } : {}),
+      ...(discoveryOutputs.length ? { discovery_outputs: discoveryOutputs } : {}),
+      ...(discoveryFields.type_explicit ? { graph_type_explicit: true } : {}),
     };
   });
 }

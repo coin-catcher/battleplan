@@ -68,7 +68,11 @@ export function resolveDraftFieldsFromWorkflow(record: Record<string, unknown>):
   node_kind?: TaskNodeKind;
   lifecycle_phase?: LifecyclePhase;
 } {
-  const raw = record['task_kind'] ?? record['workflow_kind'] ?? record['kind'];
+  const raw = record['type']
+    ?? record['task_kind']
+    ?? record['task_type']
+    ?? record['workflow_kind']
+    ?? record['kind'];
   const workflow = normalizeWorkflowTaskKind(raw);
   if (!workflow) {
     return {
