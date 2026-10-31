@@ -40,6 +40,11 @@ import {
 } from '../core/generate-tasks-layered';
 import { splitDiscoveryDrafts } from '../core/discovery-cross-graph';
 import {
+  canOfferDiscoveryJsonImport,
+  pendingDiscoveryImportMessage,
+  reconcileDiscoverySessionFromChat,
+} from '../core/discovery-session-recovery';
+import {
   buildDiscoveryCompleteSummary,
   type DiscoveryCompleteSummary,
 } from '../core/discovery-summary';
@@ -144,6 +149,16 @@ export class BattleplanStore {
     return Boolean(this.generateTasksSessionFor(taskId) ?? this.hydratedDiscoverySessionForTask(taskId));
   }
 
+  canImportDiscoveryJsonFromChat(taskId: string): boolean {
+    const session = this.generateTasksSessionFor(taskId) ?? this.hydratedDiscoverySessionForTask(taskId);
+    if (!session) return this.canResumeStuckDiscovery(taskId);
+    return canOfferDiscoveryJsonImport(
+      session,
+      this.messagesForDiscoveryResume(taskId),
+      this.artifactsForDiscoveryResume(taskId),
+    );
+  }
+
   canResumeStuckDiscovery(taskId: string): boolean {
     if (this.hasActiveDiscoverySession(taskId)) return false;
     const task = this.tasks().find((item) => item.task_id === taskId);
@@ -231,9 +246,10 @@ export class BattleplanStore {
       return;
     }
     this.clearTaskPanelError(taskId);
-    this.generateTasksSession.set(inferred);
-    await this.persistDiscoverySession(projectId, inferred);
-    await this.tryImportDiscoveryJson(projectId, taskId);
+    const reconciled = reconcileDiscoverySessionFromChat(inferred, messages, artifacts);
+    this.generateTasksSession.set(reconciled);
+    await this.persistDiscoverySession(projectId, reconciled);
+    await this.tryImportDiscoveryJson(projectId, taskId, undefined, { forcePartitionGraph: true, userInitiated: true });
     if (this.error()) this.adoptGlobalErrorAsTaskPanel(taskId);
     else this.notice.set('Start Discovery resumed from this task’s chat history.');
   }
@@ -263,6 +279,7 @@ export class BattleplanStore {
 
   private async recoverDiscoveryProgress(projectId: string, taskId: string): Promise<void> {
     this.hydrateDiscoverySessionFromProject(taskId);
+    await this.reconcileDiscoverySessionForTask(projectId, taskId);
     if (!this.generateTasksSessionFor(taskId)) {
       if (!this.canResumeStuckDiscovery(taskId)) return;
       const previousError = this.error();
@@ -273,7 +290,23 @@ export class BattleplanStore {
       return;
     }
     if (this.busy()) return;
-    await this.tryImportDiscoveryJson(projectId, taskId);
+    await this.tryImportDiscoveryJson(projectId, taskId, undefined, { forcePartitionGraph: true });
+  }
+
+  private async reconcileDiscoverySessionForTask(projectId: string, taskId: string): Promise<void> {
+    let session = this.generateTasksSessionFor(taskId) ?? this.hydratedDiscoverySessionForTask(taskId);
+    if (!session) return;
+    let messages = this.messagesForDiscoveryResume(taskId);
+    let artifacts = this.artifactsForDiscoveryResume(taskId);
+    if (messages.length === 0) {
+      const refreshed = await this.api.listTaskMessages(taskId, { syncAgent: false });
+      messages = refreshed.messages;
+      artifacts = refreshed.artifacts ?? [];
+    }
+    const reconciled = reconcileDiscoverySessionFromChat(session, messages, artifacts);
+    if (reconciled === session) return;
+    this.generateTasksSession.set(reconciled);
+    await this.persistDiscoverySession(projectId, reconciled);
   }
 
   readonly project = computed(() => this.projects().find((item) => item.project_id === this.projectId()) ?? null);
@@ -893,6 +926,14 @@ export class BattleplanStore {
     const task = this.selectedTask();
     if (!task) return;
     this.hydrateDiscoverySessionFromProject(task.task_id);
+    await this.run(async () => {
+      const refreshed = await this.api.listTaskMessages(task.task_id, { syncAgent: false });
+      this.cacheTaskConversation({ ...refreshed, task: refreshed.task });
+      if (this.selection().taskId === task.task_id) {
+        this.applyTaskConversation(refreshed);
+      }
+    });
+    await this.reconcileDiscoverySessionForTask(task.project_id, task.task_id);
     if (!this.generateTasksSessionFor(task.task_id) && this.canResumeStuckDiscovery(task.task_id)) {
       await this.resumeStuckDiscoveryForTask(task.project_id, task.task_id);
       if (this.error()) {
@@ -907,8 +948,12 @@ export class BattleplanStore {
       return;
     }
     this.clearTaskPanelError(task.task_id);
-    await this.tryImportDiscoveryJson(task.project_id, task.task_id);
+    await this.tryImportDiscoveryJson(task.project_id, task.task_id, undefined, {
+      forcePartitionGraph: true,
+      userInitiated: true,
+    });
     if (this.error()) this.adoptGlobalErrorAsTaskPanel(task.task_id);
+    else this.notice.set('Task graph imported from the last assistant reply.');
   }
 
   private findDiscoveryImportMessage(runId?: string): ChatMessage | null {
@@ -933,21 +978,45 @@ export class BattleplanStore {
     projectId: string,
     sourceTaskId: string,
     runId?: string,
+    options?: { forcePartitionGraph?: boolean; userInitiated?: boolean },
   ): Promise<void> {
     const session = this.generateTasksSessionFor(sourceTaskId);
     if (!session) return;
     const reply = this.findDiscoveryImportMessage(runId);
-    if (!reply || !tryParseGeneratedTasksFromSources(reply.content, this.artifacts())) return;
+    if (!reply) {
+      if (options?.userInitiated) {
+        this.error.set('No assistant message with task graph JSON found in this chat.');
+      }
+      return;
+    }
+    let parsed: ReturnType<typeof parseGeneratedTasksFromSources> | null = null;
+    try {
+      parsed = parseGeneratedTasksFromSources(reply.content, this.artifacts());
+    } catch (error) {
+      if (options?.userInitiated) {
+        this.error.set(error instanceof Error ? error.message : 'Could not parse task graph JSON.');
+      }
+      return;
+    }
+    if (!parsed?.tasks.length) {
+      if (options?.userInitiated) {
+        this.error.set('The assistant reply did not contain any tasks.');
+      }
+      return;
+    }
 
     const messageKey = discoveryMessageKey(reply);
     if (session.lastImportedMessageKey === messageKey) return;
 
     const importRunId = reply.run_id ?? runId ?? `discovery-recovery-${Date.now()}`;
     const phaseBefore = session.phase;
-    const awaitingGraph = session.awaitingGraphJson;
+    const awaitingGraph = session.awaitingGraphJson || options?.forcePartitionGraph;
     const closingStep = session.closingStep;
 
     if (phaseBefore === 'depth_first' && !awaitingGraph && closingStep !== 'architecture') {
+      if (options?.userInitiated) {
+        this.error.set('Discovery is waiting for GRAPH DONE before importing partition graph JSON.');
+      }
       return;
     }
     if (phaseBefore === 'cluster_review') {
