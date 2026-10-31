@@ -182,7 +182,8 @@ export function buildGenerateTasksRepairUserMessage(issues: GeneratedTasksValida
     '- Do not create accidental cycles using only tree, ordering, fork, or join edges.',
     '- Every task needs title, prompt, and a complete brief (all pstack fields) unless discovery brief_path is used.',
     '- Discovery: each task needs stable id, type (research|code|critique), brief_path, and matching git_paths.',
-    '- research: research_mode subgraph|document. critique: ≥2 outputs; approval gates need cycle edges with break_condition.',
+    '- research: research_mode subgraph|document; name discovery artifacts in outputs for child inputs.',
+    '- critique: decision_mode yes_no|one_of|multi; ≥2 outputs with justification; gates use cycle edges + break_condition.',
   ].join('\n');
 }
 

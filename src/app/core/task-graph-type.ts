@@ -10,9 +10,17 @@ import {
 export const TASK_GRAPH_TYPES = ['research', 'code', 'critique'] as const;
 export type TaskGraphType = (typeof TASK_GRAPH_TYPES)[number];
 
-/** How a research task delivers value on the graph frontier. */
+/**
+ * How research participates in Discovery:
+ * - subgraph: explore the frontier and propose the child task graph (Start Discovery / partitions).
+ * - document: collect, distill, and interpret data only (artifacts feed existing graph children).
+ */
 export const RESEARCH_OUTPUT_MODES = ['subgraph', 'document'] as const;
 export type ResearchOutputMode = (typeof RESEARCH_OUTPUT_MODES)[number];
+
+/** Critique decision shape (recorded with justification for downstream tasks). */
+export const CRITIQUE_DECISION_MODES = ['yes_no', 'one_of', 'multi'] as const;
+export type CritiqueDecisionMode = (typeof CRITIQUE_DECISION_MODES)[number];
 
 export interface TaskGraphTypeFields {
   graph_type: TaskGraphType;
@@ -72,6 +80,21 @@ export function taskGraphTypeFromRecord(record: Record<string, unknown>): TaskGr
   return undefined;
 }
 
+export function parseCritiqueDecisionMode(record: Record<string, unknown>): CritiqueDecisionMode | undefined {
+  const raw = record['decision_mode'] ?? record['decision_type'] ?? record['critique_mode'];
+  if (typeof raw !== 'string' || !raw.trim()) return undefined;
+  const token = raw.trim().toLowerCase().replace(/-/g, '_');
+  if (token === 'yes_no' || token === 'binary' || token === 'threshold') return 'yes_no';
+  if (token === 'one_of' || token === 'oneof' || token === 'single_choice') return 'one_of';
+  if (token === 'multi' || token === 'multiple' || token === 'multi_choice' || token === 'multichoice') {
+    return 'multi';
+  }
+  if ((CRITIQUE_DECISION_MODES as readonly string[]).includes(token)) {
+    return token as CritiqueDecisionMode;
+  }
+  return undefined;
+}
+
 export function parseResearchOutputMode(record: Record<string, unknown>): ResearchOutputMode | undefined {
   const raw = record['research_mode'] ?? record['research_output'] ?? record['research_role'];
   if (typeof raw !== 'string' || !raw.trim()) return undefined;
@@ -110,12 +133,14 @@ export function discoveryTaskTypeContractLines(): string[] {
   return [
     '- **`type`** (required): `research` | `code` | `critique` — canonical task graph type.',
     '  Aliases accepted: `task_kind`, `task_type` (legacy). Battleplan maps to mindmap `output_type` + `node_kind`.',
-    '  - **research** — unknown frontier: explore options and/or produce planning artifacts.',
-    '    - `research_mode`: `subgraph` (spawn/defer a child task graph after discovery) | `document` (distilled report/summary for downstream code/architecture).',
-    '    - Use when uncertainty is high; collected data supports later planning and complements existing codebase context.',
+    '  - **research** — explore an **unknown frontier**: discover options, run a Discovery Session (collect → distill → interpret), then **propose the child task graph** when `research_mode` is `subgraph`.',
+    '    - Commit artifacts under `outputs/` (brief + data files). **Every downstream task in the graph** should list relevant research artifacts in `inputs` so shared discovery data is available to all children (via git mirror + brief).',
+    '    - `research_mode`: `subgraph` (frontier → proposed task graph) | `document` (add shared planning/evidence only, no new graph tranche).',
     '  - **code** — implement or change the codebase; deliverables include a change summary and the agent branch with commits.',
-    '  - **critique** — decision from inputs + codebase; list at least **two** named `outputs` (e.g. approve path vs rework path).',
-    '    When acting as an **approval gate**, add a **cycle** edge (critique → upstream work) with `break_condition` (e.g. human:REVIEW).',
+    '  - **critique** — emit a **decision with justification** (record in brief + outputs). Downstream tasks consume the recorded decision via `inputs`.',
+    '    - `decision_mode`: `yes_no` (pass/fail threshold, e.g. quality gate) | `one_of` (pick exactly one branch) | `multi` (activate multiple downstream paths per gating criteria).',
+    '    - `outputs`: name each decision branch (≥2). For `yes_no`, use two outputs (e.g. pass / fail). Match `outputs` to **fork/join/cycle** edges so flow follows the decision.',
+    '    - Approval gates that send work back upstream: **cycle** edge (critique → prior task) with `break_condition` (e.g. human:REVIEW).',
     '  Do not set conflicting `output_type`/`node_kind` unless you intend to override the mapping.',
   ];
 }
@@ -141,13 +166,56 @@ export function validateDiscoveryTaskDraft(
     });
   }
   if (draft.graph_type === 'critique') {
+    issues.push(...validateCritiqueDecisionDraft(draft, prefix));
+  }
+  if (draft.graph_type === 'research') {
     const outputs = draft.discovery_outputs ?? [];
-    if (outputs.length < 2) {
+    if (isDiscovery && outputs.length === 0 && draft.graph_type_explicit) {
       issues.push({
         path: `${prefix}.outputs`,
-        message: 'Critique tasks need at least two named outputs (decision branches, e.g. proceed vs rework).',
+        message: 'Research tasks should name committed discovery artifacts in outputs so child tasks can reference them in inputs.',
       });
     }
+  }
+  return issues;
+}
+
+function validateCritiqueDecisionDraft(
+  draft: import('./models').TaskDraft,
+  prefix: string,
+): DiscoveryTaskTypeValidationIssue[] {
+  const issues: DiscoveryTaskTypeValidationIssue[] = [];
+  const outputs = draft.discovery_outputs ?? [];
+  const mode = draft.decision_mode;
+  if (outputs.length < 2) {
+    issues.push({
+      path: `${prefix}.outputs`,
+      message: 'Critique tasks need at least two named outputs (decision branches with recorded justification).',
+    });
+  }
+  if (draft.graph_type_explicit && !mode) {
+    issues.push({
+      path: `${prefix}.decision_mode`,
+      message: 'Set decision_mode to yes_no, one_of, or multi for critique tasks.',
+    });
+  }
+  if (mode === 'yes_no' && outputs.length > 0 && outputs.length !== 2) {
+    issues.push({
+      path: `${prefix}.outputs`,
+      message: 'yes_no critique tasks should name exactly two outputs (pass vs fail / yes vs no).',
+    });
+  }
+  if (mode === 'one_of' && outputs.length < 2) {
+    issues.push({
+      path: `${prefix}.outputs`,
+      message: 'one_of critique tasks need at least two option outputs.',
+    });
+  }
+  if (mode === 'multi' && outputs.length < 2) {
+    issues.push({
+      path: `${prefix}.outputs`,
+      message: 'multi critique tasks need at least two gated outputs; use fork edges to downstream paths.',
+    });
   }
   return issues;
 }

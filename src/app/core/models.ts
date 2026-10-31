@@ -229,8 +229,10 @@ export interface TaskDraft {
   graph_type?: import('./task-graph-type').TaskGraphType;
   /** Research deliverable shape when graph_type is research. */
   research_mode?: import('./task-graph-type').ResearchOutputMode;
-  /** Agent-declared artifact names (critique tasks need ≥2). */
+  /** Agent-declared artifact / decision branch names. */
   discovery_outputs?: string[];
+  /** Critique decision shape when graph_type is critique. */
+  decision_mode?: import('./task-graph-type').CritiqueDecisionMode;
   /** True when JSON included explicit `type` (or alias). */
   graph_type_explicit?: boolean;
 }

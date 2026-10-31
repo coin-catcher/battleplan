@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   normalizeTaskGraphType,
+  parseCritiqueDecisionMode,
   taskGraphTypeFromRecord,
   validateDiscoveryTaskDraft,
 } from './task-graph-type';
@@ -36,9 +37,16 @@ describe('task-graph-type', () => {
       output_type: 'research',
       depends_on: [],
       graph_type: 'critique',
+      graph_type_explicit: true,
       node_kind: 'critique',
-      discovery_outputs: ['proceed-to-build', 'rework-upstream'],
+      decision_mode: 'yes_no',
+      discovery_outputs: ['pass-quality-gate', 'fail-rework'],
     };
     expect(validateDiscoveryTaskDraft(draft, 0)).toHaveLength(0);
+  });
+
+  it('parses decision_mode aliases from JSON records', () => {
+    expect(parseCritiqueDecisionMode({ decision_mode: 'one_of' })).toBe('one_of');
+    expect(parseCritiqueDecisionMode({ decision_type: 'multi-choice' })).toBe('multi');
   });
 });

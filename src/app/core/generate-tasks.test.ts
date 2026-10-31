@@ -25,7 +25,7 @@ describe('generateTasksInstructionForResearchTask', () => {
     expect(text).toContain('one-dimensional list of code tasks');
     expect(text).toContain('depends_on to []');
     expect(text).toContain('complete brief');
-    expect(text).toContain('critiquing');
+    expect(text).toContain('critique');
     expect(text).toContain('break_condition');
   });
 });
@@ -34,7 +34,7 @@ describe('generateTasksInstructionForProject', () => {
   it('includes JSON schema rules', () => {
     const text = generateTasksInstructionForProject();
     expect(text).toContain('"tasks"');
-    expect(text).toContain('task_kind');
+    expect(text).toContain('"type"');
     expect(text).toContain('fan-in');
   });
 });

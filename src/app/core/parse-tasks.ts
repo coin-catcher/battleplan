@@ -6,7 +6,7 @@ import { normalizeLoopMode, normalizeTaskNodeKind } from './task-node-kind';
 import { normalizeLifecyclePhase } from './task-lifecycle';
 import { normalizeDiscoveryAgentTaskId } from './discovery-task-schema';
 import { resolveDiscoveryTaskDraftFields } from './discovery-task-kind';
-import { parseStringList } from './task-graph-type';
+import { parseCritiqueDecisionMode, parseStringList } from './task-graph-type';
 
 export interface ParsedGeneratedTasks {
   tasks: TaskDraft[];
@@ -197,6 +197,7 @@ function parseGeneratedTaskRecords(
       : undefined;
     const discoverySlug = normalizeDiscoveryAgentTaskId(record['id']);
     const discoveryOutputs = parseStringList(record['outputs']);
+    const decisionMode = parseCritiqueDecisionMode(record);
     return {
       title,
       prompt,
@@ -220,6 +221,7 @@ function parseGeneratedTaskRecords(
       ...(discoveryFields.graph_type ? { graph_type: discoveryFields.graph_type } : {}),
       ...(discoveryFields.research_mode ? { research_mode: discoveryFields.research_mode } : {}),
       ...(discoveryOutputs.length ? { discovery_outputs: discoveryOutputs } : {}),
+      ...(decisionMode ? { decision_mode: decisionMode } : {}),
       ...(discoveryFields.type_explicit ? { graph_type_explicit: true } : {}),
     };
   });
