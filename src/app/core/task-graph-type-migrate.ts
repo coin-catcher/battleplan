@@ -35,14 +35,13 @@ export function inferGraphTypeFromLegacyTask(
   if (
     options?.discoveryRootTaskId
     && task.task_id === options.discoveryRootTaskId
-    && task.node_kind === 'brainstorm'
   ) {
     return 'research';
   }
   if (task.graph_id && slug && !slug.startsWith('partition-')) {
     return 'code';
   }
-  if (task.graph_id && task.pattern_id && task.output_type === 'research' && task.node_kind !== 'critique') {
+  if (task.graph_id && task.pattern_id && task.output_type === 'research') {
     return 'code';
   }
   const record = {
