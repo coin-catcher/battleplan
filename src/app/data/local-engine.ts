@@ -164,6 +164,10 @@ interface NormalizedDraft {
   pattern_id?: string;
   template_ids?: string[];
   cross_graph_edit_rationale?: string;
+  graph_type?: import('../core/task-graph-type').TaskGraphType;
+  research_mode?: import('../core/task-graph-type').ResearchOutputMode;
+  decision_mode?: import('../core/task-graph-type').CritiqueDecisionMode;
+  discovery_outputs?: string[];
 }
 
 export interface CreateTasksOptions {
@@ -2423,6 +2427,10 @@ function normalizeDrafts(raw: TaskDraft[]): NormalizedDraft[] {
       brief_path: item.brief_path,
       git_paths: item.git_paths,
       discovery_task_slug: item.discovery_task_slug,
+      graph_type: item.graph_type,
+      research_mode: item.research_mode,
+      decision_mode: item.decision_mode,
+      discovery_outputs: item.discovery_outputs,
     };
     if (types.length === 1) {
       normalized.push({ title, prompt, output_type: types[0], depends_on: depends, sequential_with: sequential, ...meta });
