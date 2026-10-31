@@ -56,8 +56,13 @@ export function parseGeneratedTasksPayload(text: string): ParsedGeneratedTasks {
   if (!Array.isArray(tasksRaw) || tasksRaw.length === 0) {
     throw new Error('The task list is empty.');
   }
-  const edges = parseGeneratedEdgeList(record['edges'] ?? record['graph_edges'] ?? record['links']);
-  return { tasks: parseGeneratedTaskRecords(tasksRaw), edges };
+  const idToTitle = buildAgentTaskIdToTitleMap(tasksRaw);
+  const defaultGraphId = typeof record['graph_id'] === 'string' ? record['graph_id'].trim() : undefined;
+  const edges = parseGeneratedEdgeList(
+    record['edges'] ?? record['graph_edges'] ?? record['links'],
+    idToTitle,
+  );
+  return { tasks: parseGeneratedTaskRecords(tasksRaw, idToTitle, defaultGraphId), edges };
 }
 
 export function parseGeneratedTaskList(text: string): TaskDraft[] {
@@ -84,7 +89,52 @@ function extractGenerateTasksJson(text: string): string {
   return source.slice(start, end + 1);
 }
 
-function parseGeneratedTaskRecords(parsed: unknown[]): TaskDraft[] {
+function buildAgentTaskIdToTitleMap(tasksRaw: unknown[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const item of tasksRaw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    const id = optionalText(record['id']);
+    const title = optionalText(record['title']);
+    if (id && title) map.set(id, title);
+  }
+  return map;
+}
+
+function resolveTaskDependencyRefs(
+  raw: unknown,
+  idToTitle: Map<string, string>,
+  titlesInBatch: Set<string>,
+): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string') continue;
+    const token = entry.trim();
+    if (!token) continue;
+    if (idToTitle.has(token)) {
+      out.push(idToTitle.get(token)!);
+      continue;
+    }
+    if (titlesInBatch.has(token)) {
+      out.push(token);
+    }
+  }
+  return out;
+}
+
+function parseGeneratedTaskRecords(
+  parsed: unknown[],
+  idToTitle: Map<string, string> = new Map(),
+  defaultGraphId?: string,
+): TaskDraft[] {
+  const titlesInBatch = new Set<string>();
+  for (const item of parsed) {
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      const title = optionalText((item as Record<string, unknown>)['title']);
+      if (title) titlesInBatch.add(title);
+    }
+  }
   return parsed.map((item, index) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       throw new Error(`Task ${index + 1} must be an object.`);
@@ -101,10 +151,15 @@ function parseGeneratedTaskRecords(parsed: unknown[]): TaskDraft[] {
     const output = typeof outputRaw === 'string' && outputRaw.trim()
       ? outputRaw.trim()
       : 'research';
-    const depends = record['depends_on'] ?? record['dependencies'] ?? [];
-    if (!Array.isArray(depends) || depends.some((entry) => typeof entry !== 'string')) {
+    const dependsRaw = record['depends_on'] ?? record['dependencies'] ?? [];
+    const inputsRaw = record['inputs'] ?? [];
+    if (!Array.isArray(dependsRaw) || dependsRaw.some((entry) => typeof entry !== 'string')) {
       throw new Error(`Task ${index + 1} depends_on must be an array of task titles.`);
     }
+    if (!Array.isArray(inputsRaw) || inputsRaw.some((entry) => typeof entry !== 'string')) {
+      throw new Error(`Task ${index + 1} inputs must be an array of strings when present.`);
+    }
+    const depends = resolveTaskDependencyRefs([...dependsRaw, ...inputsRaw], idToTitle, titlesInBatch);
     const sequentialRaw = record['sequential_with']
       ?? record['sibling_dependencies']
       ?? record['conflicts_with']
@@ -122,8 +177,14 @@ function parseGeneratedTaskRecords(parsed: unknown[]): TaskDraft[] {
     const repoPath = typeof record['repo_path'] === 'string' && record['repo_path'].trim()
       ? record['repo_path'].trim()
       : repoPathFromBriefPath(briefPath);
-    const patternId = typeof record['pattern_id'] === 'string' ? record['pattern_id'].trim() : undefined;
-    const graphId = typeof record['graph_id'] === 'string' ? record['graph_id'].trim() : undefined;
+    const patternIdRaw = record['pattern_id'];
+    const patternId = typeof patternIdRaw === 'string' && patternIdRaw.trim()
+      ? patternIdRaw.trim()
+      : undefined;
+    const graphIdRaw = record['graph_id'];
+    const graphId = typeof graphIdRaw === 'string' && graphIdRaw.trim()
+      ? graphIdRaw.trim()
+      : defaultGraphId;
     const crossGraph = record['cross_graph_edit'] === true ? true : undefined;
     const crossRationale = typeof record['cross_graph_edit_rationale'] === 'string'
       ? record['cross_graph_edit_rationale'].trim()

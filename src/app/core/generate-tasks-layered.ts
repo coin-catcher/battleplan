@@ -90,6 +90,7 @@ const DEPTH_FIRST_LINKED_GRAPH_RULES = [
   '- Propose numbered tasks with titles, outcomes, outputs, inputs, **edges** (who feeds whom), and patterns. **No JSON** until the user sends **GRAPH DONE** and every task is approved.',
   '- User: approve / disapprove / change per number.',
   '- On full approval: write briefs under battleplan/projects/{project_id}/tasks/{task_id}/outputs/ on your agent branch, commit, push.',
+  '- JSON may use task `id` slugs in `edges.from` / `edges.to` and in `inputs`; edge `kind` may be `hard` (ordering) or `soft` (fork). Include top-level `graph_id` and per-task `brief_path`.',
   '',
   '### On GRAPH DONE',
   'Summarize the partition graph, index it in your reply, then emit **only** valid JSON: full subgraph (all layers), `edges`, `brief_path`, optional `pattern_id`.',

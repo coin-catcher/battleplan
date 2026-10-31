@@ -26,6 +26,10 @@ const EDGE_KIND_ALIASES: Record<string, TaskEdgeKind> = {
   cycle: 'cycle',
   loop: 'cycle',
   rework: 'cycle',
+  hard: 'ordering',
+  soft: 'fork',
+  dependency: 'ordering',
+  prerequisite: 'ordering',
 };
 
 const DEFAULT_CYCLE_BREAK = 'human:REVIEW';
@@ -42,9 +46,30 @@ export function normalizeGeneratedEdgeKind(value: unknown): TaskEdgeKind {
   return mapped;
 }
 
-export function parseGeneratedEdgeDraft(record: Record<string, unknown>, index: number): GeneratedTaskEdgeDraft {
-  const from = requiredTitle(record['from'] ?? record['from_title'] ?? record['source'], `Edge ${index + 1} from`);
-  const to = requiredTitle(record['to'] ?? record['to_title'] ?? record['target'], `Edge ${index + 1} to`);
+export function resolveGeneratedGraphEndpoint(
+  value: unknown,
+  idToTitle: Map<string, string>,
+  label: string,
+): string {
+  const raw = requiredTitle(value, label);
+  return idToTitle.get(raw) ?? raw;
+}
+
+export function parseGeneratedEdgeDraft(
+  record: Record<string, unknown>,
+  index: number,
+  idToTitle: Map<string, string> = new Map(),
+): GeneratedTaskEdgeDraft {
+  const from = resolveGeneratedGraphEndpoint(
+    record['from'] ?? record['from_title'] ?? record['source'],
+    idToTitle,
+    `Edge ${index + 1} from`,
+  );
+  const to = resolveGeneratedGraphEndpoint(
+    record['to'] ?? record['to_title'] ?? record['target'],
+    idToTitle,
+    `Edge ${index + 1} to`,
+  );
   const kind = normalizeGeneratedEdgeKind(record['kind'] ?? record['edge_kind'] ?? record['type']);
   const breakRaw = record['break_condition'] ?? record['break'];
   const break_condition = typeof breakRaw === 'string' ? breakRaw.trim() : undefined;
@@ -54,7 +79,7 @@ export function parseGeneratedEdgeDraft(record: Record<string, unknown>, index: 
   return { from, to, kind, break_condition: break_condition || undefined };
 }
 
-export function parseGeneratedEdgeList(raw: unknown): GeneratedTaskEdgeDraft[] {
+export function parseGeneratedEdgeList(raw: unknown, idToTitle: Map<string, string> = new Map()): GeneratedTaskEdgeDraft[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) {
     throw new Error('Graph edges must be a JSON array when present.');
@@ -63,7 +88,7 @@ export function parseGeneratedEdgeList(raw: unknown): GeneratedTaskEdgeDraft[] {
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       throw new Error(`Edge ${index + 1} must be an object.`);
     }
-    return parseGeneratedEdgeDraft(item as Record<string, unknown>, index);
+    return parseGeneratedEdgeDraft(item as Record<string, unknown>, index, idToTitle);
   });
 }
 
