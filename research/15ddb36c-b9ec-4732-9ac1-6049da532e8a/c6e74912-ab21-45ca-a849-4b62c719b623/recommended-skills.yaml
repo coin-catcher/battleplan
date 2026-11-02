@@ -1,0 +1,184 @@
+# Curated starter catalog for BattlePlan Skills Library (v1).
+# `id` is stable in BattlePlan storage; `source` is where to vendor/copy from.
+
+version: 1
+featured_stacks:
+  - plugin: pstack
+    repo: cursor/plugins
+    path: pstack
+    rationale: "Primary recommended rigor stack (poteto-mode playbooks, review, shipping)."
+  - plugin: cursor-team-kit
+    repo: cursor/plugins
+    path: cursor-team-kit
+    rationale: "CI, verification, and team shipping aligned with Cloud Agents."
+
+skills:
+  - id: pstack-poteto-mode
+    name: Poteto Mode (pstack)
+    tier: recommended
+    categories: [featured, engineering-rigor]
+    source:
+      type: plugin
+      repository: https://github.com/cursor/plugins
+      plugin_name: pstack
+      skill_path: pstack/skills/poteto-mode
+    cloud_agent_notes: "Vendoring entire pstack plugin skills folder is acceptable; invoke via /poteto-mode in Cursor desktop; Cloud Agents follow SKILL.md body."
+    tags: [workflow, review, tdd]
+
+  - id: pstack-setup
+    name: setup-pstack
+    tier: recommended
+    categories: [engineering-rigor]
+    source:
+      type: plugin
+      repository: https://github.com/cursor/plugins
+      plugin_name: pstack
+      skill_path: pstack/skills/setup-pstack
+    cloud_agent_notes: "Optional; writes user-local rules—prefer project-level model DAR for Cloud Agents instead."
+
+  - id: dyl-stack
+    name: dyl-stack
+    tier: recommended
+    categories: [engineering-rigor]
+    source:
+      type: plugin
+      repository: https://github.com/cursor/plugins
+      plugin_name: dyl-stack
+      skill_path: dyl-stack
+    tags: [workflow]
+
+  - id: cursor-team-kit
+    name: cursor-team-kit
+    tier: recommended
+    categories: [featured, shipping-and-ci]
+    source:
+      type: plugin
+      repository: https://github.com/cursor/plugins
+      plugin_name: cursor-team-kit
+      skill_path: cursor-team-kit
+    tags: [ci, verification]
+
+  - id: cursor-github
+    name: GitHub integration
+    tier: recommended
+    categories: [integrations, shipping-and-ci]
+    source:
+      type: plugin
+      repository: https://github.com/cursor/plugins
+      plugin_name: github
+      skill_path: third_party/github
+    tags: [mcp, pr]
+    requires_mcp_auth: true
+
+  - id: cursor-playwright
+    name: Playwright
+    tier: recommended
+    categories: [integrations, web-frontend]
+    source:
+      type: plugin
+      repository: https://github.com/cursor/plugins
+      plugin_name: playwright
+      skill_path: third_party/playwright
+    tags: [e2e, testing]
+    requires_mcp_auth: true
+
+  - id: orchestrate
+    name: orchestrate
+    tier: suggested
+    categories: [engineering-rigor, battleplan]
+    source:
+      type: plugin
+      repository: https://github.com/cursor/plugins
+      plugin_name: orchestrate
+      skill_path: orchestrate
+    tags: [parallel-agents]
+
+  - id: pr-review-canvas
+    name: pr-review-canvas
+    tier: suggested
+    categories: [shipping-and-ci]
+    source:
+      type: plugin
+      repository: https://github.com/cursor/plugins
+      plugin_name: pr-review-canvas
+      skill_path: pr-review-canvas
+
+  - id: create-skill
+    name: create-skill (Cursor built-in)
+    tier: suggested
+    categories: [learning]
+    source:
+      type: product_builtin
+      invoke: /create-skill
+    cloud_agent_notes: "Not vendored; document in DAR only for desktop sessions."
+
+  - id: anthropics-skill-creator
+    name: skill-creator
+    tier: suggested
+    categories: [learning]
+    source:
+      type: git_path
+      repository: https://github.com/anthropics/skills
+      skill_path: skills/skill-creator
+
+  - id: anthropics-webapp-testing
+    name: webapp-testing
+    tier: suggested
+    categories: [web-frontend]
+    source:
+      type: git_path
+      repository: https://github.com/anthropics/skills
+      skill_path: skills/webapp-testing
+
+  - id: battleplan-walkthrough-artifacts
+    name: walkthrough-artifacts
+    tier: recommended
+    categories: [battleplan, featured]
+    source:
+      type: cursor_cloud_skill
+      path: walkthrough-artifacts
+    cloud_agent_notes: "Ship as .cursor/skills/walkthrough-artifacts/SKILL.md in target repo; copy from Cloud Agent environment template."
+
+  - id: battleplan-env-setup
+    name: env-setup
+    tier: suggested
+    categories: [battleplan]
+    source:
+      type: cursor_cloud_skill
+      path: env-setup
+
+  - id: battleplan-subscribe
+    name: subscribe
+    tier: suggested
+    categories: [battleplan]
+    source:
+      type: cursor_cloud_skill
+      path: subscribe
+
+  - id: hashicorp-terraform
+    name: Terraform (HashiCorp skills)
+    tier: suggested
+    categories: [cloud-infra]
+    source:
+      type: index_reference
+      index: VoltAgent/awesome-agent-skills
+      upstream: hashicorp
+    cloud_agent_notes: "Resolve exact git path during catalog ingest from awesome-agent-skills entry."
+
+  - id: wordpress-agent-skills
+    name: WordPress skills
+    tier: suggested
+    categories: [cms-commerce]
+    source:
+      type: index_reference
+      index: VoltAgent/awesome-agent-skills
+      upstream: wordpress
+
+  - id: vercel-web-quality
+    name: Web quality (Addy Osmani)
+    tier: suggested
+    categories: [web-frontend]
+    source:
+      type: index_reference
+      index: VoltAgent/awesome-agent-skills
+      upstream: vercel
