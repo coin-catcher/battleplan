@@ -16,7 +16,7 @@ Battleplan persists an orchestration run on each `Project` as `graph_orchestrati
 - **Pause task:** Excludes a task from dispatch without changing its mindmap status (orchestrator pause).
 - **Pause / resume run:** Halts or resumes automatic dispatch for the active run.
 - **Stop:** Ends the run; no further automatic dispatch until a new start.
-- **Recovery:** Once per application session, on initial `loadProjects`, `reconcileGraphOrchestration` re-reads in-flight tasks and `last_agent_runs`, then re-attaches agent communication watches.
+- **Recovery:** On each **project load** — restoring the app session (last open project), switching to a cached project tab, or cold-opening a project — `reconcileGraphOrchestration` re-reads in-flight tasks and `last_agent_runs`, then re-attaches agent communication watches.
 
 ## Persistence
 

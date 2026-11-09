@@ -384,18 +384,11 @@ export class BattleplanStore {
   private foregroundWatchTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly tabSnapshots = new Map<string, ProjectTabSnapshot>();
   private readonly taskChatCache = new Map<string, { messages: ChatMessage[]; artifacts: ChatArtifact[]; task: ProjectTask }>();
-  private graphOrchestrationRecoveredThisSession = false;
   async loadProjects(): Promise<ProjectTabRestore | null> {
     let restored: ProjectTabRestore | null = null;
     await this.run(async () => {
-      const listed = await this.api.listProjects();
-      const projects = this.graphOrchestrationRecoveredThisSession
-        ? listed
-        : await this.reconcileProjectsWithActiveGraphRuns(listed);
-      if (!this.graphOrchestrationRecoveredThisSession) {
-        this.graphOrchestrationRecoveredThisSession = true;
-      }
-      this.projects.set(projects);
+      this.projects.set(await this.api.listProjects());
+      const projects = this.projects();
       const preferred = this.preferences.currentProjectId();
       const savedOpen = this.preferences.openProjectIds().filter((projectId) =>
         projects.some((item) => item.project_id === projectId),
@@ -460,8 +453,12 @@ export class BattleplanStore {
       this.projectId.set(projectId);
       await this.preferences.setCurrentProjectId(projectId);
       this.restoreWorkspace(cached);
+      await this.run(async () => {
+        await this.recoverGraphOrchestrationForProject(projectId);
+      });
       void this.refreshPendingChanges();
       this.resumeWatchForSelection();
+      this.syncDoingBackgroundWatches();
       await this.persistOpenSession();
       return { paneWidth: cached.paneWidth, mindmapView: cached.mindmapView };
     }
@@ -505,6 +502,7 @@ export class BattleplanStore {
       await this.preferences.setCurrentProjectId(projectId);
       this.selection.set({ kind: 'project' });
       await this.run(async () => {
+        await this.recoverGraphOrchestrationForProject(projectId);
         await this.reloadTasks();
         await this.reloadAgents(projectId);
         this.applyConversation(await this.api.listProjectMessages(projectId));
@@ -2265,16 +2263,22 @@ export class BattleplanStore {
     this.projects.set(await this.api.listProjects());
   }
 
-  private async reconcileProjectsWithActiveGraphRuns(projects: Project[]): Promise<Project[]> {
-    const reconciled: Project[] = [];
-    for (const project of projects) {
-      if (isOrchestrationRunActive(project.graph_orchestration)) {
-        reconciled.push(await this.api.reconcileGraphOrchestration(project.project_id));
-      } else {
-        reconciled.push(project);
+  /** When a project is loaded (cold open or restored tab), re-sync orchestration and agent watches. */
+  private async recoverGraphOrchestrationForProject(projectId: string): Promise<void> {
+    let project = this.projects().find((item) => item.project_id === projectId);
+    if (!project) {
+      project = (await this.api.listProjects()).find((item) => item.project_id === projectId);
+      if (project) {
+        this.projects.update((items) => {
+          if (items.some((item) => item.project_id === projectId)) return items;
+          return [...items, project!];
+        });
       }
     }
-    return reconciled;
+    if (!project || !isOrchestrationRunActive(project.graph_orchestration)) return;
+    const updated = await this.api.reconcileGraphOrchestration(projectId);
+    this.applyProject(updated);
+    this.ensureOrchestrationWatches(updated);
   }
 
   private applyProject(project: Project): void {
