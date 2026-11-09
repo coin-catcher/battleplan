@@ -430,6 +430,26 @@ describe('LocalEngine', () => {
     expect(savedChild?.status).toBe('ABANDONED');
   });
 
+  it('starts graph orchestration and marks run completed when graph is already done', async () => {
+    const repo = new MemoryRepository();
+    const engine = new LocalEngine(repo, cursor(), () => '2026-11-09T00:00:00.000Z', () => 'id-orch');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      starting_ref: 'main',
+      created_at: '2026-11-09T00:00:00.000Z',
+      updated_at: '2026-11-09T00:00:00.000Z',
+    });
+    const done = await engine.createTask('p1', { title: 'Only', output_type: 'code', initial_prompt: 'x' });
+    await engine.updateTask('p1', done.task_id, { status: 'DONE', manual: true });
+    const project = await engine.startGraphOrchestration('p1', {});
+    expect(project.graph_orchestration?.status).toBe('completed');
+    expect(project.graph_orchestration?.transitions.some((row) => row.kind === 'finish')).toBe(true);
+  });
+
   it('executes available child tasks in parallel batches', async () => {
     const repo = new MemoryRepository();
     const client = cursor();

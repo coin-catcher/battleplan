@@ -1,8 +1,18 @@
 import type { TaskOutputManifest } from './battleplan-storage';
 import type { ProjectTask } from './models';
+import type { TaskGraphEdge } from './task-graph';
+import { prerequisiteTaskIds } from './task-graph';
 
-export function collectUpstreamTaskIds(task: ProjectTask, all: ProjectTask[]): string[] {
+export function collectUpstreamTaskIds(
+  task: ProjectTask,
+  all: ProjectTask[],
+  edges?: TaskGraphEdge[],
+): string[] {
   const byId = new Map(all.map((t) => [t.task_id, t]));
+  if (edges?.length) {
+    const fromGraph = prerequisiteTaskIds(task.task_id, edges);
+    return fromGraph.filter((id) => byId.has(id));
+  }
   const upstream = new Set<string>();
   for (const parent of all) {
     if (parent.dependencies.includes(task.task_id)) {
@@ -15,8 +25,12 @@ export function collectUpstreamTaskIds(task: ProjectTask, all: ProjectTask[]): s
   return [...upstream].filter((id) => byId.has(id));
 }
 
-export function buildInputDocumentsSection(task: ProjectTask, all: ProjectTask[]): string {
-  const upstreamIds = collectUpstreamTaskIds(task, all);
+export function buildInputDocumentsSection(
+  task: ProjectTask,
+  all: ProjectTask[],
+  edges?: TaskGraphEdge[],
+): string {
+  const upstreamIds = collectUpstreamTaskIds(task, all, edges);
   if (!upstreamIds.length) return '';
   const lines: string[] = ['INPUT DOCUMENTS (from connected upstream tasks):'];
   for (const id of upstreamIds) {
