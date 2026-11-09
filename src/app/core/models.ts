@@ -75,6 +75,8 @@ export interface Project {
   workflows?: N8nWorkflowDefinition[];
   /** Serial template–instance orchestration (parallel cap deferred). */
   template_instance_run?: TemplateInstanceRunState;
+  /** Active task-graph orchestration run (dispatch, recovery, pause/stop). */
+  graph_orchestration?: import('./graph-orchestration').GraphOrchestrationRunState;
   created_at: string;
   updated_at: string;
 }

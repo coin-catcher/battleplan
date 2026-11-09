@@ -994,6 +994,16 @@ export class AppComponent implements OnInit {
     return { x: node.x + node.width / 2 - 10, y: node.y - node.height / 2 + 10 };
   }
 
+  runGraphPoint(node: MindmapNode): { x: number; y: number } {
+    return { x: node.x + node.width / 2 + 12, y: node.y - node.height / 2 + 10 };
+  }
+
+  startSubgraphOrchestration(taskId: string, event: Event): void {
+    event.stopPropagation();
+    event.preventDefault();
+    void this.store.startGraphOrchestration(taskId);
+  }
+
   isMindmapLinkSelected(edge: MindmapEdge): boolean {
     const selected = this.selectedMindmapLink();
     return Boolean(selected && linkKey(selected) === linkKey(edge));
@@ -1375,7 +1385,7 @@ export class AppComponent implements OnInit {
 
   onStagePointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-play-children, .map-link-handle, .map-link-hit, .zoom-controls, .agent-toolbox')) return;
+    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-play-children, .map-run-graph, .map-link-handle, .map-link-hit, .zoom-controls, .agent-toolbox')) return;
     this.selectedMindmapLink.set(null);
     if (this.connectPanel()) {
       this.dismissConnectPanel();
@@ -1416,7 +1426,7 @@ export class AppComponent implements OnInit {
 
   onNodePointerDown(node: MindmapNode, event: PointerEvent): void {
     if (this.editingNodeId() === node.id) return;
-    if ((event.target as HTMLElement).closest('.map-edge-arrow, .map-connect-panel, .map-play-children')) return;
+    if ((event.target as HTMLElement).closest('.map-edge-arrow, .map-connect-panel, .map-play-children, .map-run-graph')) return;
     event.stopPropagation();
     const group = this.mapGroupSelection();
     const inGroup = group.includes(node.id);
@@ -1929,7 +1939,7 @@ export class AppComponent implements OnInit {
 
   onMapDismissPointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-connect-panel, .map-convert-panel, .map-edge-arrow, .map-convert-handle, .map-play-children, .map-link-handle, .map-link-hit')) return;
+    if (target.closest('.map-connect-panel, .map-convert-panel, .map-edge-arrow, .map-convert-handle, .map-play-children, .map-run-graph, .map-link-handle, .map-link-hit')) return;
     this.dismissConnectPanel();
     this.convertPanel.set(null);
   }

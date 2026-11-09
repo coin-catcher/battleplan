@@ -62,6 +62,7 @@ export class BattleplanApi {
     task_templates?: import('../core/n8n-workflow').TaskTemplateDefinition[];
     workflows?: import('../core/n8n-workflow').N8nWorkflowDefinition[];
     template_instance_run?: import('../core/n8n-workflow').TemplateInstanceRunState;
+    graph_orchestration?: import('../core/graph-orchestration').GraphOrchestrationRunState | null;
     battleplan_storage_version?: number;
   }): Promise<Project> {
     return this.engine.updateProject(projectId, patch);
@@ -256,6 +257,34 @@ export class BattleplanApi {
 
   executeChildren(projectId: string, parentTaskId: string): Promise<ProjectTask[]> {
     return this.engine.executeChildren(projectId, parentTaskId);
+  }
+
+  startGraphOrchestration(projectId: string, rootTaskId?: string): Promise<Project> {
+    return this.engine.startGraphOrchestration(projectId, rootTaskId);
+  }
+
+  stopGraphOrchestration(projectId: string): Promise<Project> {
+    return this.engine.stopGraphOrchestration(projectId);
+  }
+
+  pauseGraphOrchestration(projectId: string): Promise<Project> {
+    return this.engine.pauseGraphOrchestration(projectId);
+  }
+
+  resumeGraphOrchestration(projectId: string): Promise<Project> {
+    return this.engine.resumeGraphOrchestration(projectId);
+  }
+
+  pauseOrchestrationTask(projectId: string, taskId: string): Promise<Project> {
+    return this.engine.pauseOrchestrationTask(projectId, taskId);
+  }
+
+  resumeOrchestrationTask(projectId: string, taskId: string): Promise<Project> {
+    return this.engine.resumeOrchestrationTask(projectId, taskId);
+  }
+
+  reconcileGraphOrchestration(projectId: string): Promise<Project> {
+    return this.engine.reconcileGraphOrchestration(projectId);
   }
 
   relocateMindmapLink(

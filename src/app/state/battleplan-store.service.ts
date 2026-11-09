@@ -82,6 +82,11 @@ import type { MindmapLinkRef } from '../core/link-relocation';
 import { projectWorkspaceUiFromMindmap } from '../core/project-ui-state';
 import { isWorkflowTerminalAgentReply } from '../core/agent-run-response';
 import { AgentCommunicationsService } from './agent-communications.service';
+import {
+  isOrchestrationRunActive,
+  orchestrationRunLabel,
+  orchestrationScopeTaskIds,
+} from '../core/graph-orchestration';
 
 const POLL_INTERVAL_MS = 3000;
 const POLL_ATTEMPTS = 300;
@@ -338,6 +343,11 @@ export class BattleplanStore {
   }
 
   readonly project = computed(() => this.projects().find((item) => item.project_id === this.projectId()) ?? null);
+  readonly graphOrchestrationRun = computed(() => this.project()?.graph_orchestration ?? null);
+  readonly graphOrchestrationActive = computed(() => {
+    const run = this.graphOrchestrationRun();
+    return run?.status === 'running' || run?.status === 'paused';
+  });
   readonly rootProjects = computed(() => this.projects().filter((item) => !item.parent_project_id));
   readonly editorProject = computed(() => {
     const selection = this.selection();
@@ -377,7 +387,7 @@ export class BattleplanStore {
   async loadProjects(): Promise<ProjectTabRestore | null> {
     let restored: ProjectTabRestore | null = null;
     await this.run(async () => {
-      const projects = await this.api.listProjects();
+      const projects = await this.reconcileProjectsWithActiveGraphRuns(await this.api.listProjects());
       this.projects.set(projects);
       const preferred = this.preferences.currentProjectId();
       const savedOpen = this.preferences.openProjectIds().filter((projectId) =>
@@ -488,10 +498,15 @@ export class BattleplanStore {
       await this.preferences.setCurrentProjectId(projectId);
       this.selection.set({ kind: 'project' });
       await this.run(async () => {
+        const project = this.projects().find((item) => item.project_id === projectId);
+        if (isOrchestrationRunActive(project?.graph_orchestration)) {
+          this.applyProject(await this.api.reconcileGraphOrchestration(projectId));
+        }
         await this.reloadTasks();
         await this.reloadAgents(projectId);
         this.applyConversation(await this.api.listProjectMessages(projectId));
         await this.refreshPendingChanges();
+        this.syncDoingBackgroundWatches();
       });
       this.openTabs.update((tabs) => tabs.includes(projectId) ? tabs : [...tabs, projectId]);
       this.continueProjectWatch(projectId);
@@ -1646,6 +1661,68 @@ export class BattleplanStore {
     });
   }
 
+  isTaskInOrchestrationScope(taskId: string): boolean {
+    const run = this.graphOrchestrationRun();
+    if (!this.graphOrchestrationActive()) return false;
+    return orchestrationScopeTaskIds(run?.root_task_id, this.tasks()).has(taskId);
+  }
+
+  isOrchestrationTaskPaused(taskId: string): boolean {
+    return this.graphOrchestrationRun()?.paused_task_ids.includes(taskId) ?? false;
+  }
+
+  async startGraphOrchestration(rootTaskId?: string): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    await this.run(async () => {
+      const project = await this.api.startGraphOrchestration(projectId, rootTaskId);
+      this.applyProject(project);
+      await this.reloadTasks();
+      this.notice.set(orchestrationRunLabel(project.graph_orchestration) ?? 'Task graph orchestration started.');
+      this.ensureOrchestrationWatches(project);
+    });
+  }
+
+  async stopGraphOrchestration(): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    await this.run(async () => {
+      const project = await this.api.stopGraphOrchestration(projectId);
+      this.applyProject(project);
+      this.notice.set('Task graph orchestration stopped.');
+    });
+  }
+
+  async toggleGraphOrchestrationPause(): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    const run = this.graphOrchestrationRun();
+    await this.run(async () => {
+      const project = run?.status === 'paused'
+        ? await this.api.resumeGraphOrchestration(projectId)
+        : await this.api.pauseGraphOrchestration(projectId);
+      this.applyProject(project);
+      await this.reloadTasks();
+      this.notice.set(orchestrationRunLabel(project.graph_orchestration) ?? 'Task graph orchestration updated.');
+      this.ensureOrchestrationWatches(project);
+    });
+  }
+
+  async toggleOrchestrationTaskPause(taskId: string): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    await this.run(async () => {
+      const paused = this.isOrchestrationTaskPaused(taskId);
+      const project = paused
+        ? await this.api.resumeOrchestrationTask(projectId, taskId)
+        : await this.api.pauseOrchestrationTask(projectId, taskId);
+      this.applyProject(project);
+      await this.reloadTasks();
+      this.notice.set(paused ? 'Task resumed in orchestration run.' : 'Task paused (excluded from orchestration).');
+      if (project.graph_orchestration?.status === 'running') this.ensureOrchestrationWatches(project);
+    });
+  }
+
   async executeSubprojectChat(): Promise<void> {
     const editor = this.editorProject();
     if (!editor) return;
@@ -2179,7 +2256,35 @@ export class BattleplanStore {
   }
 
   private async reloadProjects(): Promise<void> {
-    this.projects.set(await this.api.listProjects());
+    this.projects.set(await this.reconcileProjectsWithActiveGraphRuns(await this.api.listProjects()));
+  }
+
+  private async reconcileProjectsWithActiveGraphRuns(projects: Project[]): Promise<Project[]> {
+    const reconciled: Project[] = [];
+    for (const project of projects) {
+      if (isOrchestrationRunActive(project.graph_orchestration)) {
+        reconciled.push(await this.api.reconcileGraphOrchestration(project.project_id));
+      } else {
+        reconciled.push(project);
+      }
+    }
+    return reconciled;
+  }
+
+  private applyProject(project: Project): void {
+    this.projects.update((items) => items.map((item) => (
+      item.project_id === project.project_id ? project : item
+    )));
+  }
+
+  private ensureOrchestrationWatches(project: Project): void {
+    this.syncDoingBackgroundWatches();
+    for (const row of project.graph_orchestration?.last_agent_runs ?? []) {
+      this.agentComms.ensureTaskWatch(row.task_id);
+    }
+    for (const taskId of project.graph_orchestration?.active_task_ids ?? []) {
+      this.agentComms.ensureTaskWatch(taskId);
+    }
   }
 
   private async reloadTasks(): Promise<void> {
@@ -2196,6 +2301,10 @@ export class BattleplanStore {
     this.codeOutputs.set(code);
     this.researchOutputs.set(research);
     await this.refreshPendingChanges();
+    if (this.graphOrchestrationActive()) {
+      const fresh = (await this.api.listProjects()).find((item) => item.project_id === projectId);
+      if (fresh) this.applyProject(fresh);
+    }
     this.syncDoingBackgroundWatches();
   }
 
