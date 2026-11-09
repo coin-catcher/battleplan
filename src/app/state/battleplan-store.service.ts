@@ -80,8 +80,8 @@ import {
 import type { MindmapViewState, ProjectWorkspaceUiState } from '../core/project-ui-state';
 import type { MindmapLinkRef } from '../core/link-relocation';
 import { projectWorkspaceUiFromMindmap } from '../core/project-ui-state';
-import { isSubstantiveAgentResponse } from '../core/agent-run-response';
-import { doingBackgroundWatchTaskIds, taskNeedsDoingBackgroundPoll } from './doing-background-watch';
+import { isWorkflowTerminalAgentReply } from '../core/agent-run-response';
+import { AgentCommunicationsService } from './agent-communications.service';
 
 const POLL_INTERVAL_MS = 3000;
 const POLL_ATTEMPTS = 300;
@@ -119,6 +119,33 @@ export interface TaskPanelErrorState {
 export class BattleplanStore {
   private readonly api = inject(BattleplanApi);
   private readonly preferences = inject(AppPreferences);
+  private readonly agentComms = inject(AgentCommunicationsService);
+
+  constructor() {
+    this.agentComms.attachBridge({
+      tasks: () => this.tasks(),
+      projectId: () => this.projectId(),
+      selection: () => this.selection(),
+      subprojectCursorAgentId: (id) => this.subprojectCursorAgentId(id),
+      rootProject: () => {
+        const project = this.project();
+        if (!project || project.parent_task_id || project.parent_project_id) return null;
+        return project;
+      },
+      isWatchingTaskChat: (taskId) => this.watchingTaskChat(taskId, this.selection()),
+      isWatchingProjectChat: (projectId) => this.watchingProjectChat(projectId),
+      onTaskConversation: (result) => {
+        this.applyTaskConversation(result);
+        if (this.watchingTaskChat(result.task.task_id, this.selection())) {
+          void this.refreshOutput(result.task);
+        }
+      },
+      onProjectConversation: (page) => this.applyConversation(page),
+      onSubprojectTaskBundle: (taskId, page, task) => this.cacheSubprojectTaskChat(taskId, page, task),
+      reloadProjects: () => this.reloadProjects(),
+      refreshOutput: (task) => this.refreshOutput(task),
+    });
+  }
 
   readonly projects = signal<Project[]>([]);
   readonly projectId = signal<string | null>(null);
@@ -347,14 +374,6 @@ export class BattleplanStore {
   private foregroundWatchTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly tabSnapshots = new Map<string, ProjectTabSnapshot>();
   private readonly taskChatCache = new Map<string, { messages: ChatMessage[]; artifacts: ChatArtifact[]; task: ProjectTask }>();
-  private readonly doingBackgroundGeneration = new Map<string, number>();
-  private readonly doingBackgroundTimer = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly doingBackgroundInflight = new Set<string>();
-  private projectBackgroundGeneration = 0;
-  private projectBackgroundActive = false;
-  private projectBackgroundTimer: ReturnType<typeof setTimeout> | undefined;
-  private projectBackgroundInflight = false;
-
   async loadProjects(): Promise<ProjectTabRestore | null> {
     let restored: ProjectTabRestore | null = null;
     await this.run(async () => {
@@ -1590,7 +1609,7 @@ export class BattleplanStore {
     if (runId) {
       await this.syncTaskUserRun(taskId, runId);
       void this.watchTask(taskId, runId).finally(() => this.syncDoingBackgroundWatches());
-      this.ensureDoingBackgroundWatch(taskId);
+      this.agentComms.ensureTaskWatch(taskId);
     }
   }
 
@@ -1646,7 +1665,7 @@ export class BattleplanStore {
       await this.syncProjectUserRun(projectId, runId);
       void this.watchProject(projectId, runId);
       const task = this.selectedTask();
-      if (task?.output_type === 'subproject') this.ensureDoingBackgroundWatch(task.task_id);
+      if (task?.output_type === 'subproject') this.agentComms.ensureTaskWatch(task.task_id);
     }
   }
 
@@ -1693,7 +1712,7 @@ export class BattleplanStore {
       if (watchProjectId) {
         await this.syncProjectUserRun(watchProjectId, runId);
         void this.watchProject(watchProjectId, runId);
-        this.ensureDoingBackgroundWatch(taskId);
+        this.agentComms.ensureTaskWatch(taskId);
       } else {
         await this.syncTaskUserRun(taskId, runId);
         if (this.generateTasksSessionFor(taskId)) {
@@ -1705,7 +1724,7 @@ export class BattleplanStore {
         } else {
           void this.watchTask(taskId, runId).finally(() => this.syncDoingBackgroundWatches());
         }
-        this.ensureDoingBackgroundWatch(taskId);
+        this.agentComms.ensureTaskWatch(taskId);
       }
     } else {
       // Synchronous agent replies (e.g. library research) finish in the same request.
@@ -1733,7 +1752,7 @@ export class BattleplanStore {
       this.syncDoingBackgroundWatches();
       return;
     }
-    this.ensureDoingBackgroundWatch(taskId);
+        this.agentComms.ensureTaskWatch(taskId);
     void this.finishApproveMerge(taskId);
   }
 
@@ -1762,7 +1781,7 @@ export class BattleplanStore {
     const unique = [...new Set(taskIds.map((id) => id.trim()).filter(Boolean))].filter((id) => id !== 'project');
     if (unique.length === 0) return;
     for (const taskId of unique) {
-      this.stopDoingBackgroundWatch(taskId);
+      this.agentComms.stopTaskWatch(taskId);
       this.taskChatCache.delete(taskId);
     }
     this.stopWatch();
@@ -1873,76 +1892,7 @@ export class BattleplanStore {
   }
 
   private syncDoingBackgroundWatches(): void {
-    const wanted = new Set(doingBackgroundWatchTaskIds(this.tasks(), (id) => this.subprojectCursorAgentId(id)));
-    for (const taskId of wanted) this.ensureDoingBackgroundWatch(taskId);
-    for (const taskId of [...this.doingBackgroundGeneration.keys()]) {
-      if (!wanted.has(taskId)) this.stopDoingBackgroundWatch(taskId);
-    }
-    this.syncProjectBackgroundWatch();
-  }
-
-  private syncProjectBackgroundWatch(): void {
-    const project = this.project();
-    const root = project && !project.parent_task_id && !project.parent_project_id ? project : null;
-    const needsWatch = Boolean(root && (root.status ?? 'TODO') === 'DOING' && root.cursor_agent_id);
-    if (needsWatch && root) {
-      this.ensureProjectBackgroundWatch(root.project_id);
-    } else {
-      this.stopProjectBackgroundWatch();
-    }
-  }
-
-  private ensureProjectBackgroundWatch(projectId: string): void {
-    if (this.projectBackgroundActive) return;
-    this.projectBackgroundActive = true;
-    const generation = ++this.projectBackgroundGeneration;
-    this.scheduleProjectBackgroundTick(projectId, generation, 0);
-  }
-
-  private stopProjectBackgroundWatch(): void {
-    if (!this.projectBackgroundActive && !this.projectBackgroundTimer) return;
-    this.projectBackgroundActive = false;
-    this.projectBackgroundGeneration += 1;
-    if (this.projectBackgroundTimer) clearTimeout(this.projectBackgroundTimer);
-    this.projectBackgroundTimer = undefined;
-    this.projectBackgroundInflight = false;
-  }
-
-  private scheduleProjectBackgroundTick(projectId: string, generation: number, attempt: number): void {
-    if (this.projectBackgroundGeneration !== generation) return;
-    if (attempt >= POLL_ATTEMPTS) return;
-    this.projectBackgroundTimer = setTimeout(() => {
-      void this.runProjectBackgroundTick(projectId, generation, attempt);
-    }, attempt === 0 ? 0 : POLL_INTERVAL_MS);
-  }
-
-  private async runProjectBackgroundTick(projectId: string, generation: number, attempt: number): Promise<void> {
-    if (this.projectBackgroundGeneration !== generation || this.projectBackgroundInflight) {
-      this.scheduleProjectBackgroundTick(projectId, generation, attempt + 1);
-      return;
-    }
-    this.projectBackgroundInflight = true;
-    try {
-      const page = await this.api.listProjectMessages(projectId);
-      if (this.projectBackgroundGeneration !== generation) return;
-      this.projects.update((projects) => projects.map((item) => (
-        item.project_id === page.project?.project_id && page.project ? page.project : item
-      )));
-      if (this.watchingProjectChat(projectId)) this.applyConversation(page);
-      const project = this.projects().find((item) => item.project_id === projectId);
-      const status = project?.status ?? 'TODO';
-      if (status !== 'DOING') {
-        this.stopProjectBackgroundWatch();
-        return;
-      }
-    } catch {
-      // Keep polling through transient failures.
-    } finally {
-      this.projectBackgroundInflight = false;
-    }
-    if (this.projectBackgroundGeneration === generation) {
-      this.scheduleProjectBackgroundTick(projectId, generation, attempt + 1);
-    }
+    this.agentComms.syncTaskWatches(this.tasks(), (id) => this.subprojectCursorAgentId(id));
   }
 
   private async syncTaskPanelAfterOpen(
@@ -2026,7 +1976,7 @@ export class BattleplanStore {
         const refreshed = await this.api.listTaskMessages(taskId);
         this.applyTaskConversation(refreshed);
         this.continueTaskWatch(taskId);
-        this.ensureDoingBackgroundWatch(taskId);
+        this.agentComms.ensureTaskWatch(taskId);
         this.notice.set('Merge conflict — the task agent is resolving it.');
       } else {
         this.setTaskPanelError(taskId, { message, connectionFailed: false });
@@ -2069,84 +2019,7 @@ export class BattleplanStore {
         void this.watchProject(projectId, runId);
       }
     }
-    this.syncProjectBackgroundWatch();
-  }
-
-  private ensureDoingBackgroundWatch(taskId: string): void {
-    const task = this.tasks().find((item) => item.task_id === taskId);
-    if (!task || !taskNeedsDoingBackgroundPoll(task, task.subproject_id ? this.subprojectCursorAgentId(task.subproject_id) : undefined)) {
-      this.stopDoingBackgroundWatch(taskId);
-      return;
-    }
-    if (this.doingBackgroundGeneration.has(taskId)) return;
-    const generation = (this.doingBackgroundGeneration.get(taskId) ?? 0) + 1;
-    this.doingBackgroundGeneration.set(taskId, generation);
-    this.scheduleDoingBackgroundTick(taskId, generation, 0);
-  }
-
-  private stopDoingBackgroundWatch(taskId: string): void {
-    this.doingBackgroundGeneration.set(taskId, (this.doingBackgroundGeneration.get(taskId) ?? 0) + 1);
-    this.doingBackgroundGeneration.delete(taskId);
-    const timer = this.doingBackgroundTimer.get(taskId);
-    if (timer) clearTimeout(timer);
-    this.doingBackgroundTimer.delete(taskId);
-    this.doingBackgroundInflight.delete(taskId);
-  }
-
-  private scheduleDoingBackgroundTick(taskId: string, generation: number, attempt: number): void {
-    if (this.doingBackgroundGeneration.get(taskId) !== generation) return;
-    if (attempt >= POLL_ATTEMPTS) return;
-    const timer = setTimeout(() => {
-      void this.runDoingBackgroundTick(taskId, generation, attempt);
-    }, attempt === 0 ? 0 : POLL_INTERVAL_MS);
-    this.doingBackgroundTimer.set(taskId, timer);
-  }
-
-  private async runDoingBackgroundTick(taskId: string, generation: number, attempt: number): Promise<void> {
-    if (this.doingBackgroundGeneration.get(taskId) !== generation) return;
-    if (this.doingBackgroundInflight.has(taskId)) {
-      this.scheduleDoingBackgroundTick(taskId, generation, attempt + 1);
-      return;
-    }
-    this.doingBackgroundInflight.add(taskId);
-    try {
-      const task = this.tasks().find((item) => item.task_id === taskId);
-      if (!task || !taskNeedsDoingBackgroundPoll(task, task.subproject_id ? this.subprojectCursorAgentId(task.subproject_id) : undefined)) {
-        this.stopDoingBackgroundWatch(taskId);
-        return;
-      }
-      if (task.output_type === 'subproject' && task.subproject_id) {
-        const page = await this.api.listProjectMessages(task.subproject_id);
-        if (this.doingBackgroundGeneration.get(taskId) !== generation) return;
-        await this.reloadProjects();
-        const freshTask = this.tasks().find((item) => item.task_id === taskId) ?? task;
-        this.cacheSubprojectTaskChat(taskId, page, freshTask);
-        if (this.watchingTaskChat(taskId, this.selection())) this.applyConversation(page);
-        const refreshed = await this.api.listTaskMessages(taskId);
-        if (this.doingBackgroundGeneration.get(taskId) !== generation) return;
-        this.applyTaskConversation(refreshed);
-        if (refreshed.task.status !== 'DOING') {
-          this.stopDoingBackgroundWatch(taskId);
-          return;
-        }
-      } else {
-        const result = await this.api.listTaskMessages(taskId);
-        if (this.doingBackgroundGeneration.get(taskId) !== generation) return;
-        this.applyTaskConversation(result);
-        if (result.task.status !== 'DOING') {
-          if (this.watchingTaskChat(taskId, this.selection())) await this.refreshOutput(result.task);
-          this.stopDoingBackgroundWatch(taskId);
-          return;
-        }
-      }
-    } catch {
-      // Keep polling; transient failures should not stop background sync.
-    } finally {
-      this.doingBackgroundInflight.delete(taskId);
-    }
-    if (this.doingBackgroundGeneration.get(taskId) === generation) {
-      this.scheduleDoingBackgroundTick(taskId, generation, attempt + 1);
-    }
+    this.syncDoingBackgroundWatches();
   }
 
   private cacheTaskConversation(result: { messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }): void {
@@ -2169,8 +2042,8 @@ export class BattleplanStore {
     const live = this.tasks().find((item) => item.task_id === taskId);
     const subprojectAgentId = live?.subproject_id ? this.subprojectCursorAgentId(live.subproject_id) : undefined;
     const pollActive = live
-      ? taskBackgroundPollActive(live, subprojectAgentId, this.doingBackgroundGeneration.has(taskId))
-      : this.doingBackgroundGeneration.has(taskId);
+      ? taskBackgroundPollActive(live, subprojectAgentId, this.agentComms.isTaskPolling(taskId))
+      : this.agentComms.isTaskPolling(taskId);
     const merged = coalesceCachedTaskStatus(live, { ...cachedTask, task_id: taskId }, pollActive);
     this.replaceTask(merged);
     this.taskChatCache.set(taskId, {
@@ -2427,7 +2300,7 @@ export class BattleplanStore {
 function unansweredRun(messages: ChatMessage[]): string | undefined {
   const answered = new Set(
     messages
-      .filter((message) => message.role === 'assistant' && message.run_id && isSubstantiveAgentResponse(message.content))
+      .filter((message) => message.role === 'assistant' && message.run_id && isWorkflowTerminalAgentReply(message.content))
       .map((message) => message.run_id),
   );
   return [...messages].reverse().find((message) => message.role === 'user' && message.run_id && !answered.has(message.run_id))?.run_id;
@@ -2442,7 +2315,7 @@ function hasAssistant(messages: ChatMessage[], runId: string): boolean {
   return messages.some((message) => (
     message.run_id === runId
     && message.role === 'assistant'
-    && isSubstantiveAgentResponse(message.content)
+    && isWorkflowTerminalAgentReply(message.content)
   ));
 }
 
