@@ -85,7 +85,7 @@ import { AgentCommunicationsService } from './agent-communications.service';
 import {
   isOrchestrationRunActive,
   orchestrationRunLabel,
-  orchestrationScopeTaskIds,
+  orchestrationScopeForRun,
 } from '../core/graph-orchestration';
 
 const POLL_INTERVAL_MS = 3000;
@@ -384,10 +384,17 @@ export class BattleplanStore {
   private foregroundWatchTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly tabSnapshots = new Map<string, ProjectTabSnapshot>();
   private readonly taskChatCache = new Map<string, { messages: ChatMessage[]; artifacts: ChatArtifact[]; task: ProjectTask }>();
+  private graphOrchestrationRecoveredThisSession = false;
   async loadProjects(): Promise<ProjectTabRestore | null> {
     let restored: ProjectTabRestore | null = null;
     await this.run(async () => {
-      const projects = await this.reconcileProjectsWithActiveGraphRuns(await this.api.listProjects());
+      const listed = await this.api.listProjects();
+      const projects = this.graphOrchestrationRecoveredThisSession
+        ? listed
+        : await this.reconcileProjectsWithActiveGraphRuns(listed);
+      if (!this.graphOrchestrationRecoveredThisSession) {
+        this.graphOrchestrationRecoveredThisSession = true;
+      }
       this.projects.set(projects);
       const preferred = this.preferences.currentProjectId();
       const savedOpen = this.preferences.openProjectIds().filter((projectId) =>
@@ -498,10 +505,6 @@ export class BattleplanStore {
       await this.preferences.setCurrentProjectId(projectId);
       this.selection.set({ kind: 'project' });
       await this.run(async () => {
-        const project = this.projects().find((item) => item.project_id === projectId);
-        if (isOrchestrationRunActive(project?.graph_orchestration)) {
-          this.applyProject(await this.api.reconcileGraphOrchestration(projectId));
-        }
         await this.reloadTasks();
         await this.reloadAgents(projectId);
         this.applyConversation(await this.api.listProjectMessages(projectId));
@@ -1663,8 +1666,8 @@ export class BattleplanStore {
 
   isTaskInOrchestrationScope(taskId: string): boolean {
     const run = this.graphOrchestrationRun();
-    if (!this.graphOrchestrationActive()) return false;
-    return orchestrationScopeTaskIds(run?.root_task_id, this.tasks()).has(taskId);
+    if (!run || !this.graphOrchestrationActive()) return false;
+    return orchestrationScopeForRun(run, this.tasks()).has(taskId);
   }
 
   isOrchestrationTaskPaused(taskId: string): boolean {
@@ -1675,7 +1678,10 @@ export class BattleplanStore {
     const projectId = this.projectId();
     if (!projectId) return;
     await this.run(async () => {
-      const project = await this.api.startGraphOrchestration(projectId, rootTaskId);
+      const project = await this.api.startGraphOrchestration(projectId, {
+        rootTaskId,
+        descendantsOnly: false,
+      });
       this.applyProject(project);
       await this.reloadTasks();
       this.notice.set(orchestrationRunLabel(project.graph_orchestration) ?? 'Task graph orchestration started.');
@@ -2256,7 +2262,7 @@ export class BattleplanStore {
   }
 
   private async reloadProjects(): Promise<void> {
-    this.projects.set(await this.reconcileProjectsWithActiveGraphRuns(await this.api.listProjects()));
+    this.projects.set(await this.api.listProjects());
   }
 
   private async reconcileProjectsWithActiveGraphRuns(projects: Project[]): Promise<Project[]> {

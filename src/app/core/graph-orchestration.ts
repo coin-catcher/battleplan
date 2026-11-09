@@ -2,8 +2,8 @@ import { descendantTaskIds } from './execute-children';
 import { independentBatch } from './execute-children';
 import type { ProjectTask } from './models';
 import type { TaskGraphEdge } from './task-graph';
-import { outgoingEdges, prerequisitesMet } from './task-graph';
-import { isAutoDispatchCandidate } from './task-ready';
+import { edgeBlocksExecution, incomingEdges, outgoingEdges, prerequisitesMet } from './task-graph';
+import { isDispatchableNodeKind } from './task-node-kind';
 
 export const GRAPH_ORCHESTRATION_STATUSES = [
   'idle',
@@ -49,6 +49,8 @@ export interface GraphOrchestrationRunState {
   run_id: string;
   /** When set, only this task and its descendants participate in the run. */
   root_task_id?: string;
+  /** When true with `root_task_id`, scope is descendants only (root is not dispatched). */
+  descendants_only?: boolean;
   status: GraphOrchestrationRunStatus;
   started_at: string;
   updated_at: string;
@@ -63,11 +65,21 @@ export interface GraphOrchestrationRunState {
 export function orchestrationScopeTaskIds(
   rootTaskId: string | undefined,
   tasks: ProjectTask[],
+  options?: { descendantsOnly?: boolean },
 ): Set<string> {
   if (!rootTaskId) return new Set(tasks.map((task) => task.task_id));
   const scoped = new Set(descendantTaskIds(rootTaskId, tasks));
-  scoped.add(rootTaskId);
+  if (!options?.descendantsOnly) scoped.add(rootTaskId);
   return scoped;
+}
+
+export function orchestrationScopeForRun(
+  run: GraphOrchestrationRunState,
+  tasks: ProjectTask[],
+): Set<string> {
+  return orchestrationScopeTaskIds(run.root_task_id, tasks, {
+    descendantsOnly: run.descendants_only,
+  });
 }
 
 export function tasksInOrchestrationScope(
@@ -84,15 +96,49 @@ export function isTaskPausedByOrchestration(
   return Boolean(run?.paused_task_ids.includes(taskId));
 }
 
+export function prerequisitesMetForOrchestration(
+  task: ProjectTask,
+  tasks: ProjectTask[],
+  edges: TaskGraphEdge[],
+  run: GraphOrchestrationRunState,
+): boolean {
+  const byId = new Map(tasks.map((item) => [item.task_id, item]));
+  for (const edge of incomingEdges(task.task_id, edges)) {
+    if (run.descendants_only && run.root_task_id
+      && edge.kind === 'tree' && edge.from_task_id === run.root_task_id) {
+      continue;
+    }
+    const from = byId.get(edge.from_task_id);
+    if (!from) continue;
+    if (edgeBlocksExecution(from, edge)) return false;
+  }
+  return true;
+}
+
+export function isOrchestrationDispatchCandidate(
+  task: ProjectTask,
+  tasks: ProjectTask[],
+  edges: TaskGraphEdge[],
+  run: GraphOrchestrationRunState,
+): boolean {
+  if (task.status === 'BLOCKED') return false;
+  if (task.status !== 'TODO') return false;
+  if (task.output_type === 'subproject') return false;
+  if (!isDispatchableNodeKind(task.node_kind)) return false;
+  if (task.cursor_agent_id) return false;
+  if (!prerequisitesMetForOrchestration(task, tasks, edges, run)) return false;
+  return true;
+}
+
 export function orchestrationDispatchBatch(
   tasks: ProjectTask[],
   edges: TaskGraphEdge[],
   run: GraphOrchestrationRunState,
 ): ProjectTask[] {
-  const scope = orchestrationScopeTaskIds(run.root_task_id, tasks);
+  const scope = orchestrationScopeForRun(run, tasks);
   const scopedTasks = tasksInOrchestrationScope(tasks, scope);
   const ready = scopedTasks.filter(
-    (task) => isAutoDispatchCandidate(task, tasks, edges)
+    (task) => isOrchestrationDispatchCandidate(task, tasks, edges, run)
       && !run.paused_task_ids.includes(task.task_id),
   );
   return independentBatch(ready, tasks);
@@ -117,7 +163,7 @@ export function isOrchestrationRunComplete(
   run: GraphOrchestrationRunState,
 ): boolean {
   if (run.status === 'stopped' || run.status === 'completed') return true;
-  const scope = orchestrationScopeTaskIds(run.root_task_id, tasks);
+  const scope = orchestrationScopeForRun(run, tasks);
   const scoped = tasksInOrchestrationScope(tasks, scope);
   const inFlight = scoped.some(
     (task) => (task.status === 'DOING' || task.status === 'REVIEW') && !run.paused_task_ids.includes(task.task_id),
@@ -181,7 +227,7 @@ export function reconcileRunningTasks(
   tasks: ProjectTask[],
   run: GraphOrchestrationRunState,
 ): GraphOrchestrationRunState {
-  const scope = orchestrationScopeTaskIds(run.root_task_id, tasks);
+  const scope = orchestrationScopeForRun(run, tasks);
   const active_task_ids = tasks
     .filter((task) => scope.has(task.task_id)
       && (task.status === 'DOING' || task.status === 'REVIEW')
@@ -237,10 +283,12 @@ export function newGraphOrchestrationRun(
   rootTaskId: string | undefined,
   runId: string,
   at: string,
+  options?: { descendantsOnly?: boolean },
 ): GraphOrchestrationRunState {
   let run: GraphOrchestrationRunState = {
     run_id: runId,
     root_task_id: rootTaskId,
+    descendants_only: options?.descendantsOnly,
     status: 'running',
     started_at: at,
     updated_at: at,

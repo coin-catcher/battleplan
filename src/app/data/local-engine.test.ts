@@ -445,7 +445,7 @@ describe('LocalEngine', () => {
     });
     const done = await engine.createTask('p1', { title: 'Only', output_type: 'code', initial_prompt: 'x' });
     await engine.updateTask('p1', done.task_id, { status: 'DONE', manual: true });
-    const project = await engine.startGraphOrchestration('p1');
+    const project = await engine.startGraphOrchestration('p1', {});
     expect(project.graph_orchestration?.status).toBe('completed');
     expect(project.graph_orchestration?.transitions.some((row) => row.kind === 'finish')).toBe(true);
   });

@@ -5,6 +5,7 @@ import {
   appendOrchestrationTransition,
   isOrchestrationRunComplete,
   newGraphOrchestrationRun,
+  isOrchestrationDispatchCandidate,
   orchestrationDispatchBatch,
   orchestrationScopeTaskIds,
   planExecutionWaves,
@@ -35,6 +36,25 @@ describe('graph-orchestration', () => {
     ];
     const scope = orchestrationScopeTaskIds('root', tasks);
     expect([...scope].sort()).toEqual(['child', 'root']);
+  });
+
+  it('scopes descendants_only runs without the root task', () => {
+    const tasks = [
+      task({ task_id: 'root', title: 'Root', dependencies: ['child'] }),
+      task({ task_id: 'child', title: 'Child' }),
+    ];
+    const scope = orchestrationScopeTaskIds('root', tasks, { descendantsOnly: true });
+    expect([...scope]).toEqual(['child']);
+  });
+
+  it('allows descendants_only runs to skip tree prereq from scope root', () => {
+    const root = task({ task_id: 'root', title: 'Root', dependencies: ['child'], status: 'TODO' });
+    const child = task({ task_id: 'child', title: 'Child', initial_prompt: 'go' });
+    const edges: TaskGraphEdge[] = [
+      { edge_id: 't', from_task_id: 'root', to_task_id: 'child', kind: 'tree' },
+    ];
+    const run = newGraphOrchestrationRun('root', 'run-1', '2020-01-01T00:00:00.000Z', { descendantsOnly: true });
+    expect(isOrchestrationDispatchCandidate(child, [root, child], edges, run)).toBe(true);
   });
 
   it('dispatches ready parallel tasks respecting pause list', () => {

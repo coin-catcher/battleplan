@@ -68,7 +68,6 @@ import {
   normalChildIds,
   siblingDependencyIds,
 } from '../core/dependencies';
-import { availableDescendants, independentBatch } from '../core/execute-children';
 import {
   buildGraphEdgesFromDrafts,
   filterGraphEdgesToTaskIds,
@@ -104,7 +103,7 @@ import {
   workflowExecutionPreamble,
   workflowFeedbackPreamble,
 } from '../core/task-workflow-lifecycle';
-import { autoDispatchBatch, graphEdgesForRun } from '../core/task-ready';
+import { graphEdgesForRun } from '../core/task-ready';
 import {
   appendOrchestrationTransition,
   isOrchestrationRunActive,
@@ -1205,37 +1204,39 @@ export class LocalEngine {
 
   async executeChildren(projectId: string, parentTaskId: string): Promise<ProjectTask[]> {
     await this.requireTask(projectId, parentTaskId);
-    const started: ProjectTask[] = [];
-    for (let guard = 0; guard < 500; guard += 1) {
-      const tasks = await this.listTasks(projectId);
-      const available = availableDescendants(parentTaskId, tasks);
-      if (available.length === 0) break;
-      const batch = independentBatch(available, tasks);
-      if (batch.length === 0) break;
-      await Promise.all(batch.map(async (candidate) => {
-        if (candidate.output_type === 'subproject') return;
-        if (candidate.status === 'ABANDONED') return;
-        const fresh = await this.requireTask(projectId, candidate.task_id);
-        if (fresh.cursor_agent_id || fresh.status !== 'TODO') return;
-        if (!taskInitialPrompt(fresh)) {
-          throw new Error(`"${fresh.title}" needs an Initial Prompt before it can be executed.`);
-        }
-        await this.executeTask(candidate.task_id);
-        const updated = await this.requireTask(projectId, candidate.task_id);
-        started.push(updated);
-      }));
-    }
-    return started;
+    const project = await this.startGraphOrchestration(projectId, {
+      rootTaskId: parentTaskId,
+      descendantsOnly: true,
+    });
+    const ids = [...new Set(
+      (project.graph_orchestration?.transitions ?? [])
+        .filter((row) => row.kind === 'dispatch' && row.to_task_id)
+        .map((row) => row.to_task_id as string),
+    )];
+    if (ids.length === 0) return [];
+    const tasks = await this.listTasks(projectId);
+    return ids
+      .map((taskId) => tasks.find((task) => task.task_id === taskId))
+      .filter((task): task is ProjectTask => Boolean(task));
   }
 
-  async startGraphOrchestration(projectId: string, rootTaskId?: string): Promise<Project> {
+  async startGraphOrchestration(
+    projectId: string,
+    options?: { rootTaskId?: string; descendantsOnly?: boolean },
+  ): Promise<Project> {
+    const rootTaskId = options?.rootTaskId;
     if (rootTaskId) await this.requireTask(projectId, rootTaskId);
     const project = await this.requireProject(projectId);
     const existing = project.graph_orchestration;
     if (isOrchestrationRunActive(existing)) {
       throw new Error('A task graph is already executing for this project.');
     }
-    const run = newGraphOrchestrationRun(rootTaskId, this.newId(), this.now());
+    const run = newGraphOrchestrationRun(
+      rootTaskId,
+      this.newId(),
+      this.now(),
+      { descendantsOnly: options?.descendantsOnly },
+    );
     project.graph_orchestration = run;
     project.updated_at = this.now();
     await this.repo.saveProject(project);
@@ -2426,21 +2427,9 @@ export class LocalEngine {
 
   private async autoDispatchReadyTasks(projectId: string): Promise<void> {
     const project = await this.requireProject(projectId);
-    if (project.graph_orchestration?.status === 'running') {
-      await this.recordOrchestrationCompletions(projectId);
-      await this.advanceGraphOrchestration(projectId);
-      return;
-    }
-    const tasks = await this.repo.listTasks(projectId);
-    const edges = graphEdgesForRun(project, tasks);
-    const batch = autoDispatchBatch(tasks, edges);
-    for (const candidate of batch) {
-      try {
-        await this.executeTask(candidate.task_id);
-      } catch {
-        // Task stays TODO when prerequisites or config block dispatch.
-      }
-    }
+    if (project.graph_orchestration?.status !== 'running') return;
+    await this.recordOrchestrationCompletions(projectId);
+    await this.advanceGraphOrchestration(projectId);
   }
 
   private async recordOrchestrationCompletions(projectId: string): Promise<void> {

@@ -259,8 +259,11 @@ export class BattleplanApi {
     return this.engine.executeChildren(projectId, parentTaskId);
   }
 
-  startGraphOrchestration(projectId: string, rootTaskId?: string): Promise<Project> {
-    return this.engine.startGraphOrchestration(projectId, rootTaskId);
+  startGraphOrchestration(
+    projectId: string,
+    options?: { rootTaskId?: string; descendantsOnly?: boolean },
+  ): Promise<Project> {
+    return this.engine.startGraphOrchestration(projectId, options);
   }
 
   stopGraphOrchestration(projectId: string): Promise<Project> {
