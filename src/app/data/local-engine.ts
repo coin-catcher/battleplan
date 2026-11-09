@@ -68,7 +68,6 @@ import {
   normalChildIds,
   siblingDependencyIds,
 } from '../core/dependencies';
-import { availableDescendants, independentBatch } from '../core/execute-children';
 import {
   buildGraphEdgesFromDrafts,
   filterGraphEdgesToTaskIds,
@@ -104,7 +103,15 @@ import {
   workflowExecutionPreamble,
   workflowFeedbackPreamble,
 } from '../core/task-workflow-lifecycle';
-import { autoDispatchBatch, graphEdgesForRun } from '../core/task-ready';
+import { graphEdgesForRun } from '../core/task-ready';
+import {
+  appendOrchestrationTransition,
+  isOrchestrationRunActive,
+  isOrchestrationRunComplete,
+  newGraphOrchestrationRun,
+  orchestrationDispatchBatch,
+  reconcileRunningTasks,
+} from '../core/graph-orchestration';
 import {
   applyGraphEdgesToLegacyFields,
   ensureProjectTaskGraph,
@@ -328,6 +335,7 @@ export class LocalEngine {
     task_templates?: Project['task_templates'];
     workflows?: Project['workflows'];
     template_instance_run?: Project['template_instance_run'];
+    graph_orchestration?: Project['graph_orchestration'] | null;
     battleplan_storage_version?: number;
   }): Promise<Project> {
     const project = await this.requireProject(projectId);
@@ -400,6 +408,10 @@ export class LocalEngine {
     }
     if (patch.template_instance_run !== undefined) {
       project.template_instance_run = patch.template_instance_run;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'graph_orchestration')) {
+      if (patch.graph_orchestration) project.graph_orchestration = patch.graph_orchestration;
+      else delete project.graph_orchestration;
     }
     if (patch.battleplan_storage_version !== undefined) {
       project.battleplan_storage_version = patch.battleplan_storage_version;
@@ -1192,27 +1204,136 @@ export class LocalEngine {
 
   async executeChildren(projectId: string, parentTaskId: string): Promise<ProjectTask[]> {
     await this.requireTask(projectId, parentTaskId);
-    const started: ProjectTask[] = [];
-    for (let guard = 0; guard < 500; guard += 1) {
-      const tasks = await this.listTasks(projectId);
-      const available = availableDescendants(parentTaskId, tasks);
-      if (available.length === 0) break;
-      const batch = independentBatch(available, tasks);
-      if (batch.length === 0) break;
-      await Promise.all(batch.map(async (candidate) => {
-        if (candidate.output_type === 'subproject') return;
-        if (candidate.status === 'ABANDONED') return;
-        const fresh = await this.requireTask(projectId, candidate.task_id);
-        if (fresh.cursor_agent_id || fresh.status !== 'TODO') return;
-        if (!taskInitialPrompt(fresh)) {
-          throw new Error(`"${fresh.title}" needs an Initial Prompt before it can be executed.`);
-        }
-        await this.executeTask(candidate.task_id);
-        const updated = await this.requireTask(projectId, candidate.task_id);
-        started.push(updated);
-      }));
+    const project = await this.startGraphOrchestration(projectId, {
+      rootTaskId: parentTaskId,
+      descendantsOnly: true,
+    });
+    const ids = [...new Set(
+      (project.graph_orchestration?.transitions ?? [])
+        .filter((row) => row.kind === 'dispatch' && row.to_task_id)
+        .map((row) => row.to_task_id as string),
+    )];
+    if (ids.length === 0) return [];
+    const tasks = await this.listTasks(projectId);
+    return ids
+      .map((taskId) => tasks.find((task) => task.task_id === taskId))
+      .filter((task): task is ProjectTask => Boolean(task));
+  }
+
+  async startGraphOrchestration(
+    projectId: string,
+    options?: { rootTaskId?: string; descendantsOnly?: boolean },
+  ): Promise<Project> {
+    const rootTaskId = options?.rootTaskId;
+    if (rootTaskId) await this.requireTask(projectId, rootTaskId);
+    const project = await this.requireProject(projectId);
+    const existing = project.graph_orchestration;
+    if (isOrchestrationRunActive(existing)) {
+      throw new Error('A task graph is already executing for this project.');
     }
-    return started;
+    const run = newGraphOrchestrationRun(
+      rootTaskId,
+      this.newId(),
+      this.now(),
+      { descendantsOnly: options?.descendantsOnly },
+    );
+    project.graph_orchestration = run;
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    await this.advanceGraphOrchestration(projectId);
+    return this.requireProject(projectId);
+  }
+
+  async stopGraphOrchestration(projectId: string): Promise<Project> {
+    const project = await this.requireProject(projectId);
+    const run = project.graph_orchestration;
+    if (!isOrchestrationRunActive(run)) throw new Error('No task graph is executing.');
+    let next = appendOrchestrationTransition(run!, 'stop', {});
+    next = { ...next, status: 'stopped', updated_at: this.now() };
+    project.graph_orchestration = next;
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    return project;
+  }
+
+  async pauseGraphOrchestration(projectId: string): Promise<Project> {
+    const project = await this.requireProject(projectId);
+    const run = project.graph_orchestration;
+    if (run?.status !== 'running') throw new Error('Task graph orchestration is not running.');
+    let next = appendOrchestrationTransition(run, 'pause_run', {});
+    next = { ...next, status: 'paused', updated_at: this.now() };
+    project.graph_orchestration = next;
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    return project;
+  }
+
+  async resumeGraphOrchestration(projectId: string): Promise<Project> {
+    const project = await this.requireProject(projectId);
+    const run = project.graph_orchestration;
+    if (run?.status !== 'paused') throw new Error('Task graph orchestration is not paused.');
+    let next = appendOrchestrationTransition(run, 'resume_run', {});
+    next = { ...next, status: 'running', updated_at: this.now() };
+    project.graph_orchestration = next;
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    await this.advanceGraphOrchestration(projectId);
+    return this.requireProject(projectId);
+  }
+
+  async pauseOrchestrationTask(projectId: string, taskId: string): Promise<Project> {
+    await this.requireTask(projectId, taskId);
+    const project = await this.requireProject(projectId);
+    const run = project.graph_orchestration;
+    if (!isOrchestrationRunActive(run)) throw new Error('Start task graph orchestration before pausing tasks.');
+    const paused = new Set(run!.paused_task_ids);
+    paused.add(taskId);
+    let next: typeof run = {
+      ...run!,
+      paused_task_ids: [...paused],
+      updated_at: this.now(),
+    };
+    next = appendOrchestrationTransition(next, 'pause_task', { to_task_id: taskId });
+    project.graph_orchestration = next;
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    return project;
+  }
+
+  async resumeOrchestrationTask(projectId: string, taskId: string): Promise<Project> {
+    await this.requireTask(projectId, taskId);
+    const project = await this.requireProject(projectId);
+    const run = project.graph_orchestration;
+    if (!isOrchestrationRunActive(run)) throw new Error('Start task graph orchestration before resuming tasks.');
+    let next: typeof run = {
+      ...run!,
+      paused_task_ids: run!.paused_task_ids.filter((id) => id !== taskId),
+      updated_at: this.now(),
+    };
+    next = appendOrchestrationTransition(next, 'resume_task', { to_task_id: taskId });
+    project.graph_orchestration = next;
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    if (next.status === 'running') await this.advanceGraphOrchestration(projectId);
+    return this.requireProject(projectId);
+  }
+
+  async reconcileGraphOrchestration(projectId: string): Promise<Project> {
+    const project = await this.requireProject(projectId);
+    const run = project.graph_orchestration;
+    if (!isOrchestrationRunActive(run)) return project;
+    const tasks = await this.listTasks(projectId);
+    let next = reconcileRunningTasks(tasks, run!);
+    next = appendOrchestrationTransition(next, 'recover', {
+      detail: next.active_task_ids.length
+        ? `in flight: ${next.active_task_ids.join(', ')}`
+        : 'no in-flight agents',
+    });
+    project.graph_orchestration = next;
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    if (next.status === 'running') await this.advanceGraphOrchestration(projectId);
+    return this.requireProject(projectId);
   }
 
   async executeTask(taskId: string): Promise<ChatMessage> {
@@ -1241,7 +1362,8 @@ export class LocalEngine {
     await this.assertDependenciesDone(task);
     const project = await this.requireProject(task.project_id);
     const projectTasks = await this.listTasks(task.project_id);
-    const upstreamIds = collectUpstreamTaskIds(task, projectTasks);
+    const graphEdges = graphEdgesForRun(project, projectTasks);
+    const upstreamIds = collectUpstreamTaskIds(task, projectTasks, graphEdges);
     if (upstreamIds.length) {
       await this.repo.stageUpstreamInputsForTask(
         task.project_id,
@@ -2040,7 +2162,8 @@ export class LocalEngine {
       lines.push('Task brief:', formatTaskBriefMarkdown(task.brief));
     }
     const tasks = await this.repo.listTasks(task.project_id);
-    const inputDocs = buildInputDocumentsSection(task, tasks);
+    const edges = graphEdgesForRun(project, tasks);
+    const inputDocs = buildInputDocumentsSection(task, tasks, edges);
     if (inputDocs) lines.push(inputDocs);
     const upstream = this.upstreamHandoffMarkdown(task, tasks);
     if (upstream) lines.push(upstream);
@@ -2304,16 +2427,78 @@ export class LocalEngine {
 
   private async autoDispatchReadyTasks(projectId: string): Promise<void> {
     const project = await this.requireProject(projectId);
-    const tasks = await this.repo.listTasks(projectId);
+    if (project.graph_orchestration?.status !== 'running') return;
+    await this.recordOrchestrationCompletions(projectId);
+    await this.advanceGraphOrchestration(projectId);
+  }
+
+  private async recordOrchestrationCompletions(projectId: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    const run = project.graph_orchestration;
+    if (!run || run.status !== 'running') return;
+    const tasks = await this.listTasks(projectId);
+    const completed = run.active_task_ids.filter((taskId) => {
+      const task = tasks.find((item) => item.task_id === taskId);
+      return task?.status === 'DONE';
+    });
+    if (completed.length === 0) return;
+    let next = run;
+    for (const taskId of completed) {
+      next = appendOrchestrationTransition(next, 'complete', { from_task_id: taskId });
+    }
+    next = {
+      ...next,
+      active_task_ids: next.active_task_ids.filter((id) => !completed.includes(id)),
+      updated_at: this.now(),
+    };
+    project.graph_orchestration = next;
+    await this.repo.saveProject(project);
+  }
+
+  private async advanceGraphOrchestration(projectId: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    let run = project.graph_orchestration;
+    if (!run || run.status !== 'running') return;
+    const tasks = await this.listTasks(projectId);
     const edges = graphEdgesForRun(project, tasks);
-    const batch = autoDispatchBatch(tasks, edges);
+    if (isOrchestrationRunComplete(tasks, edges, run)) {
+      run = appendOrchestrationTransition({ ...run, status: 'completed' }, 'finish', {});
+      project.graph_orchestration = run;
+      project.updated_at = this.now();
+      await this.repo.saveProject(project);
+      return;
+    }
+    const batch = orchestrationDispatchBatch(tasks, edges, run);
     for (const candidate of batch) {
       try {
         await this.executeTask(candidate.task_id);
+        const fresh = await this.requireTask(projectId, candidate.task_id);
+        run = appendOrchestrationTransition(run, 'dispatch', {
+          to_task_id: candidate.task_id,
+          detail: fresh.cursor_agent_id ?? fresh.backend_run_id,
+        });
+        run = {
+          ...run,
+          last_agent_runs: [
+            ...run.last_agent_runs.filter((item) => item.task_id !== candidate.task_id),
+            {
+              task_id: candidate.task_id,
+              cursor_agent_id: fresh.cursor_agent_id,
+              backend_run_id: fresh.backend_run_id,
+              dispatched_at: this.now(),
+            },
+          ],
+          active_task_ids: [...new Set([...run.active_task_ids, candidate.task_id])],
+          updated_at: this.now(),
+        };
       } catch {
         // Task stays TODO when prerequisites or config block dispatch.
       }
     }
+    run = reconcileRunningTasks(await this.listTasks(projectId), run);
+    project.graph_orchestration = run;
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
   }
 
   private async ensureTaskBrief(task: ProjectTask): Promise<void> {
@@ -2353,7 +2538,8 @@ export class LocalEngine {
     }
     const project = await this.requireProject(task.project_id);
     const tasks = await this.repo.listTasks(task.project_id);
-    const inputDocs = buildInputDocumentsSection(task, tasks);
+    const edges = graphEdgesForRun(project, tasks);
+    const inputDocs = buildInputDocumentsSection(task, tasks, edges);
     let summary: string;
     if (config.mode === 'script') {
       if (!config.script?.trim()) throw new Error('Script text is required for execute tasks.');
