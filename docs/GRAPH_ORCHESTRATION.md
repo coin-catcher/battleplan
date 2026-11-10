@@ -10,8 +10,9 @@ Battleplan persists an orchestration run on each `Project` as `graph_orchestrati
 
 ## Run lifecycle
 
-- **Start:** Mindmap **Run task graph** (whole project) or **Run subgraph** on a parent task (root + descendants, root included).
-- **Execute Children:** Starts a subgraph run with `descendants_only` (children only, same orchestration path).
+- **Start:** Mindmap **play** (`|>`) on a task with children — runs that task and its descendants under orchestration.
+- **Stop / pause (run):** Mindmap toolbar **Stop Execution** and **Pause Execution** while a run is active.
+- **Pause (task):** Mindmap **pause** (`‖`) on child tasks (toggle per task; dimmed fill when paused).
 - **While running:** Ready tasks dispatch through `LocalEngine.executeTask` with graph-based upstream inputs. Completing or approving a task triggers the next wave when `status === 'running'`.
 - **Pause task:** Excludes a task from dispatch without changing its mindmap status (orchestrator pause).
 - **Pause / resume run:** Halts or resumes automatic dispatch for the active run.
