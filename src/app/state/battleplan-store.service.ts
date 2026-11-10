@@ -1672,6 +1672,12 @@ export class BattleplanStore {
     return this.graphOrchestrationRun()?.paused_task_ids.includes(taskId) ?? false;
   }
 
+  isTaskOrchestrationExecuting(taskId: string): boolean {
+    const run = this.graphOrchestrationRun();
+    if (!run || !this.graphOrchestrationActive()) return false;
+    return run.active_task_ids.includes(taskId);
+  }
+
   async startGraphOrchestration(rootTaskId?: string): Promise<void> {
     const projectId = this.projectId();
     if (!projectId) return;

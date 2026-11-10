@@ -54,25 +54,17 @@
       </section>
 
       <div class="map-frame">
-        <div class="orchestration-controls" aria-live="polite">
-          @if (store.graphOrchestrationActive()) {
-            <span class="orchestration-status">
-              Task graph {{ store.graphOrchestrationRun()?.status }}
-              @if (store.graphOrchestrationRun()?.root_task_id; as rootId) {
-                <span class="orchestration-meta">· subtree</span>
-              }
-            </span>
+        @if (store.graphOrchestrationActive()) {
+          <div class="orchestration-controls" aria-live="polite">
+            <button type="button" class="ghost" [disabled]="store.busy()" (click)="store.stopGraphOrchestration()">Stop Execution</button>
             <button
               type="button"
               class="ghost"
               [disabled]="store.busy()"
               (click)="store.toggleGraphOrchestrationPause()"
-            >{{ store.graphOrchestrationRun()?.status === 'paused' ? 'Resume run' : 'Pause run' }}</button>
-            <button type="button" class="ghost" [disabled]="store.busy()" (click)="store.stopGraphOrchestration()">Stop graph</button>
-          } @else {
-            <button type="button" class="accent" [disabled]="store.busy()" (click)="store.startGraphOrchestration()">Run task graph</button>
-          }
-        </div>
+            >{{ store.graphOrchestrationRun()?.status === 'paused' ? 'Unpause Execution' : 'Pause Execution' }}</button>
+          </div>
+        }
         <div class="project-view-toggle" role="tablist" aria-label="Project view">
           <button
             type="button"
@@ -256,24 +248,38 @@
                 (pointerdown)="onConvertPointerDown(node, $event)"
               ></button>
             }
-            @if (node.kind === 'task' && taskHasChildren(node.id)) {
-              <button
-                type="button"
-                class="map-play-children"
-                [style.left.px]="playChildrenPoint(node).x"
-                [style.top.px]="playChildrenPoint(node).y"
-                aria-label="Execute child tasks"
-                (pointerdown)="requestExecuteChildren(node.id, $event)"
-              ></button>
-              <button
-                type="button"
-                class="map-run-graph"
-                [class.active]="store.graphOrchestrationRun()?.root_task_id === node.id && store.graphOrchestrationActive()"
-                [style.left.px]="runGraphPoint(node).x"
-                [style.top.px]="runGraphPoint(node).y"
-                aria-label="Run task subgraph"
-                (pointerdown)="startSubgraphOrchestration(node.id, $event)"
-              ></button>
+            @for (control of orchestrationMindmapControls(node); track control; let idx = $index) {
+              @if (control === 'play') {
+                <button
+                  type="button"
+                  class="map-orchestration-play"
+                  [style.left.px]="taskTopRightControlPoint(node, idx).x"
+                  [style.top.px]="taskTopRightControlPoint(node, idx).y"
+                  aria-label="Run this task and its descendants"
+                  (pointerdown)="playTaskGraph(node.id, $event)"
+                ></button>
+              } @else if (control === 'stop') {
+                <button
+                  type="button"
+                  class="map-orchestration-stop"
+                  [style.left.px]="taskTopRightControlPoint(node, idx).x"
+                  [style.top.px]="taskTopRightControlPoint(node, idx).y"
+                  aria-label="Stop task graph execution"
+                  (pointerdown)="stopTaskGraphFromNode($event)"
+                ></button>
+              } @else if (control === 'pause') {
+                <button
+                  type="button"
+                  class="map-orchestration-pause"
+                  [class.is-paused]="store.isOrchestrationTaskPaused(node.id)"
+                  [class.is-disabled]="!store.graphOrchestrationActive() || !store.isTaskInOrchestrationScope(node.id)"
+                  [style.left.px]="taskTopRightControlPoint(node, idx).x"
+                  [style.top.px]="taskTopRightControlPoint(node, idx).y"
+                  [attr.aria-label]="store.isOrchestrationTaskPaused(node.id) ? 'Resume this task in the graph' : 'Pause this task in the graph'"
+                  [disabled]="!store.graphOrchestrationActive() || !store.isTaskInOrchestrationScope(node.id) || store.busy()"
+                  (pointerdown)="toggleTaskGraphPause(node.id, $event)"
+                ></button>
+              }
             }
             <div
               class="map-node"
@@ -769,22 +775,15 @@
                         <span>Initial Prompt</span>
                         <textarea rows="3" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this task."></textarea>
                       </label>
-                      <div class="composer-actions">
-                        @if (store.chatActionPending() === 'execute') {
-                          <span class="inline-spinner" aria-label="Executing task"></span>
-                        } @else {
-                          <button type="button" class="accent" [disabled]="chatActionsLocked() || !taskInitialPrompt.trim() || task.status === 'ABANDONED'" (click)="executeTask()">Execute</button>
-                        }
-                        @if (taskHasChildren(task.task_id)) {
-                          <button type="button" class="ghost" [disabled]="chatActionsLocked()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
-                          <button type="button" class="ghost" [disabled]="chatActionsLocked() || store.graphOrchestrationActive()" (click)="store.startGraphOrchestration(task.task_id)">Run subgraph</button>
-                        }
-                        @if (store.graphOrchestrationActive() && store.isTaskInOrchestrationScope(task.task_id)) {
-                          <button type="button" class="ghost" [disabled]="chatActionsLocked()" (click)="store.toggleOrchestrationTaskPause(task.task_id)">
-                            {{ store.isOrchestrationTaskPaused(task.task_id) ? 'Resume in graph' : 'Pause in graph' }}
-                          </button>
-                        }
-                      </div>
+                      @if (!taskHasChildren(task.task_id)) {
+                        <div class="composer-actions">
+                          @if (store.chatActionPending() === 'execute') {
+                            <span class="inline-spinner" aria-label="Executing task"></span>
+                          } @else {
+                            <button type="button" class="accent" [disabled]="chatActionsLocked() || !taskInitialPrompt.trim() || task.status === 'ABANDONED'" (click)="executeTask()">Execute</button>
+                          }
+                        </div>
+                      }
                     </div>
                   }
                 </div>
@@ -1050,17 +1049,8 @@
                 <div class="composer-actions">
                   @if (store.chatActionPending() === 'execute') {
                     <span class="inline-spinner" aria-label="Executing subproject"></span>
-                  } @else {
+                  } @else if (!taskHasChildren(task.task_id)) {
                     <button type="button" class="accent" [disabled]="chatActionsLocked() || !subprojectInitialPrompt.trim()" (click)="executeSubproject()">Execute</button>
-                  }
-                  @if (taskHasChildren(task.task_id)) {
-                    <button type="button" class="ghost" [disabled]="chatActionsLocked()" (click)="requestExecuteChildren(task.task_id, $event)">Execute Children</button>
-                    <button type="button" class="ghost" [disabled]="chatActionsLocked() || store.graphOrchestrationActive()" (click)="store.startGraphOrchestration(task.task_id)">Run subgraph</button>
-                  }
-                  @if (store.graphOrchestrationActive() && store.isTaskInOrchestrationScope(task.task_id)) {
-                    <button type="button" class="ghost" [disabled]="chatActionsLocked()" (click)="store.toggleOrchestrationTaskPause(task.task_id)">
-                      {{ store.isOrchestrationTaskPaused(task.task_id) ? 'Resume in graph' : 'Pause in graph' }}
-                    </button>
                   }
                 </div>
               }
@@ -1571,20 +1561,6 @@
       <div class="modal-actions">
         <button type="button" class="ghost" (click)="dismissUpdate()">Not now</button>
         <button type="button" class="primary" (click)="installUpdate()">Download and restart</button>
-      </div>
-    </section>
-  </div>
-}
-
-@if (executeChildrenPrompt()) {
-  <div class="modal-backdrop" role="presentation">
-    <section class="modal" role="dialog" aria-labelledby="execute-children-title">
-      <header class="panel-head">
-        <h2 id="execute-children-title">Execute Children?</h2>
-      </header>
-      <div class="modal-actions">
-        <button type="button" class="ghost" (click)="answerExecuteChildren(false)">No</button>
-        <button type="button" class="primary" (click)="answerExecuteChildren(true)">Yes</button>
       </div>
     </section>
   </div>

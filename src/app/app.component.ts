@@ -92,7 +92,7 @@ import {
   type TaskEdgeKind,
   type TaskGraphEdge,
 } from './core/task-graph';
-import { normalChildIds } from './core/dependencies';
+import { normalChildIds, normalParentIds } from './core/dependencies';
 import { libraryAgentsForKind, taskResearchChatStarted } from './core/agent-bindings';
 import { BattleplanStore } from './state/battleplan-store.service';
 import { isDiscoveryRootTask as taskIsDiscoveryRoot } from './core/task-generate-eligibility';
@@ -222,7 +222,6 @@ export class AppComponent implements OnInit {
   taskExecuteWorkflowId = '';
   dependencies: string[] = [];
   siblingDependencies: string[] = [];
-  readonly executeChildrenPrompt = signal<string | null>(null);
   readonly selectedMindmapLink = signal<MindmapLinkRef | null>(null);
   readonly linkEndpointDrag = signal<{ link: MindmapLinkRef; end: 'from' | 'to'; x: number; y: number } | null>(null);
   readonly mindmapLinkKey = linkKey;
@@ -990,18 +989,47 @@ export class AppComponent implements OnInit {
     return normalChildIds(task, byId).length > 0;
   }
 
-  playChildrenPoint(node: MindmapNode): { x: number; y: number } {
-    return { x: node.x + node.width / 2 - 10, y: node.y - node.height / 2 + 10 };
+  taskHasParent(taskId: string): boolean {
+    return normalParentIds(taskId, this.store.tasks()).length > 0;
   }
 
-  runGraphPoint(node: MindmapNode): { x: number; y: number } {
-    return { x: node.x + node.width / 2 + 12, y: node.y - node.height / 2 + 10 };
+  taskTopRightControlPoint(node: MindmapNode, slotFromRight: number): { x: number; y: number } {
+    return {
+      x: node.x + node.width / 2 - 14 - slotFromRight * 28,
+      y: node.y - node.height / 2 + 14,
+    };
   }
 
-  startSubgraphOrchestration(taskId: string, event: Event): void {
+  orchestrationMindmapControls(node: MindmapNode): Array<'play' | 'stop' | 'pause'> {
+    if (node.kind !== 'task') return [];
+    const controls: Array<'play' | 'stop' | 'pause'> = [];
+    if (this.taskHasParent(node.id)) controls.push('pause');
+    if (this.store.graphOrchestrationActive()) {
+      if (this.store.isTaskOrchestrationExecuting(node.id)) controls.push('stop');
+    } else if (this.taskHasChildren(node.id)) {
+      controls.push('play');
+    }
+    return controls;
+  }
+
+  playTaskGraph(taskId: string, event: Event): void {
     event.stopPropagation();
     event.preventDefault();
     void this.store.startGraphOrchestration(taskId);
+  }
+
+  stopTaskGraphFromNode(event: Event): void {
+    event.stopPropagation();
+    event.preventDefault();
+    void this.store.stopGraphOrchestration();
+  }
+
+  toggleTaskGraphPause(taskId: string, event: Event): void {
+    event.stopPropagation();
+    event.preventDefault();
+    if (!this.store.graphOrchestrationActive()) return;
+    if (!this.store.isTaskInOrchestrationScope(taskId)) return;
+    void this.store.toggleOrchestrationTaskPause(taskId);
   }
 
   isMindmapLinkSelected(edge: MindmapEdge): boolean {
@@ -1060,19 +1088,6 @@ export class AppComponent implements OnInit {
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
-  }
-
-  requestExecuteChildren(taskId: string, event: Event): void {
-    event.stopPropagation();
-    event.preventDefault();
-    this.executeChildrenPrompt.set(taskId);
-  }
-
-  answerExecuteChildren(yes: boolean): void {
-    const taskId = this.executeChildrenPrompt();
-    this.executeChildrenPrompt.set(null);
-    if (!yes || !taskId) return;
-    void this.store.executeChildren(taskId);
   }
 
   isMapSelected(node: MindmapNode): boolean {
@@ -1385,7 +1400,7 @@ export class AppComponent implements OnInit {
 
   onStagePointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-play-children, .map-run-graph, .map-link-handle, .map-link-hit, .zoom-controls, .agent-toolbox')) return;
+    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit, .zoom-controls, .agent-toolbox')) return;
     this.selectedMindmapLink.set(null);
     if (this.connectPanel()) {
       this.dismissConnectPanel();
@@ -1426,7 +1441,7 @@ export class AppComponent implements OnInit {
 
   onNodePointerDown(node: MindmapNode, event: PointerEvent): void {
     if (this.editingNodeId() === node.id) return;
-    if ((event.target as HTMLElement).closest('.map-edge-arrow, .map-connect-panel, .map-play-children, .map-run-graph')) return;
+    if ((event.target as HTMLElement).closest('.map-edge-arrow, .map-connect-panel, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause')) return;
     event.stopPropagation();
     const group = this.mapGroupSelection();
     const inGroup = group.includes(node.id);
@@ -1939,7 +1954,7 @@ export class AppComponent implements OnInit {
 
   onMapDismissPointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-connect-panel, .map-convert-panel, .map-edge-arrow, .map-convert-handle, .map-play-children, .map-run-graph, .map-link-handle, .map-link-hit')) return;
+    if (target.closest('.map-connect-panel, .map-convert-panel, .map-edge-arrow, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit')) return;
     this.dismissConnectPanel();
     this.convertPanel.set(null);
   }

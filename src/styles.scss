@@ -715,46 +715,57 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   display: block;
 }
 
-.map-play-children {
+.map-orchestration-play,
+.map-orchestration-stop,
+.map-orchestration-pause {
   position: absolute;
   transform: translate(-50%, -50%);
   width: 26px;
   height: 26px;
   border: 0;
   border-radius: 50%;
-  z-index: 2;
+  z-index: 3;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.18);
   color: #f4efe6;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   line-height: 1;
+  padding: 0;
 }
-.map-play-children::before {
-  content: '▶';
+.map-orchestration-play {
+  background: rgba(255, 255, 255, 0.2);
+}
+.map-orchestration-play::before {
+  content: '|>';
   display: block;
-  margin-left: 2px;
+  font-size: 0.62rem;
+  letter-spacing: -0.08em;
+  margin-top: 1px;
 }
-
-.map-run-graph {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  width: 26px;
-  height: 26px;
-  border: 0;
-  border-radius: 50%;
-  z-index: 2;
-  cursor: pointer;
-  background: rgba(120, 180, 255, 0.22);
-  color: #f4efe6;
-  font-size: 0.65rem;
-  line-height: 1;
+.map-orchestration-stop {
+  background: rgba(255, 120, 120, 0.35);
 }
-.map-run-graph::before {
-  content: '⎇';
+.map-orchestration-stop::before {
+  content: '■';
   display: block;
+  font-size: 0.55rem;
 }
-.map-run-graph.active {
-  box-shadow: 0 0 0 2px rgba(120, 180, 255, 0.85);
+.map-orchestration-pause {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.55);
+}
+.map-orchestration-pause::before {
+  content: '‖';
+  display: block;
+  font-size: 0.7rem;
+  opacity: 0.95;
+  transition: opacity 0.15s ease;
+}
+.map-orchestration-pause.is-paused::before {
+  opacity: 0;
+}
+.map-orchestration-pause.is-disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .orchestration-controls {
