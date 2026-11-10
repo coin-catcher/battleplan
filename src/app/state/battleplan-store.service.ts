@@ -517,11 +517,28 @@ export class BattleplanStore {
 
   async refreshPendingChanges(): Promise<void> {
     const projectId = this.projectId();
-    if (!projectId) {
+    const project = this.project();
+    if (!projectId || !project) {
       this.pendingChanges.set([]);
       return;
     }
-    this.pendingChanges.set(await this.api.listPendingChanges(projectId));
+    if (!project.repo_url?.trim() || !project.github_pat?.trim()) {
+      this.pendingChanges.set(await this.api.listPendingChanges(projectId));
+      return;
+    }
+    try {
+      const current = await this.api.listPendingChanges(projectId);
+      const synced = await this.api.syncPendingChanges(projectId, {
+        tasks: this.tasks(),
+        codeOutputs: this.codeOutputs(),
+        researchOutputs: this.researchOutputs(),
+        current,
+      });
+      await this.api.savePendingChanges(projectId, synced);
+      this.pendingChanges.set(synced);
+    } catch {
+      this.pendingChanges.set(await this.api.listPendingChanges(projectId));
+    }
   }
 
   async reloadAgents(projectId: string): Promise<void> {
@@ -664,19 +681,44 @@ export class BattleplanStore {
     this.agents.set(agents);
   }
 
-  async releasePendingChanges(): Promise<void> {
+  async loadReleaseBranchOptions(projectId: string): Promise<string[]> {
+    return this.api.listProjectRepoBranches(projectId);
+  }
+
+  async confirmReleasePendingChanges(sourceBranch: string, targetBranch: string): Promise<void> {
     const projectId = this.projectId();
-    if (!projectId) return;
-    try {
-      const project = await this.api.prepareReleaseProjectChanges(projectId);
+    const project = this.project();
+    if (!projectId || !project) return;
+    const source = sourceBranch.trim();
+    const target = targetBranch.trim();
+    if (!source || !target) {
+      this.error.set('Choose both source and target branches.');
+      return;
+    }
+    if (source === target) {
+      this.error.set('Source and target branches must differ.');
+      return;
+    }
+    await this.run(async () => {
+      const updated = await this.api.updateProject(projectId, {
+        release_source_ref: source,
+        release_target_ref: target,
+      });
       this.projects.update((projects) => projects.map((item) => (
-        item.project_id === project.project_id ? project : item
+        item.project_id === updated.project_id ? updated : item
+      )));
+    });
+    if (this.error()) return;
+    try {
+      const prepared = await this.api.prepareReleaseProjectChanges(projectId);
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === prepared.project_id ? prepared : item
       )));
       const page = await this.api.listProjectMessages(projectId, { syncAgent: false });
       if (this.projectId() === projectId && this.watchingProjectChat(projectId)) {
         this.applyConversation(page);
       }
-      this.notice.set('Release started. Merging to main in the background.');
+      this.notice.set(`Release started. Merging \`${source}\` into \`${target}\`…`);
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : 'Could not start release.');
       return;
@@ -2083,7 +2125,7 @@ export class BattleplanStore {
         item.project_id === page.project?.project_id && page.project ? page.project : item
       )));
       if (this.watchingProjectChat(projectId)) this.applyConversation(page);
-      this.notice.set('Released to main. Version bump agent started.');
+      this.notice.set('Release merge complete. Version bump agent started.');
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : 'Release failed.');
       try {

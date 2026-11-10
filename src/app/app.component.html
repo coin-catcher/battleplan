@@ -1576,6 +1576,48 @@
   </div>
 }
 
+@if (releaseChangesModalOpen()) {
+  <div class="modal-backdrop" role="presentation">
+    <section class="modal" role="dialog" aria-labelledby="release-changes-title">
+      <header class="panel-head">
+        <h2 id="release-changes-title">Release Changes</h2>
+        <p>Merge pending commits from the source branch into the target branch, then start the version-bump agent.</p>
+      </header>
+      @if (releaseBranchesLoading) {
+        <p class="pending">Loading branches…</p>
+      }
+      @if (releaseBranchLoadError) {
+        <p class="banner error" role="alert">{{ releaseBranchLoadError }}</p>
+      }
+      <label class="field">
+        <span>Source branch</span>
+        <select [(ngModel)]="releaseSourceBranchDraft" name="releaseSourceBranch">
+          @for (branch of releaseBranchOptions; track branch) {
+            <option [value]="branch">{{ branch }}</option>
+          }
+        </select>
+      </label>
+      <label class="field">
+        <span>Target branch</span>
+        <select [(ngModel)]="releaseTargetBranchDraft" name="releaseTargetBranch">
+          @for (branch of releaseBranchOptions; track branch) {
+            <option [value]="branch">{{ branch }}</option>
+          }
+        </select>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="ghost" (click)="cancelReleaseChanges()">Cancel</button>
+        <button
+          type="button"
+          class="primary"
+          [disabled]="releaseBranchesLoading || !releaseSourceBranchDraft || !releaseTargetBranchDraft"
+          (click)="confirmReleaseChanges()"
+        >Release</button>
+      </div>
+    </section>
+  </div>
+}
+
 @if (executeChildrenPrompt()) {
   <div class="modal-backdrop" role="presentation">
     <section class="modal" role="dialog" aria-labelledby="execute-children-title">
