@@ -750,15 +750,13 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   background: rgba(255, 120, 120, 0.35);
 }
 .map-orchestration-pause {
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.55);
+  background: rgba(255, 196, 120, 0.3);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.45);
+  transition: background 0.15s ease;
 }
-.map-orchestration-pause .map-orchestration-icon-pause {
-  opacity: 0.95;
-  transition: opacity 0.15s ease;
-}
-.map-orchestration-pause.is-paused .map-orchestration-icon-pause {
-  opacity: 0;
+.map-orchestration-pause.is-paused {
+  background: rgba(255, 196, 120, 1);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85);
 }
 .map-orchestration-pause.is-disabled {
   cursor: default;
