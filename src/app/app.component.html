@@ -257,7 +257,11 @@
                   [style.top.px]="taskTopRightControlPoint(node, idx).y"
                   aria-label="Run this task and its descendants"
                   (pointerdown)="playTaskGraph(node.id, $event)"
-                ></button>
+                >
+                  <svg class="map-orchestration-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M8 5.14v13.72c0 .79.87 1.27 1.54.84l9.65-6.86c.51-.36.51-1.12 0-1.48l-9.65-6.86A1 1 0 0 0 8 5.14Z" fill="currentColor"/>
+                  </svg>
+                </button>
               } @else if (control === 'stop') {
                 <button
                   type="button"
@@ -266,7 +270,11 @@
                   [style.top.px]="taskTopRightControlPoint(node, idx).y"
                   aria-label="Stop task graph execution"
                   (pointerdown)="stopTaskGraphFromNode($event)"
-                ></button>
+                >
+                  <svg class="map-orchestration-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <rect x="7" y="7" width="10" height="10" rx="1.25" fill="currentColor"/>
+                  </svg>
+                </button>
               } @else if (control === 'pause') {
                 <button
                   type="button"
@@ -278,7 +286,12 @@
                   [attr.aria-label]="store.isOrchestrationTaskPaused(node.id) ? 'Resume this task in the graph' : 'Pause this task in the graph'"
                   [disabled]="!store.graphOrchestrationActive() || !store.isTaskInOrchestrationScope(node.id) || store.busy()"
                   (pointerdown)="toggleTaskGraphPause(node.id, $event)"
-                ></button>
+                >
+                  <svg class="map-orchestration-icon map-orchestration-icon-pause" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <rect x="6" y="5" width="4.5" height="14" rx="1" fill="currentColor"/>
+                    <rect x="13.5" y="5" width="4.5" height="14" rx="1" fill="currentColor"/>
+                  </svg>
+                </button>
               }
             }
             <div

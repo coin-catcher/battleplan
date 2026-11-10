@@ -727,40 +727,37 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   z-index: 3;
   cursor: pointer;
   color: #f4efe6;
-  font-size: 0.72rem;
-  line-height: 1;
   padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.map-orchestration-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
+  flex-shrink: 0;
 }
 .map-orchestration-play {
   background: rgba(255, 255, 255, 0.2);
 }
-.map-orchestration-play::before {
-  content: '|>';
-  display: block;
-  font-size: 0.62rem;
-  letter-spacing: -0.08em;
-  margin-top: 1px;
+.map-orchestration-play .map-orchestration-icon {
+  width: 13px;
+  height: 13px;
+  margin-left: 1px;
 }
 .map-orchestration-stop {
   background: rgba(255, 120, 120, 0.35);
-}
-.map-orchestration-stop::before {
-  content: '■';
-  display: block;
-  font-size: 0.55rem;
 }
 .map-orchestration-pause {
   background: rgba(255, 255, 255, 0.08);
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.55);
 }
-.map-orchestration-pause::before {
-  content: '‖';
-  display: block;
-  font-size: 0.7rem;
+.map-orchestration-pause .map-orchestration-icon-pause {
   opacity: 0.95;
   transition: opacity 0.15s ease;
 }
-.map-orchestration-pause.is-paused::before {
+.map-orchestration-pause.is-paused .map-orchestration-icon-pause {
   opacity: 0;
 }
 .map-orchestration-pause.is-disabled {
