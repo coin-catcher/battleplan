@@ -18,6 +18,8 @@ import {
   DEFAULT_DEVELOP_BRANCH,
   DEFAULT_MAIN_BRANCH,
   projectRepoSlug,
+  releaseSourceBranch,
+  releaseTargetBranch,
   syncPendingChangesForProject,
 } from '../core/pending-changes';
 import { parseReleaseVersionBranch, VERSION_BUMP_AGENT_MESSAGE } from '../core/release-version';
@@ -35,6 +37,7 @@ import {
   createAndMergePullRequest,
   createPullRequest,
   isGithubMergeConflictError,
+  listGithubBranches,
   listPullCommits,
   MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL,
   mergePullRequest,
@@ -337,6 +340,8 @@ export class LocalEngine {
     template_instance_run?: Project['template_instance_run'];
     graph_orchestration?: Project['graph_orchestration'] | null;
     battleplan_storage_version?: number;
+    release_source_ref?: string;
+    release_target_ref?: string;
   }): Promise<Project> {
     const project = await this.requireProject(projectId);
     const changes: string[] = [];
@@ -372,6 +377,16 @@ export class LocalEngine {
       const next = patch.github_pat.trim();
       if (next !== (project.github_pat ?? '')) changes.push('GitHub token updated.');
       project.github_pat = next || undefined;
+    }
+    if (patch.release_source_ref !== undefined) {
+      const next = patch.release_source_ref.trim();
+      if (next !== (project.release_source_ref ?? '')) changes.push(`Release source branch: ${next || 'default'}`);
+      project.release_source_ref = next || undefined;
+    }
+    if (patch.release_target_ref !== undefined) {
+      const next = patch.release_target_ref.trim();
+      if (next !== (project.release_target_ref ?? '')) changes.push(`Release target branch: ${next || 'default'}`);
+      project.release_target_ref = next || undefined;
     }
     if (patch.map_x !== undefined) project.map_x = patch.map_x;
     if (patch.map_y !== undefined) project.map_y = patch.map_y;
@@ -1579,10 +1594,17 @@ export class LocalEngine {
       scope: 'project',
       project_id: projectId,
       role: 'change',
-      content: 'Releasing accumulated changes to main…',
+      content: `Releasing pending changes from \`${releaseSourceBranch(project)}\` into \`${releaseTargetBranch(project)}\`…`,
       intent: 'chat',
     });
     return this.requireProject(projectId);
+  }
+
+  async listProjectRepoBranches(projectId: string): Promise<string[]> {
+    const project = await this.requireProject(projectId);
+    const token = requireProjectGithubPat(project);
+    const { owner, repo } = repoSlugFromProject(project);
+    return listGithubBranches(owner, repo, token);
   }
 
   async executeReleaseProjectChanges(projectId: string): Promise<ChatMessage> {
@@ -1593,19 +1615,19 @@ export class LocalEngine {
     }
     const token = requireProjectGithubPat(project);
     const { owner, repo } = repoSlugFromProject(project);
-    const develop = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
-    const main = DEFAULT_MAIN_BRANCH;
+    const source = releaseSourceBranch(project);
+    const target = releaseTargetBranch(project);
     await createAndMergePullRequest({
       owner,
       repo,
-      head: develop,
-      base: main,
+      head: source,
+      base: target,
       title: `Release: ${project.title}`,
-      body: 'Merge accumulated develop changes into main.',
+      body: `Merge accumulated \`${source}\` changes into \`${target}\`.`,
       token,
     });
     await this.repo.savePendingChanges(projectId, []);
-    const agentPrompt = wrapAgentRunPrompt(VERSION_BUMP_AGENT_MESSAGE, { baseBranch: develop });
+    const agentPrompt = wrapAgentRunPrompt(VERSION_BUMP_AGENT_MESSAGE, { baseBranch: source });
     if (rootProjectStatus(project) !== 'DOING') {
       applyProjectStatusTransition(project, 'DOING', 'manual');
     }

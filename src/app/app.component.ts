@@ -12,6 +12,7 @@ import type {
   TaskStatus,
 } from './core/models';
 import { TASK_STATUSES } from './core/models';
+import { releaseSourceBranch, releaseTargetBranch } from './core/pending-changes';
 import {
   fieldsFromTaskEditorKind,
   MINDMAP_CONNECT_TASK_KINDS,
@@ -222,6 +223,12 @@ export class AppComponent implements OnInit {
   taskExecuteWorkflowId = '';
   dependencies: string[] = [];
   siblingDependencies: string[] = [];
+  readonly releaseChangesModalOpen = signal(false);
+  releaseBranchOptions: string[] = [];
+  releaseSourceBranchDraft = '';
+  releaseTargetBranchDraft = '';
+  releaseBranchesLoading = false;
+  releaseBranchLoadError = '';
   readonly selectedMindmapLink = signal<MindmapLinkRef | null>(null);
   readonly linkEndpointDrag = signal<{ link: MindmapLinkRef; end: 'from' | 'to'; x: number; y: number } | null>(null);
   readonly mindmapLinkKey = linkKey;
@@ -814,7 +821,52 @@ export class AppComponent implements OnInit {
   }
 
   releasePendingChanges(): void {
-    void this.store.releasePendingChanges();
+    const project = this.store.project();
+    if (!project) return;
+    if (!project.repo_url?.trim() || !project.github_pat?.trim()) {
+      this.store.error.set('Add a repository URL and GitHub token on the project before releasing.');
+      return;
+    }
+    this.releaseBranchLoadError = '';
+    this.releaseSourceBranchDraft = releaseSourceBranch(project);
+    this.releaseTargetBranchDraft = releaseTargetBranch(project);
+    this.releaseBranchOptions = [];
+    this.releaseChangesModalOpen.set(true);
+    this.releaseBranchesLoading = true;
+    void this.store.loadReleaseBranchOptions(project.project_id)
+      .then((branches) => {
+        this.releaseBranchOptions = this.ensureBranchInList(branches, [
+          this.releaseSourceBranchDraft,
+          this.releaseTargetBranchDraft,
+        ]);
+      })
+      .catch((error) => {
+        this.releaseBranchLoadError = error instanceof Error ? error.message : 'Could not list branches.';
+        this.releaseBranchOptions = this.ensureBranchInList([], [
+          this.releaseSourceBranchDraft,
+          this.releaseTargetBranchDraft,
+        ]);
+      })
+      .finally(() => {
+        this.releaseBranchesLoading = false;
+      });
+  }
+
+  cancelReleaseChanges(): void {
+    this.releaseChangesModalOpen.set(false);
+  }
+
+  confirmReleaseChanges(): void {
+    this.releaseChangesModalOpen.set(false);
+    void this.store.confirmReleasePendingChanges(this.releaseSourceBranchDraft, this.releaseTargetBranchDraft);
+  }
+
+  private ensureBranchInList(branches: string[], extra: string[]): string[] {
+    const merged = new Set(branches);
+    for (const name of extra) {
+      if (name.trim()) merged.add(name.trim());
+    }
+    return [...merged].sort((left, right) => left.localeCompare(right));
   }
 
   startResize(event: PointerEvent): void {

@@ -64,6 +64,8 @@ export class BattleplanApi {
     template_instance_run?: import('../core/n8n-workflow').TemplateInstanceRunState;
     graph_orchestration?: import('../core/graph-orchestration').GraphOrchestrationRunState | null;
     battleplan_storage_version?: number;
+    release_source_ref?: string;
+    release_target_ref?: string;
   }): Promise<Project> {
     return this.engine.updateProject(projectId, patch);
   }
@@ -317,6 +319,10 @@ export class BattleplanApi {
 
   approve(taskId: string): Promise<ProjectTask> {
     return this.engine.approve(taskId);
+  }
+
+  listProjectRepoBranches(projectId: string): Promise<string[]> {
+    return this.engine.listProjectRepoBranches(projectId);
   }
 
   prepareReleaseProjectChanges(projectId: string): Promise<Project> {
