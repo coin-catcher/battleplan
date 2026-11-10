@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Project } from './models';
 import {
   parseMergePullNumber,
+  releaseSourceBranch,
+  releaseTargetBranch,
   syncPendingChangesForProject,
 } from './pending-changes';
 
@@ -18,6 +20,18 @@ const project: Project = {
 describe('pending changes', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('resolves release source and target branches with defaults', () => {
+    expect(releaseSourceBranch(project)).toBe('develop');
+    expect(releaseTargetBranch(project)).toBe('main');
+    expect(releaseSourceBranch({ ...project, starting_ref: 'feature/x' })).toBe('feature/x');
+    expect(releaseSourceBranch({
+      ...project,
+      release_source_ref: 'release',
+      starting_ref: 'feature/x',
+    })).toBe('release');
+    expect(releaseTargetBranch({ ...project, release_target_ref: 'production' })).toBe('production');
   });
 
   it('parses merge commit messages for pull numbers', () => {
