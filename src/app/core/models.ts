@@ -39,6 +39,10 @@ export interface Project {
   starting_ref?: string;
   /** GitHub PAT for programmatic PR create/merge (stored locally in project_config.json). */
   github_pat?: string;
+  /** Commits ahead of release target shown as pending changes (defaults to starting_ref). */
+  release_source_ref?: string;
+  /** Branch Release Changes merges into (defaults to main). */
+  release_target_ref?: string;
   map_x?: number;
   map_y?: number;
   /** Mindmap status for the root project node (nested subprojects use their task node). */

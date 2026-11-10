@@ -50,14 +50,25 @@ export async function fetchGithubPullRequest(
   };
 }
 
+export function releaseSourceBranch(project: Project): string {
+  return project.release_source_ref?.trim()
+    || project.starting_ref?.trim()
+    || DEFAULT_DEVELOP_BRANCH;
+}
+
+export function releaseTargetBranch(project: Project): string {
+  return project.release_target_ref?.trim() || DEFAULT_MAIN_BRANCH;
+}
+
+/** Commits on `sourceBranch` that are not on `targetBranch` (GitHub compare target…source). */
 export async function fetchCommitsOnDevelopNotInMain(
   owner: string,
   repo: string,
-  mainBranch = DEFAULT_MAIN_BRANCH,
-  developBranch = DEFAULT_DEVELOP_BRANCH,
+  targetBranch = DEFAULT_MAIN_BRANCH,
+  sourceBranch = DEFAULT_DEVELOP_BRANCH,
 ): Promise<CompareCommit[]> {
   const response = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/compare/${encodeURIComponent(mainBranch)}...${encodeURIComponent(developBranch)}`,
+    `https://api.github.com/repos/${owner}/${repo}/compare/${encodeURIComponent(targetBranch)}...${encodeURIComponent(sourceBranch)}`,
     { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'battleplan-desktop' } },
   );
   if (response.status === 404) return [];
@@ -159,7 +170,9 @@ export async function syncPendingChangesForProject(input: {
   if (!slug) return [];
   const { owner, repo } = slug;
 
-  const commits = await fetchCommitsOnDevelopNotInMain(owner, repo);
+  const targetBranch = releaseTargetBranch(input.project);
+  const sourceBranch = releaseSourceBranch(input.project);
+  const commits = await fetchCommitsOnDevelopNotInMain(owner, repo, targetBranch, sourceBranch);
   if (commits.length === 0) return [];
 
   const taskByPull = buildTaskPullIndex(input.tasks, input.codeOutputs, input.researchOutputs);

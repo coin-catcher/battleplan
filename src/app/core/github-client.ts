@@ -56,6 +56,29 @@ export function requireProjectGithubPat(project: { github_pat?: string }): strin
   return token;
 }
 
+export async function listGithubBranches(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<string[]> {
+  const names: string[] = [];
+  let page = 1;
+  for (;;) {
+    const data = await githubJson<Array<{ name: string }>>(
+      token,
+      `https://api.github.com/repos/${owner}/${repo}/branches?per_page=100&page=${page}`,
+    );
+    if (data.length === 0) break;
+    for (const row of data) {
+      if (row.name?.trim()) names.push(row.name.trim());
+    }
+    if (data.length < 100) break;
+    page += 1;
+    if (page > 20) break;
+  }
+  return [...new Set(names)].sort((left, right) => left.localeCompare(right));
+}
+
 export async function compareBranches(
   owner: string,
   repo: string,
