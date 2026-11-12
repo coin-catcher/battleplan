@@ -75,6 +75,7 @@ import { MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL } from '../core/github-client';
 import {
   cloneProjectTask,
   coalesceCachedTaskStatus,
+  shouldCoalesceInboundTaskStatus,
   taskBackgroundPollActive,
 } from '../core/task-status-coalesce';
 import type { MindmapViewState, ProjectWorkspaceUiState } from '../core/project-ui-state';
@@ -1684,7 +1685,6 @@ export class BattleplanStore {
     const taskId = task.task_id;
     const statusBeforeExecute = task.status;
     this.patchTaskStatus(taskId, 'DOING');
-    this.syncDoingBackgroundWatches();
     let runId: string | undefined;
     await this.run(async () => {
       const sent = await this.api.executeTask(taskId);
@@ -1852,7 +1852,6 @@ export class BattleplanStore {
     }
     this.clearTaskPanelError(taskId);
     this.patchTaskStatus(taskId, 'DOING');
-    this.syncDoingBackgroundWatches();
     let runId: string | undefined;
     let watchProjectId: string | undefined;
     await this.run(async () => {
@@ -2324,8 +2323,22 @@ export class BattleplanStore {
 
   private applyTaskConversation(result: { messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }): void {
     const taskId = result.task.task_id;
-    const previous = this.tasks().find((item) => item.task_id === taskId)?.status;
-    const task = cloneProjectTask({ ...result.task, task_id: taskId });
+    const live = this.tasks().find((item) => item.task_id === taskId);
+    const previous = live?.status;
+    const subprojectAgentId = live?.subproject_id ? this.subprojectCursorAgentId(live.subproject_id) : undefined;
+    const inbound = cloneProjectTask({ ...result.task, task_id: taskId });
+    const backgroundPollActive = taskBackgroundPollActive(
+      live,
+      subprojectAgentId,
+      this.agentComms.isTaskPolling(taskId),
+    );
+    const pollActive = shouldCoalesceInboundTaskStatus(
+      live,
+      inbound,
+      result.messages,
+      backgroundPollActive,
+    );
+    const task = coalesceCachedTaskStatus(live, inbound, pollActive);
     this.cacheTaskConversation({ ...result, task });
     this.replaceTask(task);
     if (previous !== task.status) {
