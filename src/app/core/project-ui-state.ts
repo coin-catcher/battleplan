@@ -11,14 +11,15 @@ export interface ProjectWorkspaceUiState {
   mindmap_origin_y: number;
 }
 
-const MIN_ZOOM = 0.35;
+/** 0.01 ⇒ 100 world px render as 1 screen px (100× zoom out from 1:1). */
+export const MIN_MINDMAP_ZOOM = 0.01;
 const MAX_ZOOM = 2.5;
 const MIN_PANE = 280;
 const MAX_PANE = 720;
 
 export function clampMindmapZoom(value: number): number {
   if (!Number.isFinite(value)) return 1;
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+  return Math.min(MAX_ZOOM, Math.max(MIN_MINDMAP_ZOOM, value));
 }
 
 export function clampPaneWidth(value: number): number {
