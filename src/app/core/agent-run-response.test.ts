@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   AGENT_RESPONSE_PLACEHOLDER,
+  agentDeclaresNoHumanReviewNeeded,
+  buildOrchestrationReExecuteMessage,
   isSubstantiveAgentResponse,
   isWorkflowTerminalAgentReply,
+  NO_HUMAN_REVIEW_NEEDED_SENTINEL,
 } from './agent-run-response';
 
 describe('isSubstantiveAgentResponse', () => {
@@ -14,6 +17,27 @@ describe('isSubstantiveAgentResponse', () => {
   it('accepts run result or non-empty assistant text', () => {
     expect(isSubstantiveAgentResponse('', { result: 'Done.' })).toBe(true);
     expect(isSubstantiveAgentResponse('Here is the summary.')).toBe(true);
+  });
+});
+
+describe('buildOrchestrationReExecuteMessage', () => {
+  it('continues existing chat and includes upstream context without resetting objectives', () => {
+    const message = buildOrchestrationReExecuteMessage({
+      inputDocuments: 'INPUT DOCUMENTS',
+      upstreamHandoff: 'handoff block',
+      crossGraphRationale: 'Partition B moved goalposts',
+    });
+    expect(message).toContain('existing conversation');
+    expect(message).toContain('INPUT DOCUMENTS');
+    expect(message).toContain('Partition B moved goalposts');
+    expect(message).toContain(NO_HUMAN_REVIEW_NEEDED_SENTINEL);
+  });
+});
+
+describe('agentDeclaresNoHumanReviewNeeded', () => {
+  it('detects the sentinel token in assistant text', () => {
+    expect(agentDeclaresNoHumanReviewNeeded(`Summary.\n${NO_HUMAN_REVIEW_NEEDED_SENTINEL}`)).toBe(true);
+    expect(agentDeclaresNoHumanReviewNeeded('Needs your input on scope.')).toBe(false);
   });
 });
 
