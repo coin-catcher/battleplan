@@ -15,16 +15,17 @@ export interface GithubPullRequestRef {
   html_url: string;
 }
 
-function authHeaders(token: string): HeadersInit {
-  return {
+function authHeaders(token?: string): HeadersInit {
+  const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
-    Authorization: `Bearer ${token}`,
     'User-Agent': 'battleplan-desktop',
     'X-GitHub-Api-Version': '2022-11-28',
   };
+  if (token?.trim()) headers['Authorization'] = `Bearer ${token.trim()}`;
+  return headers;
 }
 
-async function githubJson<T>(token: string, url: string, init?: RequestInit): Promise<T> {
+async function githubJson<T>(token: string | undefined, url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
     headers: { ...authHeaders(token), ...(init?.headers ?? {}) },
@@ -59,7 +60,7 @@ export function requireProjectGithubPat(project: { github_pat?: string }): strin
 export async function listGithubBranches(
   owner: string,
   repo: string,
-  token: string,
+  token?: string,
 ): Promise<string[]> {
   const names: string[] = [];
   let page = 1;
@@ -117,7 +118,7 @@ export async function fetchCommitsAheadOfBase(
   repo: string,
   base: string,
   head: string,
-  token: string,
+  token?: string,
 ): Promise<GithubCompareCommit[]> {
   const data = await githubJson<GithubComparePayload>(
     token,
@@ -157,7 +158,7 @@ export async function fetchGithubPullRequest(
   owner: string,
   repo: string,
   number: number,
-  token: string,
+  token?: string,
 ): Promise<{ merged: boolean; baseRef: string; title: string; body: string } | null> {
   try {
     const data = await githubJson<{

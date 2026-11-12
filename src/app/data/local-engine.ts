@@ -1042,7 +1042,7 @@ export class LocalEngine {
     const project = await this.requireProject(projectId);
     const slug = projectRepoSlug(project);
     if (!slug) return [];
-    const token = requireProjectGithubPat(project);
+    const token = project.github_pat?.trim();
     const source = releaseSourceBranch(project);
     const target = releaseTargetBranch(project);
     const commits = await fetchCommitsAheadOfBase(slug.owner, slug.repo, target, source, token);
@@ -1696,9 +1696,17 @@ export class LocalEngine {
 
   async listProjectRepoBranches(projectId: string): Promise<string[]> {
     const project = await this.requireProject(projectId);
-    const token = requireProjectGithubPat(project);
+    const token = project.github_pat?.trim();
     const { owner, repo } = repoSlugFromProject(project);
-    return listGithubBranches(owner, repo, token);
+    const configured = [releaseSourceBranch(project), releaseTargetBranch(project)]
+      .filter((name, index, list) => name && list.indexOf(name) === index);
+    if (!token) return configured;
+    try {
+      const listed = await listGithubBranches(owner, repo, token);
+      return [...new Set([...listed, ...configured])].sort((left, right) => left.localeCompare(right));
+    } catch {
+      return configured;
+    }
   }
 
   async executeReleaseProjectChanges(projectId: string): Promise<ChatMessage> {
