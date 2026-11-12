@@ -552,6 +552,32 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   margin: 0;
   font-size: 0.95rem;
 }
+.pending-changes-filters {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  font-size: 0.72rem;
+}
+.pending-branch-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 72px;
+  color: var(--muted);
+}
+.pending-branch-field select {
+  width: 100%;
+  font-size: 0.78rem;
+  padding: 4px 6px;
+}
+.pending-branch-arrow {
+  align-self: center;
+  padding-bottom: 6px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
 .pending-changes-table-wrap {
   max-height: 140px;
   overflow: auto;

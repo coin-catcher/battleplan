@@ -29,6 +29,37 @@
           <h2>Pending Changes</h2>
           <button type="button" class="accent" [disabled]="store.busy() || store.pendingChanges().length === 0" (click)="releasePendingChanges()">Release Changes</button>
         </header>
+        @if (canConfigurePendingBranches()) {
+          <div class="pending-changes-filters">
+            <label class="pending-branch-field">
+              <span>Source</span>
+              <select
+                [ngModel]="pendingSourceBranchName()"
+                (ngModelChange)="onPendingSourceBranchChange($event)"
+                name="pendingSourceBranch"
+                [disabled]="store.busy() || pendingBranchesLoading"
+              >
+                @for (branch of pendingBranchOptions; track branch) {
+                  <option [value]="branch">{{ branch }}</option>
+                }
+              </select>
+            </label>
+            <span class="pending-branch-arrow" aria-hidden="true">→</span>
+            <label class="pending-branch-field">
+              <span>Target</span>
+              <select
+                [ngModel]="pendingTargetBranchName()"
+                (ngModelChange)="onPendingTargetBranchChange($event)"
+                name="pendingTargetBranch"
+                [disabled]="store.busy() || pendingBranchesLoading"
+              >
+                @for (branch of pendingBranchOptions; track branch) {
+                  <option [value]="branch">{{ branch }}</option>
+                }
+              </select>
+            </label>
+          </div>
+        }
         <div class="pending-changes-table-wrap">
           <table class="pending-changes-table">
             <thead>
@@ -45,7 +76,7 @@
                 </tr>
               } @empty {
                 <tr>
-                  <td colspan="2" class="empty">No changes waiting for main.</td>
+                  <td colspan="2" class="empty">{{ pendingChangesEmptyLabel() }}</td>
                 </tr>
               }
             </tbody>
