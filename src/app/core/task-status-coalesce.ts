@@ -36,10 +36,11 @@ export function coalesceCachedTaskStatus(
 }
 
 export function taskBackgroundPollActive(
-  task: ProjectTask,
+  task: ProjectTask | undefined,
   subprojectCursorAgentId: string | undefined,
   doingBackgroundGenerationHasTask: boolean,
 ): boolean {
+  if (!task) return doingBackgroundGenerationHasTask;
   return doingBackgroundGenerationHasTask
     || taskNeedsDoingBackgroundPoll(task, subprojectCursorAgentId);
 }
