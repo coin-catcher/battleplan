@@ -125,7 +125,6 @@ export function isOrchestrationDispatchCandidate(
   if (task.status !== 'TODO') return false;
   if (task.output_type === 'subproject') return false;
   if (!isDispatchableNodeKind(task.node_kind)) return false;
-  if (task.cursor_agent_id) return false;
   if (!prerequisitesMetForOrchestration(task, tasks, edges, run)) return false;
   return true;
 }

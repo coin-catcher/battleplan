@@ -95,7 +95,10 @@ import {
 import {
   AGENT_RESPONSE_PLACEHOLDER,
   isSubstantiveAgentResponse,
+  agentDeclaresNoHumanReviewNeeded,
+  buildOrchestrationReExecuteMessage,
   isWorkflowTerminalAgentReply,
+  NO_HUMAN_REVIEW_GRILLING_INSTRUCTION,
 } from '../core/agent-run-response';
 import { isDispatchableNodeKind } from '../core/task-node-kind';
 import { defaultConnectorForTask } from '../core/connector-defaults';
@@ -1371,11 +1374,16 @@ export class LocalEngine {
       throw new Error('Decision and fog nodes are completed in Battleplan, not dispatched to agents.');
     }
     await this.ensureTaskBrief(task);
-    if (task.cursor_agent_id) throw new Error('This task already has a Cursor agent.');
+    const project = await this.requireProject(task.project_id);
+    if (task.cursor_agent_id) {
+      if (project.graph_orchestration?.status !== 'running') {
+        throw new Error('This task already has a Cursor agent.');
+      }
+      return this.reExecuteOrchestrationTask(task, project);
+    }
     const initial = taskInitialPrompt(task);
     if (!initial) throw new Error('Initial prompt is required.');
     await this.assertDependenciesDone(task);
-    const project = await this.requireProject(task.project_id);
     const projectTasks = await this.listTasks(task.project_id);
     const graphEdges = graphEdgesForRun(project, projectTasks);
     const upstreamIds = collectUpstreamTaskIds(task, projectTasks, graphEdges);
@@ -1400,6 +1408,62 @@ export class LocalEngine {
       return this.launchResearchLibraryFirstMessage(task, project, researchAgent!, initial);
     }
     return this.launchWithFirstMessage(task, initial);
+  }
+
+  private async reExecuteOrchestrationTask(task: ProjectTask, project: Project): Promise<ChatMessage> {
+    if (!task.cursor_agent_id) throw new Error('This task has no Cursor agent to re-execute.');
+    await this.assertDependenciesDone(task);
+    const projectTasks = await this.listTasks(task.project_id);
+    const graphEdges = graphEdgesForRun(project, projectTasks);
+    const upstreamIds = collectUpstreamTaskIds(task, projectTasks, graphEdges);
+    if (upstreamIds.length) {
+      await this.repo.stageUpstreamInputsForTask(
+        task.project_id,
+        task.task_id,
+        upstreamIds.map((upstreamId) => {
+          const upstream = projectTasks.find((item) => item.task_id === upstreamId)!;
+          return {
+            task_id: upstream.task_id,
+            title: upstream.title,
+            repo_path: upstream.repo_path,
+          };
+        }),
+      );
+    }
+    await this.seedAgentLibraryForProject(task.project_id);
+    const agents = await this.repo.listProjectAgents(task.project_id);
+    const codeAgent = findProjectAgent(agents, resolveCodeAgentId(task, project));
+    const launch = cursorLaunchFromLibrary(codeAgent, project, this.cursorApiKey());
+    const output = task.output_type === 'code'
+      ? await this.repo.getCodeOutput(task.task_id)
+      : await this.repo.getResearchOutput(task.task_id);
+    const base = launch.startingRef?.trim() || project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
+    const tasks = projectTasks;
+    const inputDocs = buildInputDocumentsSection(task, tasks, graphEdges);
+    const upstream = this.upstreamHandoffMarkdown(task, tasks);
+    const body = buildOrchestrationReExecuteMessage({
+      inputDocuments: inputDocs,
+      upstreamHandoff: upstream,
+      crossGraphRationale: task.cross_graph_edit_rationale,
+      objectivesReminder: taskInitialPrompt(task) || undefined,
+    });
+    this.markTaskDoingOnAgentChat(task);
+    const run = await this.cursor.createRun(task.cursor_agent_id, {
+      text: wrapAgentRunPrompt(body, { baseBranch: base, agentBranch: output?.branch }),
+      mode: 'agent',
+    });
+    task.latest_run_id = run.id;
+    task.updated_at = this.now();
+    await this.repo.saveTask(task);
+    return this.record({
+      scope: 'task',
+      project_id: task.project_id,
+      task_id: task.task_id,
+      role: 'user',
+      content: body,
+      run_id: run.id,
+      intent: 'feedback',
+    });
   }
 
   async sendTaskMessage(taskId: string, text: string): Promise<ChatMessage> {
@@ -1969,6 +2033,25 @@ export class LocalEngine {
     }
     task.updated_at = this.now();
     await this.repo.saveTask(task);
+    await this.tryAutoApproveAfterAgentRun(task, assistant.content);
+  }
+
+  private async tryAutoApproveAfterAgentRun(task: ProjectTask, assistantContent: string): Promise<void> {
+    if (!agentDeclaresNoHumanReviewNeeded(assistantContent)) return;
+    if (task.output_type !== 'code' && task.output_type !== 'research') return;
+    const fresh = await this.repo.getTask(task.task_id);
+    if (!fresh || fresh.status !== 'REVIEW') return;
+    const output = fresh.output_type === 'code'
+      ? await this.repo.getCodeOutput(fresh.task_id)
+      : await this.repo.getResearchOutput(fresh.task_id);
+    if (!output?.branch?.trim()) return;
+    const project = await this.requireProject(fresh.project_id);
+    if (!project.github_pat?.trim()) return;
+    try {
+      await this.executeApproveMerge(fresh.task_id);
+    } catch {
+      // Human review when auto-merge fails (conflicts, missing PR data, etc.).
+    }
   }
 
   private async applySubprojectParentRun(projectId: string, run: CursorRun): Promise<void> {
@@ -2193,6 +2276,7 @@ export class LocalEngine {
     if (siblingIds.length > 0) {
       lines.push(`This task depends on these completed task ids: ${siblingIds.join(', ')}.`);
     }
+    lines.push(NO_HUMAN_REVIEW_GRILLING_INSTRUCTION);
     const dar = joinDarSections(await collectTaskDarSections(task, this.darLookup()));
     const firstChat = joinDarSections([dar, userMessage]);
     const created = await this.cursor.createAgent({
