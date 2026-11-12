@@ -79,6 +79,21 @@ export async function listGithubBranches(
   return [...new Set(names)].sort((left, right) => left.localeCompare(right));
 }
 
+type GithubComparePayload = {
+  ahead_by?: number;
+  total_commits?: number;
+  merge_base_commit?: { sha?: string };
+  commits?: Array<{ sha: string; html_url?: string; commit: { message: string } }>;
+};
+
+function mapGithubCompareCommit(item: { sha: string; html_url?: string; commit: { message: string } }): GithubCompareCommit {
+  return {
+    sha: item.sha,
+    html_url: item.html_url,
+    message: item.commit.message,
+  };
+}
+
 export async function compareBranches(
   owner: string,
   repo: string,
@@ -86,21 +101,80 @@ export async function compareBranches(
   head: string,
   token: string,
 ): Promise<{ ahead_by: number; commits: GithubCompareCommit[] }> {
-  const data = await githubJson<{
-    ahead_by?: number;
-    commits?: Array<{ sha: string; html_url?: string; commit: { message: string } }>;
-  }>(
+  const data = await githubJson<GithubComparePayload>(
     token,
     `https://api.github.com/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`,
   );
   return {
     ahead_by: data.ahead_by ?? 0,
-    commits: (data.commits ?? []).map((item) => ({
-      sha: item.sha,
-      html_url: item.html_url,
-      message: item.commit.message,
-    })),
+    commits: (data.commits ?? []).map(mapGithubCompareCommit),
   };
+}
+
+/** Commits reachable from `head` but not from `base` (authenticated; paginates past GitHub's 250-commit compare cap). */
+export async function fetchCommitsAheadOfBase(
+  owner: string,
+  repo: string,
+  base: string,
+  head: string,
+  token: string,
+): Promise<GithubCompareCommit[]> {
+  const data = await githubJson<GithubComparePayload>(
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`,
+  );
+  const aheadBy = data.ahead_by ?? 0;
+  if (aheadBy === 0) return [];
+
+  const inline = (data.commits ?? []).map(mapGithubCompareCommit);
+  const total = data.total_commits ?? aheadBy;
+  if (inline.length >= total || inline.length >= aheadBy) return inline;
+
+  const mergeBaseSha = data.merge_base_commit?.sha;
+  if (!mergeBaseSha) return inline;
+
+  const collected: GithubCompareCommit[] = [];
+  let page = 1;
+  outer: for (;;) {
+    const batch = await githubJson<Array<{ sha: string; html_url?: string; commit: { message: string } }>>(
+      token,
+      `https://api.github.com/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(head)}&per_page=100&page=${page}`,
+    );
+    if (batch.length === 0) break;
+    for (const item of batch) {
+      if (item.sha === mergeBaseSha) break outer;
+      collected.push(mapGithubCompareCommit(item));
+      if (collected.length >= aheadBy) break outer;
+    }
+    if (batch.length < 100) break;
+    page += 1;
+    if (page > 50) break;
+  }
+  return collected.reverse();
+}
+
+export async function fetchGithubPullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<{ merged: boolean; baseRef: string; title: string; body: string } | null> {
+  try {
+    const data = await githubJson<{
+      merged?: boolean;
+      base?: { ref?: string };
+      title?: string;
+      body?: string | null;
+    }>(token, `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`);
+    return {
+      merged: Boolean(data.merged),
+      baseRef: data.base?.ref ?? '',
+      title: data.title ?? '',
+      body: data.body ?? '',
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function listPullCommits(

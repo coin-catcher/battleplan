@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { appendPendingChangeRows } from './pending-changes';
-import { createPullRequest, isGithubMergeConflictError, mergePullRequest } from './github-client';
+import {
+  createPullRequest,
+  fetchCommitsAheadOfBase,
+  isGithubMergeConflictError,
+  mergePullRequest,
+} from './github-client';
 
 describe('appendPendingChangeRows', () => {
   it('merges rows by change_id', () => {
@@ -66,5 +71,28 @@ describe('github-client', () => {
     vi.stubGlobal('fetch', fetchMock);
     await mergePullRequest('o', 'r', 7, 'ghp_test');
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('fetches commits ahead of base with GitHub auth', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+      const headers = new Headers(init?.headers);
+      expect(headers.get('Authorization')).toBe('Bearer ghp_test');
+      if (url.includes('/compare/main...develop')) {
+        return new Response(JSON.stringify({
+          ahead_by: 1,
+          total_commits: 1,
+          commits: [{
+            sha: 'abc',
+            commit: { message: 'feat: test' },
+          }],
+        }), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const commits = await fetchCommitsAheadOfBase('o', 'r', 'main', 'develop', 'ghp_test');
+    expect(commits).toHaveLength(1);
+    expect(commits[0]?.sha).toBe('abc');
   });
 });

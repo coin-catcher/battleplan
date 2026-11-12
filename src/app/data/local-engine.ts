@@ -17,10 +17,10 @@ import {
   appendPendingChangeRows,
   DEFAULT_DEVELOP_BRANCH,
   DEFAULT_MAIN_BRANCH,
+  buildPendingChangesFromCommits,
   projectRepoSlug,
   releaseSourceBranch,
   releaseTargetBranch,
-  syncPendingChangesForProject,
 } from '../core/pending-changes';
 import { parseReleaseVersionBranch, VERSION_BUMP_AGENT_MESSAGE } from '../core/release-version';
 import type { GithubCompareCommit } from '../core/github-client';
@@ -36,6 +36,8 @@ import {
   compareBranches,
   createAndMergePullRequest,
   createPullRequest,
+  fetchCommitsAheadOfBase,
+  fetchGithubPullRequest,
   isGithubMergeConflictError,
   listGithubBranches,
   listPullCommits,
@@ -1038,12 +1040,22 @@ export class LocalEngine {
     current: PendingChange[];
   }): Promise<PendingChange[]> {
     const project = await this.requireProject(projectId);
-    return syncPendingChangesForProject({
-      project,
+    const slug = projectRepoSlug(project);
+    if (!slug) return [];
+    const token = requireProjectGithubPat(project);
+    const source = releaseSourceBranch(project);
+    const target = releaseTargetBranch(project);
+    const commits = await fetchCommitsAheadOfBase(slug.owner, slug.repo, target, source, token);
+    if (commits.length === 0) return [];
+    const { owner, repo } = slug;
+    return buildPendingChangesFromCommits({
+      owner,
+      repo,
+      commits,
       tasks: input.tasks,
       codeOutputs: input.codeOutputs,
       researchOutputs: input.researchOutputs,
-      current: input.current,
+      loadPull: (number) => fetchGithubPullRequest(owner, repo, number, token),
     });
   }
 

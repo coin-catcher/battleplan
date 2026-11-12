@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Project } from './models';
 import {
+  buildPendingChangesFromCommits,
   parseMergePullNumber,
   releaseSourceBranch,
   releaseTargetBranch,
-  syncPendingChangesForProject,
 } from './pending-changes';
 
 const project: Project = {
@@ -40,35 +40,24 @@ describe('pending changes', () => {
     expect(parseMergePullNumber('chore: bump version')).toBeNull();
   });
 
-  it('builds pending rows from develop commits not in main', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.includes('/compare/main...develop')) {
-        return new Response(JSON.stringify({
-          ahead_by: 1,
-          commits: [{
-            sha: 'abc123',
-            html_url: 'https://github.com/coin-catcher/battleplan/commit/abc123',
-            commit: { message: 'Merge pull request #34 from coin-catcher/bugfix\n\nFix pending changes.' },
-          }],
-        }), { status: 200 });
-      }
-      if (url.includes('/pulls/34')) {
-        return new Response(JSON.stringify({
-          merged: true,
-          base: { ref: 'develop' },
-          title: 'Fix pending changes sync',
-          body: 'Uses GitHub compare to list develop-only commits.',
-        }), { status: 200 });
-      }
-      return new Response('{}', { status: 404 });
-    }));
-
-    const rows = await syncPendingChangesForProject({
-      project,
+  it('builds pending rows from compare commits', async () => {
+    const rows = await buildPendingChangesFromCommits({
+      owner: 'coin-catcher',
+      repo: 'battleplan',
+      commits: [{
+        sha: 'abc123',
+        html_url: 'https://github.com/coin-catcher/battleplan/commit/abc123',
+        message: 'Merge pull request #34 from coin-catcher/bugfix\n\nFix pending changes.',
+      }],
       tasks: [],
       codeOutputs: {},
       researchOutputs: {},
-      current: [],
+      loadPull: async () => ({
+        merged: true,
+        baseRef: 'develop',
+        title: 'Fix pending changes sync',
+        body: 'Uses GitHub compare to list develop-only commits.',
+      }),
     });
 
     expect(rows).toHaveLength(1);
@@ -77,20 +66,15 @@ describe('pending changes', () => {
     expect(rows[0]?.summary).toContain('Fix pending changes sync');
   });
 
-  it('clears pending rows when develop matches main', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ahead_by: 0, commits: [] }), { status: 200 })));
-
-    const rows = await syncPendingChangesForProject({
-      project,
+  it('returns no rows when compare commits are empty', async () => {
+    const rows = await buildPendingChangesFromCommits({
+      owner: 'coin-catcher',
+      repo: 'battleplan',
+      commits: [],
       tasks: [],
       codeOutputs: {},
       researchOutputs: {},
-      current: [{
-        change_id: 'old',
-        task_id: '',
-        task_title: 'Old',
-        summary: 'Old change',
-      }],
+      loadPull: async () => null,
     });
 
     expect(rows).toEqual([]);
