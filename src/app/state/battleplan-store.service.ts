@@ -144,6 +144,10 @@ export class BattleplanStore {
         if (this.watchingTaskChat(result.task.task_id, this.selection())) {
           void this.refreshOutput(result.task);
         }
+        const orchestration = this.project()?.graph_orchestration;
+        if (orchestration?.status && orchestration.status !== 'idle') {
+          void this.refreshOrchestrationUiState();
+        }
       },
       onProjectConversation: (page) => this.applyConversation(page),
       onSubprojectTaskBundle: (taskId, page, task) => this.cacheSubprojectTaskChat(taskId, page, task),
@@ -381,6 +385,7 @@ export class BattleplanStore {
   private foregroundWatchGeneration = 0;
   private editorLoadGeneration = 0;
   private panelRefreshGeneration = 0;
+  private orchestrationRefreshGeneration = 0;
   private foregroundWatchTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly tabSnapshots = new Map<string, ProjectTabSnapshot>();
   private readonly taskChatCache = new Map<string, { messages: ChatMessage[]; artifacts: ChatArtifact[]; task: ProjectTask }>();
@@ -1766,8 +1771,10 @@ export class BattleplanStore {
     const projectId = this.projectId();
     if (!projectId) return;
     await this.run(async () => {
+      await this.refreshOrchestrationUiState();
       const project = await this.api.stopGraphOrchestration(projectId);
       this.applyProject(project);
+      await this.reloadTasks();
       this.notice.set('Task graph orchestration stopped.');
     });
   }
@@ -2386,11 +2393,33 @@ export class BattleplanStore {
     this.codeOutputs.set(code);
     this.researchOutputs.set(research);
     await this.refreshPendingChanges();
-    if (this.graphOrchestrationActive()) {
-      const fresh = (await this.api.listProjects()).find((item) => item.project_id === projectId);
-      if (fresh) this.applyProject(fresh);
+    const fresh = (await this.api.listProjects()).find((item) => item.project_id === projectId);
+    if (fresh) {
+      this.applyProject(fresh);
+      if (isOrchestrationRunActive(fresh.graph_orchestration)) this.ensureOrchestrationWatches(fresh);
     }
     this.syncDoingBackgroundWatches();
+  }
+
+  /** Reload tasks and orchestration run state after background agent sync (mindmap + watches). */
+  private async refreshOrchestrationUiState(): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    const generation = ++this.orchestrationRefreshGeneration;
+    try {
+      const tasks = await this.api.listTasks(projectId);
+      if (generation !== this.orchestrationRefreshGeneration) return;
+      this.tasks.set(tasks);
+      const fresh = (await this.api.listProjects()).find((item) => item.project_id === projectId);
+      if (generation !== this.orchestrationRefreshGeneration) return;
+      if (fresh) {
+        this.applyProject(fresh);
+        if (isOrchestrationRunActive(fresh.graph_orchestration)) this.ensureOrchestrationWatches(fresh);
+      }
+      this.syncDoingBackgroundWatches();
+    } catch {
+      // Transient failures should not break foreground polls.
+    }
   }
 
   private resumeWatchForSelection(): void {

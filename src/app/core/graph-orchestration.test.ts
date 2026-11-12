@@ -3,10 +3,12 @@ import type { ProjectTask } from './models';
 import type { TaskGraphEdge } from './task-graph';
 import {
   appendOrchestrationTransition,
+  healOrchestrationRunForControl,
   isOrchestrationRunComplete,
   newGraphOrchestrationRun,
   isOrchestrationDispatchCandidate,
   orchestrationDispatchBatch,
+  orchestrationRunAcceptsControl,
   orchestrationScopeTaskIds,
   planExecutionWaves,
   reconcileRunningTasks,
@@ -103,6 +105,15 @@ describe('graph-orchestration', () => {
     const waves = planExecutionWaves([root, c1, c2], edges, new Set(['root', 'c1', 'c2']), new Set());
     expect(waves[0]).toEqual(['root']);
     expect(waves[1]?.sort()).toEqual(['c1', 'c2']);
+  });
+
+  it('does not treat completed runs as finished while agents are in flight', () => {
+    const doing = task({ task_id: 'a', title: 'A', status: 'DOING', cursor_agent_id: 'agent-1' });
+    const done = task({ task_id: 'b', title: 'B', status: 'DONE' });
+    const run = { ...newGraphOrchestrationRun(undefined, 'run-1', '2020-01-01T00:00:00.000Z'), status: 'completed' as const };
+    expect(isOrchestrationRunComplete([doing, done], [], run)).toBe(false);
+    expect(orchestrationRunAcceptsControl(run, [doing, done])).toBe(true);
+    expect(healOrchestrationRunForControl(run, [doing, done]).status).toBe('running');
   });
 
   it('reconciles active agent runs after reload', () => {

@@ -112,11 +112,14 @@ import {
 import { graphEdgesForRun } from '../core/task-ready';
 import {
   appendOrchestrationTransition,
+  healOrchestrationRunForControl,
   isOrchestrationRunActive,
   isOrchestrationRunComplete,
   newGraphOrchestrationRun,
   orchestrationDispatchBatch,
+  orchestrationRunAcceptsControl,
   reconcileRunningTasks,
+  type GraphOrchestrationRunState,
 } from '../core/graph-orchestration';
 import {
   applyGraphEdgesToLegacyFields,
@@ -1263,10 +1266,8 @@ export class LocalEngine {
   }
 
   async stopGraphOrchestration(projectId: string): Promise<Project> {
-    const project = await this.requireProject(projectId);
-    const run = project.graph_orchestration;
-    if (!isOrchestrationRunActive(run)) throw new Error('No task graph is executing.');
-    let next = appendOrchestrationTransition(run!, 'stop', {});
+    const { project, run } = await this.resolveOrchestrationRunForControl(projectId);
+    let next = appendOrchestrationTransition(run, 'stop', {});
     next = { ...next, status: 'stopped', updated_at: this.now() };
     project.graph_orchestration = next;
     project.updated_at = this.now();
@@ -1275,9 +1276,8 @@ export class LocalEngine {
   }
 
   async pauseGraphOrchestration(projectId: string): Promise<Project> {
-    const project = await this.requireProject(projectId);
-    const run = project.graph_orchestration;
-    if (run?.status !== 'running') throw new Error('Task graph orchestration is not running.');
+    const { project, run } = await this.resolveOrchestrationRunForControl(projectId);
+    if (run.status !== 'running') throw new Error('Task graph orchestration is not running.');
     let next = appendOrchestrationTransition(run, 'pause_run', {});
     next = { ...next, status: 'paused', updated_at: this.now() };
     project.graph_orchestration = next;
@@ -1301,13 +1301,11 @@ export class LocalEngine {
 
   async pauseOrchestrationTask(projectId: string, taskId: string): Promise<Project> {
     await this.requireTask(projectId, taskId);
-    const project = await this.requireProject(projectId);
-    const run = project.graph_orchestration;
-    if (!isOrchestrationRunActive(run)) throw new Error('Start task graph orchestration before pausing tasks.');
-    const paused = new Set(run!.paused_task_ids);
+    const { project, run } = await this.resolveOrchestrationRunForControl(projectId);
+    const paused = new Set(run.paused_task_ids);
     paused.add(taskId);
     let next: typeof run = {
-      ...run!,
+      ...run,
       paused_task_ids: [...paused],
       updated_at: this.now(),
     };
@@ -1320,12 +1318,10 @@ export class LocalEngine {
 
   async resumeOrchestrationTask(projectId: string, taskId: string): Promise<Project> {
     await this.requireTask(projectId, taskId);
-    const project = await this.requireProject(projectId);
-    const run = project.graph_orchestration;
-    if (!isOrchestrationRunActive(run)) throw new Error('Start task graph orchestration before resuming tasks.');
+    const { project, run } = await this.resolveOrchestrationRunForControl(projectId);
     let next: typeof run = {
-      ...run!,
-      paused_task_ids: run!.paused_task_ids.filter((id) => id !== taskId),
+      ...run,
+      paused_task_ids: run.paused_task_ids.filter((id) => id !== taskId),
       updated_at: this.now(),
     };
     next = appendOrchestrationTransition(next, 'resume_task', { to_task_id: taskId });
@@ -1334,6 +1330,28 @@ export class LocalEngine {
     await this.repo.saveProject(project);
     if (next.status === 'running') await this.advanceGraphOrchestration(projectId);
     return this.requireProject(projectId);
+  }
+
+  private async resolveOrchestrationRunForControl(
+    projectId: string,
+  ): Promise<{ project: Project; run: GraphOrchestrationRunState }> {
+    let project = await this.requireProject(projectId);
+    let run = project.graph_orchestration;
+    if (!run) throw new Error('No task graph is executing.');
+    const tasks = await this.listTasks(projectId);
+    if (!orchestrationRunAcceptsControl(run, tasks)) {
+      throw new Error('No task graph is executing.');
+    }
+    const healed = healOrchestrationRunForControl(run, tasks);
+    if (healed.status !== run.status) {
+      project = { ...project, graph_orchestration: { ...healed, updated_at: this.now() } };
+      project.updated_at = this.now();
+      await this.repo.saveProject(project);
+      run = project.graph_orchestration!;
+    } else {
+      run = healed;
+    }
+    return { project, run };
   }
 
   async reconcileGraphOrchestration(projectId: string): Promise<Project> {
