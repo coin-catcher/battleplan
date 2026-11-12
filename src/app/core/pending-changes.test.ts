@@ -25,6 +25,7 @@ describe('pending changes', () => {
   it('resolves release source and target branches with defaults', () => {
     expect(releaseSourceBranch(project)).toBe('develop');
     expect(releaseTargetBranch(project)).toBe('main');
+    expect(releaseSourceBranch({ ...project, starting_ref: 'main' })).toBe('develop');
     expect(releaseSourceBranch({ ...project, starting_ref: 'feature/x' })).toBe('feature/x');
     expect(releaseSourceBranch({
       ...project,

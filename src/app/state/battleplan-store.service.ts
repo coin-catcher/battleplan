@@ -685,6 +685,33 @@ export class BattleplanStore {
     return this.api.listProjectRepoBranches(projectId);
   }
 
+  async updateReleaseBranchRefs(sourceBranch: string, targetBranch: string): Promise<void> {
+    const projectId = this.projectId();
+    const project = this.project();
+    if (!projectId || !project) return;
+    const source = sourceBranch.trim();
+    const target = targetBranch.trim();
+    if (!source || !target) {
+      this.error.set('Choose both source and target branches.');
+      return;
+    }
+    if (source === target) {
+      this.error.set('Source and target branches must differ.');
+      return;
+    }
+    await this.run(async () => {
+      const updated = await this.api.updateProject(projectId, {
+        release_source_ref: source,
+        release_target_ref: target,
+      });
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === updated.project_id ? updated : item
+      )));
+    });
+    if (this.error()) return;
+    await this.refreshPendingChanges();
+  }
+
   async confirmReleasePendingChanges(sourceBranch: string, targetBranch: string): Promise<void> {
     const projectId = this.projectId();
     const project = this.project();

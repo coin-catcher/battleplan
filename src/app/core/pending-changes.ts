@@ -51,9 +51,11 @@ export async function fetchGithubPullRequest(
 }
 
 export function releaseSourceBranch(project: Project): string {
-  return project.release_source_ref?.trim()
-    || project.starting_ref?.trim()
-    || DEFAULT_DEVELOP_BRANCH;
+  const explicit = project.release_source_ref?.trim();
+  if (explicit) return explicit;
+  const starting = project.starting_ref?.trim();
+  if (starting && starting !== DEFAULT_MAIN_BRANCH) return starting;
+  return DEFAULT_DEVELOP_BRANCH;
 }
 
 export function releaseTargetBranch(project: Project): string {
