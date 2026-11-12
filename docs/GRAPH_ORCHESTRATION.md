@@ -13,7 +13,7 @@ Battleplan persists an orchestration run on each `Project` as `graph_orchestrati
 - **Start:** Mindmap **play** (`|>`) on a task with children — runs that task and its descendants under orchestration.
 - **Stop / pause (run):** Mindmap toolbar **Stop Execution** and **Pause Execution** while a run is active.
 - **Pause (task):** Mindmap **pause** (`‖`) on child tasks (toggle per task; dimmed fill when paused).
-- **While running:** Ready tasks dispatch through `LocalEngine.executeTask` with graph-based upstream inputs. Completing or approving a task triggers the next wave when `status === 'running'`.
+- **While running:** Ready tasks dispatch through `LocalEngine.executeTask` with graph-based upstream inputs. Tasks that already have a Cursor agent are **re-executed** via a new run on the same chat, with `NO_HUMAN_REVIEW_GRILLING_INSTRUCTION` injected. Completing or approving a task triggers the next wave when `status === 'running'`.
 - **Pause task:** Excludes a task from dispatch without changing its mindmap status (orchestrator pause).
 - **Pause / resume run:** Halts or resumes automatic dispatch for the active run.
 - **Stop:** Ends the run; no further automatic dispatch until a new start.

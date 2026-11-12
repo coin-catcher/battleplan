@@ -57,6 +57,12 @@ describe('graph-orchestration', () => {
     expect(isOrchestrationDispatchCandidate(child, [root, child], edges, run)).toBe(true);
   });
 
+  it('allows re-execute candidates that already have a cursor agent', () => {
+    const a = task({ task_id: 'a', title: 'A', initial_prompt: 'go', cursor_agent_id: 'agent-1' });
+    const run = newGraphOrchestrationRun(undefined, 'run-1', '2020-01-01T00:00:00.000Z');
+    expect(isOrchestrationDispatchCandidate(a, [a], [], run)).toBe(true);
+  });
+
   it('dispatches ready parallel tasks respecting pause list', () => {
     const a = task({ task_id: 'a', title: 'A', initial_prompt: 'go' });
     const b = task({ task_id: 'b', title: 'B', initial_prompt: 'go' });
