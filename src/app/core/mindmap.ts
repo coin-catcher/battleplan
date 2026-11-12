@@ -8,6 +8,7 @@ import {
   siblingDependencyIds,
 } from './dependencies';
 import { mindmapNodeSize, mindmapShapeForTask } from './mindmap-shape';
+import { mindmapCanvasCenter, mindmapCanvasWorldSpan } from './project-ui-state';
 
 export type MindmapShape =
   | 'project'
@@ -178,9 +179,6 @@ export function mindmapNodesInWorldRect(nodes: MindmapNode[], rect: WorldRect): 
     .map((node) => node.id);
 }
 
-const WORLD_X = 1600;
-const WORLD_Y = 1200;
-
 export function layoutMindmap(
   title: string,
   tasks: ProjectTask[],
@@ -235,8 +233,10 @@ export function layoutMindmap(
     angleOf.set(task.task_id, index * 0.7);
   });
 
-  const projectX = projectPin?.x ?? WORLD_X;
-  const projectY = projectPin?.y ?? WORLD_Y;
+  const defaultCenter = mindmapCanvasCenter();
+  const projectX = projectPin?.x ?? defaultCenter.x;
+  const projectY = projectPin?.y ?? defaultCenter.y;
+  const minCanvasSpan = mindmapCanvasWorldSpan();
   const nodes: MindmapNode[] = [{
     id: 'project',
     kind: 'project',
@@ -268,12 +268,18 @@ export function layoutMindmap(
   }
   separateUnpinned(nodes, tasks);
 
-  let maxX = WORLD_X + 800;
-  let maxY = WORLD_Y + 600;
+  let maxX = projectX + 800;
+  let maxY = projectY + 600;
+  let minX = projectX - 800;
+  let minY = projectY - 600;
   for (const node of nodes) {
     maxX = Math.max(maxX, node.x + node.width / 2 + 80);
     maxY = Math.max(maxY, node.y + node.height / 2 + 80);
+    minX = Math.min(minX, node.x - node.width / 2 - 80);
+    minY = Math.min(minY, node.y - node.height / 2 - 80);
   }
+  const contentWidth = maxX - minX;
+  const contentHeight = maxY - minY;
 
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const project = nodeById.get('project');
@@ -310,8 +316,8 @@ export function layoutMindmap(
     }
   }
   return {
-    width: Math.max(WORLD_X * 2, maxX),
-    height: Math.max(WORLD_Y * 2, maxY),
+    width: Math.max(minCanvasSpan, contentWidth, maxX + 80),
+    height: Math.max(minCanvasSpan, contentHeight, maxY + 80),
     nodes,
     edges,
   };

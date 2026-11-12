@@ -229,6 +229,9 @@ export class AppComponent implements OnInit {
   releaseTargetBranchDraft = '';
   releaseBranchesLoading = false;
   releaseBranchLoadError = '';
+  pendingBranchOptions: string[] = [];
+  pendingBranchesLoading = false;
+  private pendingBranchesLoadSignature = '';
   readonly selectedMindmapLink = signal<MindmapLinkRef | null>(null);
   readonly linkEndpointDrag = signal<{ link: MindmapLinkRef; end: 'from' | 'to'; x: number; y: number } | null>(null);
   readonly mindmapLinkKey = linkKey;
@@ -323,6 +326,54 @@ export class AppComponent implements OnInit {
       if (projectId === this.mapGroupProjectId) return;
       this.mapGroupProjectId = projectId;
       this.clearMapGroupSelection();
+    });
+
+    effect(() => {
+      const project = this.store.project();
+      const projectId = project?.project_id ?? '';
+      const repo = project?.repo_url?.trim() ?? '';
+      const pat = project?.github_pat?.trim() ?? '';
+      const canList = Boolean(projectId && repo && pat);
+      if (project) {
+        this.pendingBranchOptions = this.ensureBranchInList(this.pendingBranchOptions, [
+          releaseSourceBranch(project),
+          releaseTargetBranch(project),
+        ]);
+      }
+      if (!canList) {
+        this.pendingBranchesLoading = false;
+        this.pendingBranchesLoadSignature = '';
+        if (!projectId) this.pendingBranchOptions = [];
+        return;
+      }
+      const loadSignature = `${projectId}:${repo}:${pat}`;
+      if (loadSignature === this.pendingBranchesLoadSignature) return;
+      this.pendingBranchesLoadSignature = loadSignature;
+      this.pendingBranchOptions = [];
+      const loadId = projectId;
+      this.pendingBranchesLoading = true;
+      void this.store.loadReleaseBranchOptions(loadId)
+        .then((branches) => {
+          if (this.pendingBranchesLoadSignature !== loadSignature) return;
+          const current = this.store.project();
+          if (!current) return;
+          this.pendingBranchOptions = this.ensureBranchInList(branches, [
+            releaseSourceBranch(current),
+            releaseTargetBranch(current),
+          ]);
+        })
+        .catch(() => {
+          if (this.pendingBranchesLoadSignature !== loadSignature) return;
+          const current = this.store.project();
+          if (!current) return;
+          this.pendingBranchOptions = this.ensureBranchInList([], [
+            releaseSourceBranch(current),
+            releaseTargetBranch(current),
+          ]);
+        })
+        .finally(() => {
+          if (this.pendingBranchesLoadSignature === loadSignature) this.pendingBranchesLoading = false;
+        });
     });
 
     effect(() => {
@@ -867,6 +918,38 @@ export class AppComponent implements OnInit {
       if (name.trim()) merged.add(name.trim());
     }
     return [...merged].sort((left, right) => left.localeCompare(right));
+  }
+
+  canConfigurePendingBranches(): boolean {
+    const project = this.store.project();
+    return Boolean(project?.repo_url?.trim() && project?.github_pat?.trim());
+  }
+
+  pendingSourceBranchName(): string {
+    const project = this.store.project();
+    return project ? releaseSourceBranch(project) : '';
+  }
+
+  pendingTargetBranchName(): string {
+    const project = this.store.project();
+    return project ? releaseTargetBranch(project) : '';
+  }
+
+  pendingChangesEmptyLabel(): string {
+    if (!this.canConfigurePendingBranches()) {
+      return 'Add a repo URL and GitHub token to sync pending changes.';
+    }
+    return `No commits on ${this.pendingSourceBranchName()} ahead of ${this.pendingTargetBranchName()}.`;
+  }
+
+  onPendingSourceBranchChange(branch: string): void {
+    if (branch === this.pendingSourceBranchName()) return;
+    void this.store.updateReleaseBranchRefs(branch, this.pendingTargetBranchName());
+  }
+
+  onPendingTargetBranchChange(branch: string): void {
+    if (branch === this.pendingTargetBranchName()) return;
+    void this.store.updateReleaseBranchRefs(this.pendingSourceBranchName(), branch);
   }
 
   startResize(event: PointerEvent): void {

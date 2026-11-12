@@ -11,14 +11,27 @@ export interface ProjectWorkspaceUiState {
   mindmap_origin_y: number;
 }
 
-const MIN_ZOOM = 0.35;
+/** 0.01 ⇒ 100 world px render as 1 screen px (100× zoom out from 1:1). */
+export const MIN_MINDMAP_ZOOM = 0.01;
+/** Reference viewport edge length when sizing the mindmap world canvas. */
+export const MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX = 1024;
 const MAX_ZOOM = 2.5;
 const MIN_PANE = 280;
 const MAX_PANE = 720;
 
 export function clampMindmapZoom(value: number): number {
   if (!Number.isFinite(value)) return 1;
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+  return Math.min(MAX_ZOOM, Math.max(MIN_MINDMAP_ZOOM, value));
+}
+
+/** World-space width/height so at {@link MIN_MINDMAP_ZOOM} the canvas fills the reference viewport. */
+export function mindmapCanvasWorldSpan(): number {
+  return Math.ceil(MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX / MIN_MINDMAP_ZOOM);
+}
+
+export function mindmapCanvasCenter(): { x: number; y: number } {
+  const span = mindmapCanvasWorldSpan();
+  return { x: span / 2, y: span / 2 };
 }
 
 export function clampPaneWidth(value: number): number {
