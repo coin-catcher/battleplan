@@ -17,10 +17,10 @@ import {
   appendPendingChangeRows,
   DEFAULT_DEVELOP_BRANCH,
   DEFAULT_MAIN_BRANCH,
+  buildPendingChangesFromCommits,
   projectRepoSlug,
   releaseSourceBranch,
   releaseTargetBranch,
-  syncPendingChangesForProject,
 } from '../core/pending-changes';
 import { parseReleaseVersionBranch, VERSION_BUMP_AGENT_MESSAGE } from '../core/release-version';
 import type { GithubCompareCommit } from '../core/github-client';
@@ -36,6 +36,8 @@ import {
   compareBranches,
   createAndMergePullRequest,
   createPullRequest,
+  fetchCommitsAheadOfBase,
+  fetchGithubPullRequest,
   isGithubMergeConflictError,
   listGithubBranches,
   listPullCommits,
@@ -112,11 +114,14 @@ import {
 import { graphEdgesForRun } from '../core/task-ready';
 import {
   appendOrchestrationTransition,
+  healOrchestrationRunForControl,
   isOrchestrationRunActive,
   isOrchestrationRunComplete,
   newGraphOrchestrationRun,
   orchestrationDispatchBatch,
+  orchestrationRunAcceptsControl,
   reconcileRunningTasks,
+  type GraphOrchestrationRunState,
 } from '../core/graph-orchestration';
 import {
   applyGraphEdgesToLegacyFields,
@@ -1035,12 +1040,22 @@ export class LocalEngine {
     current: PendingChange[];
   }): Promise<PendingChange[]> {
     const project = await this.requireProject(projectId);
-    return syncPendingChangesForProject({
-      project,
+    const slug = projectRepoSlug(project);
+    if (!slug) return [];
+    const token = project.github_pat?.trim();
+    const source = releaseSourceBranch(project);
+    const target = releaseTargetBranch(project);
+    const commits = await fetchCommitsAheadOfBase(slug.owner, slug.repo, target, source, token);
+    if (commits.length === 0) return [];
+    const { owner, repo } = slug;
+    return buildPendingChangesFromCommits({
+      owner,
+      repo,
+      commits,
       tasks: input.tasks,
       codeOutputs: input.codeOutputs,
       researchOutputs: input.researchOutputs,
-      current: input.current,
+      loadPull: (number) => fetchGithubPullRequest(owner, repo, number, token),
     });
   }
 
@@ -1204,10 +1219,13 @@ export class LocalEngine {
       }
       await this.importReferencedRuns({ scope: 'task', projectId: task.project_id, taskId });
     }
-    const updated = await this.repo.getTask(taskId);
+    const messages = await this.repo.listTaskMessages(taskId);
+    let updated = await this.repo.getTask(taskId);
+    if (!updated) updated = task;
+    updated = await this.reconcileTaskStatusWithLatestAgentRun(updated, messages);
     return {
-      messages: await this.repo.listTaskMessages(taskId),
-      task: updated ?? task,
+      messages,
+      task: updated,
       artifacts: await this.repo.listArtifacts('task', taskId),
     };
   }
@@ -1263,10 +1281,8 @@ export class LocalEngine {
   }
 
   async stopGraphOrchestration(projectId: string): Promise<Project> {
-    const project = await this.requireProject(projectId);
-    const run = project.graph_orchestration;
-    if (!isOrchestrationRunActive(run)) throw new Error('No task graph is executing.');
-    let next = appendOrchestrationTransition(run!, 'stop', {});
+    const { project, run } = await this.resolveOrchestrationRunForControl(projectId);
+    let next = appendOrchestrationTransition(run, 'stop', {});
     next = { ...next, status: 'stopped', updated_at: this.now() };
     project.graph_orchestration = next;
     project.updated_at = this.now();
@@ -1275,9 +1291,8 @@ export class LocalEngine {
   }
 
   async pauseGraphOrchestration(projectId: string): Promise<Project> {
-    const project = await this.requireProject(projectId);
-    const run = project.graph_orchestration;
-    if (run?.status !== 'running') throw new Error('Task graph orchestration is not running.');
+    const { project, run } = await this.resolveOrchestrationRunForControl(projectId);
+    if (run.status !== 'running') throw new Error('Task graph orchestration is not running.');
     let next = appendOrchestrationTransition(run, 'pause_run', {});
     next = { ...next, status: 'paused', updated_at: this.now() };
     project.graph_orchestration = next;
@@ -1301,13 +1316,11 @@ export class LocalEngine {
 
   async pauseOrchestrationTask(projectId: string, taskId: string): Promise<Project> {
     await this.requireTask(projectId, taskId);
-    const project = await this.requireProject(projectId);
-    const run = project.graph_orchestration;
-    if (!isOrchestrationRunActive(run)) throw new Error('Start task graph orchestration before pausing tasks.');
-    const paused = new Set(run!.paused_task_ids);
+    const { project, run } = await this.resolveOrchestrationRunForControl(projectId);
+    const paused = new Set(run.paused_task_ids);
     paused.add(taskId);
     let next: typeof run = {
-      ...run!,
+      ...run,
       paused_task_ids: [...paused],
       updated_at: this.now(),
     };
@@ -1320,12 +1333,10 @@ export class LocalEngine {
 
   async resumeOrchestrationTask(projectId: string, taskId: string): Promise<Project> {
     await this.requireTask(projectId, taskId);
-    const project = await this.requireProject(projectId);
-    const run = project.graph_orchestration;
-    if (!isOrchestrationRunActive(run)) throw new Error('Start task graph orchestration before resuming tasks.');
+    const { project, run } = await this.resolveOrchestrationRunForControl(projectId);
     let next: typeof run = {
-      ...run!,
-      paused_task_ids: run!.paused_task_ids.filter((id) => id !== taskId),
+      ...run,
+      paused_task_ids: run.paused_task_ids.filter((id) => id !== taskId),
       updated_at: this.now(),
     };
     next = appendOrchestrationTransition(next, 'resume_task', { to_task_id: taskId });
@@ -1334,6 +1345,28 @@ export class LocalEngine {
     await this.repo.saveProject(project);
     if (next.status === 'running') await this.advanceGraphOrchestration(projectId);
     return this.requireProject(projectId);
+  }
+
+  private async resolveOrchestrationRunForControl(
+    projectId: string,
+  ): Promise<{ project: Project; run: GraphOrchestrationRunState }> {
+    let project = await this.requireProject(projectId);
+    let run = project.graph_orchestration;
+    if (!run) throw new Error('No task graph is executing.');
+    const tasks = await this.listTasks(projectId);
+    if (!orchestrationRunAcceptsControl(run, tasks)) {
+      throw new Error('No task graph is executing.');
+    }
+    const healed = healOrchestrationRunForControl(run, tasks);
+    if (healed.status !== run.status) {
+      project = { ...project, graph_orchestration: { ...healed, updated_at: this.now() } };
+      project.updated_at = this.now();
+      await this.repo.saveProject(project);
+      run = project.graph_orchestration!;
+    } else {
+      run = healed;
+    }
+    return { project, run };
   }
 
   async reconcileGraphOrchestration(projectId: string): Promise<Project> {
@@ -1448,6 +1481,7 @@ export class LocalEngine {
       objectivesReminder: taskInitialPrompt(task) || undefined,
     });
     this.markTaskDoingOnAgentChat(task);
+    await this.repo.saveTask(task);
     const run = await this.cursor.createRun(task.cursor_agent_id, {
       text: wrapAgentRunPrompt(body, { baseBranch: base, agentBranch: output?.branch }),
       mode: 'agent',
@@ -1500,6 +1534,7 @@ export class LocalEngine {
     const active = await this.requireTaskById(taskId);
     if (!active.cursor_agent_id) throw new Error('Start the task before sending feedback.');
     this.markTaskDoingOnAgentChat(active);
+    await this.repo.saveTask(active);
     const output = active.output_type === 'code'
       ? await this.repo.getCodeOutput(taskId)
       : await this.repo.getResearchOutput(taskId);
@@ -1666,9 +1701,17 @@ export class LocalEngine {
 
   async listProjectRepoBranches(projectId: string): Promise<string[]> {
     const project = await this.requireProject(projectId);
-    const token = requireProjectGithubPat(project);
+    const token = project.github_pat?.trim();
     const { owner, repo } = repoSlugFromProject(project);
-    return listGithubBranches(owner, repo, token);
+    const configured = [releaseSourceBranch(project), releaseTargetBranch(project)]
+      .filter((name, index, list) => name && list.indexOf(name) === index);
+    if (!token) return configured;
+    try {
+      const listed = await listGithubBranches(owner, repo, token);
+      return [...new Set([...listed, ...configured])].sort((left, right) => left.localeCompare(right));
+    } catch {
+      return configured;
+    }
   }
 
   async executeReleaseProjectChanges(projectId: string): Promise<ChatMessage> {
@@ -1778,10 +1821,11 @@ export class LocalEngine {
     const content = text.trim();
     if (!content) throw new Error('message is required.');
     if (!project.cursor_agent_id) throw new Error('This project is not linked to a Cursor agent.');
+    await this.markProjectDoingOnAgentChat(project);
+    await this.repo.saveProject(project);
     const run = await this.cursor.createRun(project.cursor_agent_id, { text: content, mode: 'plan' });
     project.latest_run_id = run.id;
     project.updated_at = this.now();
-    await this.markProjectDoingOnAgentChat(project);
     await this.repo.saveProject(project);
     const message = await this.record({
       scope: 'project',
@@ -2145,6 +2189,61 @@ export class LocalEngine {
     await this.repo.savePendingChanges(projectId, appendPendingChangeRows(current, rows));
   }
 
+  /**
+   * Align persisted task workflow status with the live Cursor run for latest_run_id
+   * (AgentCommunications polls via listTaskMessages).
+   */
+  private async reconcileTaskStatusWithLatestAgentRun(
+    task: ProjectTask,
+    messages: ChatMessage[],
+  ): Promise<ProjectTask> {
+    if (task.output_type === 'subproject' || !task.cursor_agent_id || !task.latest_run_id) return task;
+    if (task.status === 'DONE' || task.status === 'ABANDONED') return task;
+    if (task.status === 'DOING' && task.pending_action === 'merge') return task;
+    const userRun = messages.some(
+      (message) => message.scope === 'task'
+        && message.task_id === task.task_id
+        && message.role === 'user'
+        && message.run_id === task.latest_run_id,
+    );
+    if (!userRun) return task;
+    let run: CursorRun;
+    try {
+      run = await this.cursor.getRun(task.cursor_agent_id, task.latest_run_id);
+    } catch {
+      return task;
+    }
+    const assistant = messages.find(
+      (message) => message.role === 'assistant'
+        && message.run_id === task.latest_run_id
+        && message.scope === 'task'
+        && message.task_id === task.task_id,
+    );
+    const assistantText = assistant?.content ?? await this.assistantText(task.cursor_agent_id, run);
+    const terminalReply = isWorkflowTerminalAgentReply(assistantText, run);
+    if (!TERMINAL_RUN.has(run.status)) {
+      if (task.status !== 'DOING') {
+        try {
+          applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
+        } catch {
+          applyTaskStatusTransition(task, 'DOING', 'manual');
+        }
+        task.updated_at = this.now();
+        await this.repo.saveTask(task);
+      }
+      return task;
+    }
+    if (!terminalReply) {
+      if (task.status === 'REVIEW') {
+        applyTaskStatusTransition(task, 'DOING', 'manual');
+        task.updated_at = this.now();
+        await this.repo.saveTask(task);
+      }
+      return task;
+    }
+    return task;
+  }
+
   private markTaskDoingOnAgentChat(task: ProjectTask): void {
     if (task.status === 'DONE' || task.status === 'ABANDONED' || task.status === 'DOING') return;
     try {
@@ -2215,6 +2314,7 @@ export class LocalEngine {
       return;
     }
     this.markTaskDoingOnAgentChat(task);
+    await this.repo.saveTask(task);
     const run = await this.cursor.createRun(task.cursor_agent_id, {
       text: wrapAgentRunPrompt(instructions, { baseBranch, agentBranch }),
       mode: 'agent',

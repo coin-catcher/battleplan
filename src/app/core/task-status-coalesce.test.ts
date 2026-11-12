@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectTask } from './models';
-import { coalesceCachedTaskStatus, cloneProjectTask } from './task-status-coalesce';
+import {
+  coalesceCachedTaskStatus,
+  cloneProjectTask,
+  shouldCoalesceInboundTaskStatus,
+  taskChatAwaitingWorkflowReply,
+} from './task-status-coalesce';
+import type { ChatMessage } from './models';
 
 function task(overrides: Partial<ProjectTask> = {}): ProjectTask {
   return {
@@ -31,6 +37,42 @@ describe('task-status-coalesce', () => {
     const live = task({ status: 'DOING', cursor_agent_id: 'a1' });
     const cached = task({ status: 'DONE' });
     expect(coalesceCachedTaskStatus(live, cached, false).status).toBe('DONE');
+  });
+
+  it('detects unanswered workflow reply on latest run', () => {
+    const messages: ChatMessage[] = [
+      {
+        message_id: 'u1',
+        scope: 'task',
+        project_id: 'p1',
+        task_id: 't1',
+        role: 'user',
+        content: 'go',
+        run_id: 'r1',
+        intent: 'feedback',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+    expect(taskChatAwaitingWorkflowReply(messages, 't1', 'r1')).toBe(true);
+  });
+
+  it('coalesces when awaiting workflow reply even before background poll registers', () => {
+    const live = task({ status: 'DOING', cursor_agent_id: 'a1', latest_run_id: 'r1' });
+    const inbound = task({ status: 'REVIEW' });
+    const messages: ChatMessage[] = [
+      {
+        message_id: 'u1',
+        scope: 'task',
+        project_id: 'p1',
+        task_id: 't1',
+        role: 'user',
+        content: 'go',
+        run_id: 'r1',
+        intent: 'feedback',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+    expect(shouldCoalesceInboundTaskStatus(live, inbound, messages, false)).toBe(true);
   });
 
   it('cloneProjectTask copies dependency arrays', () => {

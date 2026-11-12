@@ -122,6 +122,43 @@ describe('LocalEngine', () => {
     expect(repo.projects.size).toBe(1);
   });
 
+  it('syncs pending changes from a public repo without a project GitHub token', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/compare/main...develop')) {
+        return new Response(JSON.stringify({
+          ahead_by: 1,
+          total_commits: 1,
+          commits: [{
+            sha: 'abc123',
+            html_url: 'https://github.com/coin-catcher/battleplan/commit/abc123',
+            commit: { message: 'feat: visible on develop' },
+          }],
+        }), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    }));
+    const repo = new MemoryRepository();
+    const engine = new LocalEngine(repo, cursor(), () => '2026-11-12T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      repo_url: 'https://github.com/coin-catcher/battleplan',
+      created_at: '2026-11-12T00:00:00.000Z',
+      updated_at: '2026-11-12T00:00:00.000Z',
+    });
+    const rows = await engine.syncPendingChanges('p1', {
+      tasks: [],
+      codeOutputs: {},
+      researchOutputs: {},
+      current: [],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.change_id).toBe('abc123');
+    vi.unstubAllGlobals();
+  });
+
   it('imports assistant text from a finished run when listRuns omits the result', async () => {
     const repo = new MemoryRepository();
     const client = cursor();
@@ -517,6 +554,71 @@ describe('LocalEngine', () => {
     expect(linked?.cursor_agent_id).toBe('agent-1');
     expect(linked?.status).toBe('DOING');
     await expect(engine.sendTaskMessage('task-disc', 'approve 1')).resolves.toBeDefined();
+  });
+
+  it('persists DOING before createRun returns', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    client.createRun = async () => {
+      const row = await repo.getTask('task-work');
+      expect(row?.status).toBe('DOING');
+      return { id: 'run-2', agentId: 'agent-task', status: 'RUNNING' };
+    };
+    const engine = new LocalEngine(repo, client, () => '2026-10-02T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      cursor_agent_id: 'agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const task = await engine.createTask('p1', {
+      title: 'Work',
+      output_type: 'code',
+      initial_prompt: 'Go',
+    });
+    task.task_id = 'task-work';
+    task.cursor_agent_id = 'agent-task';
+    task.status = 'REVIEW';
+    await repo.saveTask(task);
+    await engine.sendTaskMessage(task.task_id, 'Keep going');
+    expect((await repo.getTask(task.task_id))?.status).toBe('DOING');
+  });
+
+  it('keeps task DOING while latest Cursor run is still running', async () => {
+    const repo = new MemoryRepository();
+    const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      cursor_agent_id: 'agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const task = await engine.createTask('p1', { title: 'Work', output_type: 'code', initial_prompt: 'Go' });
+    task.cursor_agent_id = 'agent-task';
+    task.status = 'REVIEW';
+    task.latest_run_id = 'run-live';
+    await repo.saveTask(task);
+    await repo.saveMessage({
+      message_id: 'm-user',
+      scope: 'task',
+      project_id: 'p1',
+      task_id: task.task_id,
+      role: 'user',
+      content: 'go',
+      run_id: 'run-live',
+      intent: 'feedback',
+      created_at: '2026-10-02T00:00:00.000Z',
+    });
+    const page = await engine.listTaskMessages(task.task_id);
+    expect(page.task.status).toBe('DOING');
   });
 
   it('marks a task DOING when chat feedback is sent', async () => {

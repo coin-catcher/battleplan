@@ -75,11 +75,12 @@ import { MERGE_CONFLICT_AGENT_RECOVERY_SENTINEL } from '../core/github-client';
 import {
   cloneProjectTask,
   coalesceCachedTaskStatus,
+  shouldCoalesceInboundTaskStatus,
   taskBackgroundPollActive,
 } from '../core/task-status-coalesce';
 import type { MindmapViewState, ProjectWorkspaceUiState } from '../core/project-ui-state';
 import type { MindmapLinkRef } from '../core/link-relocation';
-import { projectWorkspaceUiFromMindmap } from '../core/project-ui-state';
+import { mindmapViewFromProjectUiState, projectWorkspaceUiFromMindmap } from '../core/project-ui-state';
 import { isWorkflowTerminalAgentReply } from '../core/agent-run-response';
 import { AgentCommunicationsService } from './agent-communications.service';
 import {
@@ -144,6 +145,10 @@ export class BattleplanStore {
         if (this.watchingTaskChat(result.task.task_id, this.selection())) {
           void this.refreshOutput(result.task);
         }
+        const orchestration = this.project()?.graph_orchestration;
+        if (orchestration?.status && orchestration.status !== 'idle') {
+          void this.refreshOrchestrationUiState();
+        }
       },
       onProjectConversation: (page) => this.applyConversation(page),
       onSubprojectTaskBundle: (taskId, page, task) => this.cacheSubprojectTaskChat(taskId, page, task),
@@ -167,7 +172,13 @@ export class BattleplanStore {
   readonly editorLoading = signal(false);
   readonly chatAgentSyncing = signal(false);
   readonly chatActionPending = signal<'send' | 'execute' | 'merge' | null>(null);
-  readonly pendingChanges = signal<PendingChange[]>([]);
+  private readonly pendingChangesByProject = signal<Record<string, PendingChange[]>>({});
+  private readonly pendingSyncGeneration = new Map<string, number>();
+  readonly pendingChanges = computed(() => {
+    const projectId = this.projectId();
+    if (!projectId) return [];
+    return this.pendingChangesByProject()[projectId] ?? [];
+  });
   readonly agents = signal<ProjectAgent[]>([]);
   readonly openTabs = signal<string[]>([]);
   readonly taskPanelErrors = signal<Record<string, TaskPanelErrorState>>({});
@@ -381,6 +392,7 @@ export class BattleplanStore {
   private foregroundWatchGeneration = 0;
   private editorLoadGeneration = 0;
   private panelRefreshGeneration = 0;
+  private orchestrationRefreshGeneration = 0;
   private foregroundWatchTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly tabSnapshots = new Map<string, ProjectTabSnapshot>();
   private readonly taskChatCache = new Map<string, { messages: ChatMessage[]; artifacts: ChatArtifact[]; task: ProjectTask }>();
@@ -414,6 +426,8 @@ export class BattleplanStore {
   }
 
   snapshotWorkspace(workspace: ProjectWorkspaceSnapshot): ProjectTabSnapshot {
+    const projectId = this.projectId();
+    const pending = projectId ? (this.pendingChangesByProject()[projectId] ?? []) : [];
     return {
       selection: this.selection(),
       tasks: this.tasks(),
@@ -422,13 +436,13 @@ export class BattleplanStore {
       agents: this.agents(),
       codeOutputs: this.codeOutputs(),
       researchOutputs: this.researchOutputs(),
-      pendingChanges: this.pendingChanges(),
+      pendingChanges: pending,
       paneWidth: workspace.paneWidth,
       mindmapView: workspace.mindmapView,
     };
   }
 
-  restoreWorkspace(snapshot: ProjectTabSnapshot): void {
+  restoreWorkspace(projectId: string, snapshot: ProjectTabSnapshot): void {
     this.selection.set(snapshot.selection);
     this.tasks.set(snapshot.tasks);
     this.messages.set(snapshot.messages);
@@ -436,7 +450,15 @@ export class BattleplanStore {
     this.agents.set(snapshot.agents ?? []);
     this.codeOutputs.set(snapshot.codeOutputs);
     this.researchOutputs.set(snapshot.researchOutputs);
-    this.pendingChanges.set(snapshot.pendingChanges);
+    this.setPendingChangesForProject(projectId, snapshot.pendingChanges);
+  }
+
+  private setPendingChangesForProject(projectId: string, rows: PendingChange[]): void {
+    this.pendingChangesByProject.update((cache) => ({ ...cache, [projectId]: rows }));
+    const snapshot = this.tabSnapshots.get(projectId);
+    if (snapshot) {
+      this.tabSnapshots.set(projectId, { ...snapshot, pendingChanges: rows });
+    }
   }
 
   async openProjectTab(projectId: string, workspace: ProjectWorkspaceSnapshot): Promise<ProjectTabRestore> {
@@ -452,7 +474,7 @@ export class BattleplanStore {
       this.stopWatch();
       this.projectId.set(projectId);
       await this.preferences.setCurrentProjectId(projectId);
-      this.restoreWorkspace(cached);
+      this.restoreWorkspace(projectId, cached);
       await this.run(async () => {
         await this.recoverGraphOrchestrationForProject(projectId);
       });
@@ -464,14 +486,8 @@ export class BattleplanStore {
     }
     const persisted = await this.api.getProjectUiState(projectId);
     const paneWidth = persisted?.pane_width ?? workspace.paneWidth;
-    const mindmapView = persisted
-      ? {
-        zoom: persisted.mindmap_zoom,
-        origin_x: persisted.mindmap_origin_x,
-        origin_y: persisted.mindmap_origin_y,
-      }
-      : null;
-    await this.selectProject(projectId);
+    const mindmapView = persisted ? mindmapViewFromProjectUiState(persisted) : null;
+    await this.selectProject(projectId, { mindmapView });
     this.tabSnapshots.set(projectId, this.snapshotWorkspace({ paneWidth, mindmapView }));
     await this.persistOpenSession();
     return { paneWidth, mindmapView };
@@ -495,7 +511,10 @@ export class BattleplanStore {
     await this.preferences.saveOpenSession(this.openTabs(), this.projectId());
   }
 
-  async selectProject(projectId: string): Promise<void> {
+  async selectProject(
+    projectId: string,
+    options?: { mindmapView?: MindmapViewState | null },
+  ): Promise<MindmapViewState | null> {
     await this.withEditorLoading(async () => {
       this.stopWatch();
       this.projectId.set(projectId);
@@ -513,31 +532,42 @@ export class BattleplanStore {
       this.continueProjectWatch(projectId);
       await this.persistOpenSession();
     });
+    if (options?.mindmapView !== undefined) {
+      return options.mindmapView;
+    }
+    const persisted = await this.api.getProjectUiState(projectId);
+    return persisted ? mindmapViewFromProjectUiState(persisted) : null;
   }
 
   async refreshPendingChanges(): Promise<void> {
     const projectId = this.projectId();
     const project = this.project();
-    if (!projectId || !project) {
-      this.pendingChanges.set([]);
+    if (!projectId || !project) return;
+    if (!project.repo_url?.trim()) {
+      this.setPendingChangesForProject(projectId, []);
       return;
     }
-    if (!project.repo_url?.trim() || !project.github_pat?.trim()) {
-      this.pendingChanges.set(await this.api.listPendingChanges(projectId));
-      return;
-    }
+    const generation = (this.pendingSyncGeneration.get(projectId) ?? 0) + 1;
+    this.pendingSyncGeneration.set(projectId, generation);
+    const isCurrentSync = (): boolean => (this.pendingSyncGeneration.get(projectId) ?? 0) === generation;
+    const tasksSnapshot = this.tasks();
+    const codeOutputsSnapshot = { ...this.codeOutputs() };
+    const researchOutputsSnapshot = { ...this.researchOutputs() };
     try {
       const current = await this.api.listPendingChanges(projectId);
+      if (!isCurrentSync()) return;
       const synced = await this.api.syncPendingChanges(projectId, {
-        tasks: this.tasks(),
-        codeOutputs: this.codeOutputs(),
-        researchOutputs: this.researchOutputs(),
+        tasks: tasksSnapshot.filter((task) => task.project_id === projectId),
+        codeOutputs: codeOutputsSnapshot,
+        researchOutputs: researchOutputsSnapshot,
         current,
       });
+      if (!isCurrentSync()) return;
       await this.api.savePendingChanges(projectId, synced);
-      this.pendingChanges.set(synced);
+      this.setPendingChangesForProject(projectId, synced);
     } catch {
-      this.pendingChanges.set(await this.api.listPendingChanges(projectId));
+      if (!isCurrentSync()) return;
+      this.setPendingChangesForProject(projectId, await this.api.listPendingChanges(projectId));
     }
   }
 
@@ -1677,7 +1707,6 @@ export class BattleplanStore {
     const taskId = task.task_id;
     const statusBeforeExecute = task.status;
     this.patchTaskStatus(taskId, 'DOING');
-    this.syncDoingBackgroundWatches();
     let runId: string | undefined;
     await this.run(async () => {
       const sent = await this.api.executeTask(taskId);
@@ -1766,8 +1795,10 @@ export class BattleplanStore {
     const projectId = this.projectId();
     if (!projectId) return;
     await this.run(async () => {
+      await this.refreshOrchestrationUiState();
       const project = await this.api.stopGraphOrchestration(projectId);
       this.applyProject(project);
+      await this.reloadTasks();
       this.notice.set('Task graph orchestration stopped.');
     });
   }
@@ -1843,7 +1874,6 @@ export class BattleplanStore {
     }
     this.clearTaskPanelError(taskId);
     this.patchTaskStatus(taskId, 'DOING');
-    this.syncDoingBackgroundWatches();
     let runId: string | undefined;
     let watchProjectId: string | undefined;
     await this.run(async () => {
@@ -2152,7 +2182,7 @@ export class BattleplanStore {
     try {
       const message = await this.api.executeReleaseProjectChanges(projectId);
       runId = message.run_id ?? undefined;
-      this.pendingChanges.set([]);
+      this.setPendingChangesForProject(projectId, []);
       const page = await this.api.listProjectMessages(projectId, { syncAgent: false });
       this.projects.update((projects) => projects.map((item) => (
         item.project_id === page.project?.project_id && page.project ? page.project : item
@@ -2315,8 +2345,22 @@ export class BattleplanStore {
 
   private applyTaskConversation(result: { messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }): void {
     const taskId = result.task.task_id;
-    const previous = this.tasks().find((item) => item.task_id === taskId)?.status;
-    const task = cloneProjectTask({ ...result.task, task_id: taskId });
+    const live = this.tasks().find((item) => item.task_id === taskId);
+    const previous = live?.status;
+    const subprojectAgentId = live?.subproject_id ? this.subprojectCursorAgentId(live.subproject_id) : undefined;
+    const inbound = cloneProjectTask({ ...result.task, task_id: taskId });
+    const backgroundPollActive = taskBackgroundPollActive(
+      live,
+      subprojectAgentId,
+      this.agentComms.isTaskPolling(taskId),
+    );
+    const pollActive = shouldCoalesceInboundTaskStatus(
+      live,
+      inbound,
+      result.messages,
+      backgroundPollActive,
+    );
+    const task = coalesceCachedTaskStatus(live, inbound, pollActive);
     this.cacheTaskConversation({ ...result, task });
     this.replaceTask(task);
     if (previous !== task.status) {
@@ -2386,11 +2430,33 @@ export class BattleplanStore {
     this.codeOutputs.set(code);
     this.researchOutputs.set(research);
     await this.refreshPendingChanges();
-    if (this.graphOrchestrationActive()) {
-      const fresh = (await this.api.listProjects()).find((item) => item.project_id === projectId);
-      if (fresh) this.applyProject(fresh);
+    const fresh = (await this.api.listProjects()).find((item) => item.project_id === projectId);
+    if (fresh) {
+      this.applyProject(fresh);
+      if (isOrchestrationRunActive(fresh.graph_orchestration)) this.ensureOrchestrationWatches(fresh);
     }
     this.syncDoingBackgroundWatches();
+  }
+
+  /** Reload tasks and orchestration run state after background agent sync (mindmap + watches). */
+  private async refreshOrchestrationUiState(): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    const generation = ++this.orchestrationRefreshGeneration;
+    try {
+      const tasks = await this.api.listTasks(projectId);
+      if (generation !== this.orchestrationRefreshGeneration) return;
+      this.tasks.set(tasks);
+      const fresh = (await this.api.listProjects()).find((item) => item.project_id === projectId);
+      if (generation !== this.orchestrationRefreshGeneration) return;
+      if (fresh) {
+        this.applyProject(fresh);
+        if (isOrchestrationRunActive(fresh.graph_orchestration)) this.ensureOrchestrationWatches(fresh);
+      }
+      this.syncDoingBackgroundWatches();
+    } catch {
+      // Transient failures should not break foreground polls.
+    }
   }
 
   private resumeWatchForSelection(): void {

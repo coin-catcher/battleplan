@@ -27,29 +27,6 @@ export interface CompareCommit {
   html_url?: string;
 }
 
-export async function fetchGithubPullRequest(
-  owner: string,
-  repo: string,
-  number: number,
-): Promise<GithubPullRequest | null> {
-  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${number}`, {
-    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'battleplan-desktop' },
-  });
-  if (!response.ok) return null;
-  const data = await response.json() as {
-    merged?: boolean;
-    base?: { ref?: string };
-    title?: string;
-    body?: string | null;
-  };
-  return {
-    merged: Boolean(data.merged),
-    baseRef: data.base?.ref ?? '',
-    title: data.title ?? '',
-    body: data.body ?? '',
-  };
-}
-
 export function releaseSourceBranch(project: Project): string {
   const explicit = project.release_source_ref?.trim();
   if (explicit) return explicit;
@@ -60,42 +37,6 @@ export function releaseSourceBranch(project: Project): string {
 
 export function releaseTargetBranch(project: Project): string {
   return project.release_target_ref?.trim() || DEFAULT_MAIN_BRANCH;
-}
-
-/** Commits on `sourceBranch` that are not on `targetBranch` (GitHub compare target…source). */
-export async function fetchCommitsOnDevelopNotInMain(
-  owner: string,
-  repo: string,
-  targetBranch = DEFAULT_MAIN_BRANCH,
-  sourceBranch = DEFAULT_DEVELOP_BRANCH,
-): Promise<CompareCommit[]> {
-  const response = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/compare/${encodeURIComponent(targetBranch)}...${encodeURIComponent(sourceBranch)}`,
-    { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'battleplan-desktop' } },
-  );
-  if (response.status === 404) return [];
-  if (!response.ok) return [];
-  const data = await response.json() as {
-    ahead_by?: number;
-    commits?: Array<{ sha: string; html_url?: string; commit: { message: string } }>;
-  };
-  if ((data.ahead_by ?? 0) === 0) return [];
-  return (data.commits ?? []).map((item) => ({
-    sha: item.sha,
-    message: item.commit.message,
-    html_url: item.html_url,
-  }));
-}
-
-/** True when develop has no commits that main is missing (develop fully merged into main). */
-export async function isDevelopMergedIntoMain(
-  owner: string,
-  repo: string,
-  mainBranch = DEFAULT_MAIN_BRANCH,
-  developBranch = DEFAULT_DEVELOP_BRANCH,
-): Promise<boolean> {
-  const commits = await fetchCommitsOnDevelopNotInMain(owner, repo, mainBranch, developBranch);
-  return commits.length === 0;
 }
 
 export function pendingSummary(output: TaskCodeOutput | TaskResearchOutput, pull?: GithubPullRequest): string {
@@ -161,33 +102,29 @@ function firstLine(message: string): string {
   return message.split('\n')[0]?.trim() || 'Change';
 }
 
-export async function syncPendingChangesForProject(input: {
-  project: Project;
+export async function buildPendingChangesFromCommits(input: {
+  owner: string;
+  repo: string;
+  commits: CompareCommit[];
   tasks: ProjectTask[];
   codeOutputs: Record<string, TaskCodeOutput | null>;
   researchOutputs: Record<string, TaskResearchOutput | null>;
-  current: PendingChange[];
+  loadPull: (number: number) => Promise<GithubPullRequest | null>;
 }): Promise<PendingChange[]> {
-  const slug = projectRepoSlug(input.project);
-  if (!slug) return [];
-  const { owner, repo } = slug;
-
-  const targetBranch = releaseTargetBranch(input.project);
-  const sourceBranch = releaseSourceBranch(input.project);
-  const commits = await fetchCommitsOnDevelopNotInMain(owner, repo, targetBranch, sourceBranch);
-  if (commits.length === 0) return [];
+  if (input.commits.length === 0) return [];
 
   const taskByPull = buildTaskPullIndex(input.tasks, input.codeOutputs, input.researchOutputs);
   const pullCache = new Map<number, GithubPullRequest | null>();
   const next: PendingChange[] = [];
   const timestamp = new Date().toISOString();
+  const { owner, repo } = input;
 
-  for (const commit of commits) {
+  for (const commit of input.commits) {
     const prNumber = parseMergePullNumber(commit.message);
     let pull: GithubPullRequest | null = null;
     if (prNumber !== null) {
       if (!pullCache.has(prNumber)) {
-        pullCache.set(prNumber, await fetchGithubPullRequest(owner, repo, prNumber));
+        pullCache.set(prNumber, await input.loadPull(prNumber));
       }
       pull = pullCache.get(prNumber) ?? null;
     }
