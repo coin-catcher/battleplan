@@ -122,6 +122,43 @@ describe('LocalEngine', () => {
     expect(repo.projects.size).toBe(1);
   });
 
+  it('syncs pending changes from a public repo without a project GitHub token', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/compare/main...develop')) {
+        return new Response(JSON.stringify({
+          ahead_by: 1,
+          total_commits: 1,
+          commits: [{
+            sha: 'abc123',
+            html_url: 'https://github.com/coin-catcher/battleplan/commit/abc123',
+            commit: { message: 'feat: visible on develop' },
+          }],
+        }), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    }));
+    const repo = new MemoryRepository();
+    const engine = new LocalEngine(repo, cursor(), () => '2026-11-12T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      repo_url: 'https://github.com/coin-catcher/battleplan',
+      created_at: '2026-11-12T00:00:00.000Z',
+      updated_at: '2026-11-12T00:00:00.000Z',
+    });
+    const rows = await engine.syncPendingChanges('p1', {
+      tasks: [],
+      codeOutputs: {},
+      researchOutputs: {},
+      current: [],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.change_id).toBe('abc123');
+    vi.unstubAllGlobals();
+  });
+
   it('imports assistant text from a finished run when listRuns omits the result', async () => {
     const repo = new MemoryRepository();
     const client = cursor();

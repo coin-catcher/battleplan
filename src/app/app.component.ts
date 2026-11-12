@@ -333,8 +333,7 @@ export class AppComponent implements OnInit {
       const project = this.store.project();
       const projectId = project?.project_id ?? '';
       const repo = project?.repo_url?.trim() ?? '';
-      const pat = project?.github_pat?.trim() ?? '';
-      const canList = Boolean(projectId && repo && pat);
+      const canList = Boolean(projectId && repo);
       if (project) {
         this.pendingBranchOptions = this.ensureBranchInList(this.pendingBranchOptions, [
           releaseSourceBranch(project),
@@ -347,7 +346,7 @@ export class AppComponent implements OnInit {
         if (!projectId) this.pendingBranchOptions = [];
         return;
       }
-      const loadSignature = `${projectId}:${repo}:${pat}`;
+      const loadSignature = `${projectId}:${repo}:${project?.release_source_ref ?? ''}:${project?.release_target_ref ?? ''}:${project?.github_pat ?? ''}`;
       if (loadSignature === this.pendingBranchesLoadSignature) return;
       this.pendingBranchesLoadSignature = loadSignature;
       this.pendingBranchOptions = [];
@@ -875,8 +874,12 @@ export class AppComponent implements OnInit {
   releasePendingChanges(): void {
     const project = this.store.project();
     if (!project) return;
-    if (!project.repo_url?.trim() || !project.github_pat?.trim()) {
-      this.store.error.set('Add a repository URL and GitHub token on the project before releasing.');
+    if (!project.repo_url?.trim()) {
+      this.store.error.set('Add a repository URL on the project before releasing.');
+      return;
+    }
+    if (!project.github_pat?.trim()) {
+      this.store.error.set('Add a GitHub token on the project before releasing.');
       return;
     }
     this.releaseBranchLoadError = '';
@@ -922,8 +925,7 @@ export class AppComponent implements OnInit {
   }
 
   canConfigurePendingBranches(): boolean {
-    const project = this.store.project();
-    return Boolean(project?.repo_url?.trim() && project?.github_pat?.trim());
+    return Boolean(this.store.project()?.repo_url?.trim());
   }
 
   pendingSourceBranchName(): string {
@@ -938,7 +940,7 @@ export class AppComponent implements OnInit {
 
   pendingChangesEmptyLabel(): string {
     if (!this.canConfigurePendingBranches()) {
-      return 'Add a repo URL and GitHub token to sync pending changes.';
+      return 'Add a repository URL to sync pending changes from GitHub.';
     }
     return `No commits on ${this.pendingSourceBranchName()} ahead of ${this.pendingTargetBranchName()}.`;
   }

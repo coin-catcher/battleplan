@@ -172,7 +172,13 @@ export class BattleplanStore {
   readonly editorLoading = signal(false);
   readonly chatAgentSyncing = signal(false);
   readonly chatActionPending = signal<'send' | 'execute' | 'merge' | null>(null);
-  readonly pendingChanges = signal<PendingChange[]>([]);
+  private readonly pendingChangesByProject = signal<Record<string, PendingChange[]>>({});
+  private readonly pendingSyncGeneration = new Map<string, number>();
+  readonly pendingChanges = computed(() => {
+    const projectId = this.projectId();
+    if (!projectId) return [];
+    return this.pendingChangesByProject()[projectId] ?? [];
+  });
   readonly agents = signal<ProjectAgent[]>([]);
   readonly openTabs = signal<string[]>([]);
   readonly taskPanelErrors = signal<Record<string, TaskPanelErrorState>>({});
@@ -420,6 +426,8 @@ export class BattleplanStore {
   }
 
   snapshotWorkspace(workspace: ProjectWorkspaceSnapshot): ProjectTabSnapshot {
+    const projectId = this.projectId();
+    const pending = projectId ? (this.pendingChangesByProject()[projectId] ?? []) : [];
     return {
       selection: this.selection(),
       tasks: this.tasks(),
@@ -428,13 +436,13 @@ export class BattleplanStore {
       agents: this.agents(),
       codeOutputs: this.codeOutputs(),
       researchOutputs: this.researchOutputs(),
-      pendingChanges: this.pendingChanges(),
+      pendingChanges: pending,
       paneWidth: workspace.paneWidth,
       mindmapView: workspace.mindmapView,
     };
   }
 
-  restoreWorkspace(snapshot: ProjectTabSnapshot): void {
+  restoreWorkspace(projectId: string, snapshot: ProjectTabSnapshot): void {
     this.selection.set(snapshot.selection);
     this.tasks.set(snapshot.tasks);
     this.messages.set(snapshot.messages);
@@ -442,7 +450,15 @@ export class BattleplanStore {
     this.agents.set(snapshot.agents ?? []);
     this.codeOutputs.set(snapshot.codeOutputs);
     this.researchOutputs.set(snapshot.researchOutputs);
-    this.pendingChanges.set(snapshot.pendingChanges);
+    this.setPendingChangesForProject(projectId, snapshot.pendingChanges);
+  }
+
+  private setPendingChangesForProject(projectId: string, rows: PendingChange[]): void {
+    this.pendingChangesByProject.update((cache) => ({ ...cache, [projectId]: rows }));
+    const snapshot = this.tabSnapshots.get(projectId);
+    if (snapshot) {
+      this.tabSnapshots.set(projectId, { ...snapshot, pendingChanges: rows });
+    }
   }
 
   async openProjectTab(projectId: string, workspace: ProjectWorkspaceSnapshot): Promise<ProjectTabRestore> {
@@ -458,7 +474,7 @@ export class BattleplanStore {
       this.stopWatch();
       this.projectId.set(projectId);
       await this.preferences.setCurrentProjectId(projectId);
-      this.restoreWorkspace(cached);
+      this.restoreWorkspace(projectId, cached);
       await this.run(async () => {
         await this.recoverGraphOrchestrationForProject(projectId);
       });
@@ -526,26 +542,32 @@ export class BattleplanStore {
   async refreshPendingChanges(): Promise<void> {
     const projectId = this.projectId();
     const project = this.project();
-    if (!projectId || !project) {
-      this.pendingChanges.set([]);
+    if (!projectId || !project) return;
+    if (!project.repo_url?.trim()) {
+      this.setPendingChangesForProject(projectId, []);
       return;
     }
-    if (!project.repo_url?.trim() || !project.github_pat?.trim()) {
-      this.pendingChanges.set(await this.api.listPendingChanges(projectId));
-      return;
-    }
+    const generation = (this.pendingSyncGeneration.get(projectId) ?? 0) + 1;
+    this.pendingSyncGeneration.set(projectId, generation);
+    const isCurrentSync = (): boolean => (this.pendingSyncGeneration.get(projectId) ?? 0) === generation;
+    const tasksSnapshot = this.tasks();
+    const codeOutputsSnapshot = { ...this.codeOutputs() };
+    const researchOutputsSnapshot = { ...this.researchOutputs() };
     try {
       const current = await this.api.listPendingChanges(projectId);
+      if (!isCurrentSync()) return;
       const synced = await this.api.syncPendingChanges(projectId, {
-        tasks: this.tasks(),
-        codeOutputs: this.codeOutputs(),
-        researchOutputs: this.researchOutputs(),
+        tasks: tasksSnapshot.filter((task) => task.project_id === projectId),
+        codeOutputs: codeOutputsSnapshot,
+        researchOutputs: researchOutputsSnapshot,
         current,
       });
+      if (!isCurrentSync()) return;
       await this.api.savePendingChanges(projectId, synced);
-      this.pendingChanges.set(synced);
+      this.setPendingChangesForProject(projectId, synced);
     } catch {
-      this.pendingChanges.set(await this.api.listPendingChanges(projectId));
+      if (!isCurrentSync()) return;
+      this.setPendingChangesForProject(projectId, await this.api.listPendingChanges(projectId));
     }
   }
 
@@ -2160,7 +2182,7 @@ export class BattleplanStore {
     try {
       const message = await this.api.executeReleaseProjectChanges(projectId);
       runId = message.run_id ?? undefined;
-      this.pendingChanges.set([]);
+      this.setPendingChangesForProject(projectId, []);
       const page = await this.api.listProjectMessages(projectId, { syncAgent: false });
       this.projects.update((projects) => projects.map((item) => (
         item.project_id === page.project?.project_id && page.project ? page.project : item
