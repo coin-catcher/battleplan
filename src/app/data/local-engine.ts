@@ -96,6 +96,7 @@ import {
   AGENT_RESPONSE_PLACEHOLDER,
   isSubstantiveAgentResponse,
   agentDeclaresNoHumanReviewNeeded,
+  buildOrchestrationReExecuteMessage,
   isWorkflowTerminalAgentReply,
   NO_HUMAN_REVIEW_GRILLING_INSTRUCTION,
 } from '../core/agent-run-response';
@@ -1411,8 +1412,6 @@ export class LocalEngine {
 
   private async reExecuteOrchestrationTask(task: ProjectTask, project: Project): Promise<ChatMessage> {
     if (!task.cursor_agent_id) throw new Error('This task has no Cursor agent to re-execute.');
-    const initial = taskInitialPrompt(task);
-    if (!initial) throw new Error('Initial prompt is required.');
     await this.assertDependenciesDone(task);
     const projectTasks = await this.listTasks(task.project_id);
     const graphEdges = graphEdgesForRun(project, projectTasks);
@@ -1442,18 +1441,15 @@ export class LocalEngine {
     const tasks = projectTasks;
     const inputDocs = buildInputDocumentsSection(task, tasks, graphEdges);
     const upstream = this.upstreamHandoffMarkdown(task, tasks);
-    const body = [
-      'Re-executing this task as part of an active task graph run.',
-      NO_HUMAN_REVIEW_GRILLING_INSTRUCTION,
-      initial,
-      inputDocs,
-      upstream,
-    ].filter(Boolean).join('\n\n');
-    const dar = joinDarSections(await collectTaskDarSections(task, this.darLookup()));
-    const prompt = joinDarSections([dar, body]);
+    const body = buildOrchestrationReExecuteMessage({
+      inputDocuments: inputDocs,
+      upstreamHandoff: upstream,
+      crossGraphRationale: task.cross_graph_edit_rationale,
+      objectivesReminder: taskInitialPrompt(task) || undefined,
+    });
     this.markTaskDoingOnAgentChat(task);
     const run = await this.cursor.createRun(task.cursor_agent_id, {
-      text: wrapAgentRunPrompt(prompt, { baseBranch: base, agentBranch: output?.branch }),
+      text: wrapAgentRunPrompt(body, { baseBranch: base, agentBranch: output?.branch }),
       mode: 'agent',
     });
     task.latest_run_id = run.id;
@@ -1466,7 +1462,7 @@ export class LocalEngine {
       role: 'user',
       content: body,
       run_id: run.id,
-      intent: 'chat',
+      intent: 'feedback',
     });
   }
 

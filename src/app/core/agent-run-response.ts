@@ -17,6 +17,30 @@ export function agentDeclaresNoHumanReviewNeeded(content: string): boolean {
   return content.includes(NO_HUMAN_REVIEW_NEEDED_SENTINEL);
 }
 
+/** User message for orchestration re-execute (continues existing agent chat). */
+export function buildOrchestrationReExecuteMessage(parts: {
+  inputDocuments?: string;
+  upstreamHandoff?: string;
+  crossGraphRationale?: string;
+  objectivesReminder?: string;
+}): string {
+  const blocks = [
+    'Task graph orchestration has re-queued this task.',
+    'Continue in this existing conversation — keep prior chat history and decisions; do not restart as a new agent.',
+    'Re-evaluate your objectives and implementation plan using the updated upstream inputs and cross-task context below.',
+    NO_HUMAN_REVIEW_GRILLING_INSTRUCTION,
+  ];
+  if (parts.inputDocuments?.trim()) blocks.push(parts.inputDocuments.trim());
+  if (parts.upstreamHandoff?.trim()) blocks.push(parts.upstreamHandoff.trim());
+  if (parts.crossGraphRationale?.trim()) {
+    blocks.push(`Cross-task graph context:\n${parts.crossGraphRationale.trim()}`);
+  }
+  if (parts.objectivesReminder?.trim()) {
+    blocks.push(`Original objectives (for reference):\n${parts.objectivesReminder.trim()}`);
+  }
+  return blocks.join('\n\n');
+}
+
 export interface AgentRunTextSource {
   result?: string;
   status?: string;
