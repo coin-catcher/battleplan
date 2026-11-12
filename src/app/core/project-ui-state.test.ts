@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   clampMindmapZoom,
+  MIN_MINDMAP_ZOOM,
+  mindmapCanvasWorldSpan,
   mindmapScrollFromView,
   mindmapViewFromScroll,
+  MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX,
   normalizeProjectWorkspaceUiState,
   projectWorkspaceUiFromMindmap,
 } from './project-ui-state';
@@ -27,6 +30,11 @@ describe('project-ui-state', () => {
     });
     expect(ui?.pane_width).toBe(280);
     expect(ui?.mindmap_zoom).toBe(0.01);
+  });
+
+  it('sizes world canvas for edge-to-edge view at minimum zoom', () => {
+    expect(mindmapCanvasWorldSpan()).toBe(Math.ceil(MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX / MIN_MINDMAP_ZOOM));
+    expect(MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX / mindmapCanvasWorldSpan()).toBe(MIN_MINDMAP_ZOOM);
   });
 
   it('builds persisted workspace rows from live mindmap state', () => {

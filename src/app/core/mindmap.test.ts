@@ -9,6 +9,7 @@ import {
   pointerToWorld,
   positionConnectedNode,
 } from './mindmap';
+import { mindmapCanvasCenter, mindmapCanvasWorldSpan } from './project-ui-state';
 
 function task(id: string, partial: Partial<ProjectTask> = {}, order = 0): ProjectTask {
   return {
@@ -28,6 +29,17 @@ function task(id: string, partial: Partial<ProjectTask> = {}, order = 0): Projec
 }
 
 describe('mindmap', () => {
+  it('uses a large world canvas for maximum zoom out', () => {
+    const layout = layoutMindmap('Plan', []);
+    const span = mindmapCanvasWorldSpan();
+    expect(layout.width).toBeGreaterThanOrEqual(span);
+    expect(layout.height).toBeGreaterThanOrEqual(span);
+    const project = layout.nodes.find((node) => node.id === 'project')!;
+    const center = mindmapCanvasCenter();
+    expect(project.x).toBeCloseTo(center.x, 0);
+    expect(project.y).toBeCloseTo(center.y, 0);
+  });
+
   it('points a solid arrow from the project to each root task', () => {
     const layout = layoutMindmap('Plan', [task('survey'), task('build', {}, 1)]);
     const solid = layout.edges.filter((edge) => !edge.dashed);
