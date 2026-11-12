@@ -156,22 +156,61 @@ export function terminalTaskIds(
   return terminals;
 }
 
+function orchestrationScopeInFlight(
+  scoped: ProjectTask[],
+  run: GraphOrchestrationRunState,
+): boolean {
+  return scoped.some(
+    (task) => (task.status === 'DOING' || task.status === 'REVIEW') && !run.paused_task_ids.includes(task.task_id),
+  );
+}
+
 export function isOrchestrationRunComplete(
   tasks: ProjectTask[],
   edges: TaskGraphEdge[],
   run: GraphOrchestrationRunState,
 ): boolean {
-  if (run.status === 'stopped' || run.status === 'completed') return true;
+  if (run.status === 'stopped') return true;
   const scope = orchestrationScopeForRun(run, tasks);
   const scoped = tasksInOrchestrationScope(tasks, scope);
-  const inFlight = scoped.some(
-    (task) => (task.status === 'DOING' || task.status === 'REVIEW') && !run.paused_task_ids.includes(task.task_id),
-  );
+  const inFlight = orchestrationScopeInFlight(scoped, run);
   if (inFlight) return false;
+  if (run.status === 'completed') {
+    return scoped.every((task) => {
+      if (run.paused_task_ids.includes(task.task_id)) return true;
+      return task.status === 'DONE' || task.status === 'ABANDONED';
+    });
+  }
   return scoped.every((task) => {
     if (run.paused_task_ids.includes(task.task_id)) return true;
     return task.status === 'DONE' || task.status === 'ABANDONED';
   });
+}
+
+/** True when stop/pause controls should work (including stale completed runs with agents still in flight). */
+export function orchestrationRunAcceptsControl(
+  run: GraphOrchestrationRunState | undefined,
+  tasks: ProjectTask[],
+): run is GraphOrchestrationRunState {
+  if (!run) return false;
+  if (isOrchestrationRunActive(run)) return true;
+  if (run.status === 'completed') {
+    const scope = orchestrationScopeForRun(run, tasks);
+    const scoped = tasksInOrchestrationScope(tasks, scope);
+    return orchestrationScopeInFlight(scoped, run);
+  }
+  return false;
+}
+
+export function healOrchestrationRunForControl(
+  run: GraphOrchestrationRunState,
+  tasks: ProjectTask[],
+): GraphOrchestrationRunState {
+  if (isOrchestrationRunActive(run)) return run;
+  if (run.status === 'completed' && orchestrationRunAcceptsControl(run, tasks)) {
+    return { ...run, status: 'running' };
+  }
+  return run;
 }
 
 /** Topological waves of tasks that could run when all upstream work is DONE (planning preview). */
