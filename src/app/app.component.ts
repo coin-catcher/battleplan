@@ -63,6 +63,7 @@ import { linkKey, type MindmapLinkRef } from './core/link-relocation';
 import {
   clampMindmapZoom,
   mindmapScrollFromView,
+  mindmapViewCenteredOnCanvas,
   mindmapViewFromScroll,
   type MindmapViewState,
 } from './core/project-ui-state';
@@ -1010,11 +1011,18 @@ export class AppComponent implements OnInit {
 
   private centerMap(): void {
     const stage = this.mapStage()?.nativeElement;
-    const project = this.map().nodes.find((node) => node.id === 'project');
-    if (!stage || !project) return;
-    const zoom = this.zoom();
-    stage.scrollLeft = project.x * zoom - stage.clientWidth / 2;
-    stage.scrollTop = project.y * zoom - stage.clientHeight / 2;
+    if (!stage) return;
+    const layout = this.map();
+    const view = mindmapViewCenteredOnCanvas(
+      layout.width,
+      layout.height,
+      stage.clientWidth,
+      stage.clientHeight,
+      this.zoom(),
+    );
+    const scroll = mindmapScrollFromView(view);
+    stage.scrollLeft = scroll.scrollLeft;
+    stage.scrollTop = scroll.scrollTop;
     this.scheduleProjectUiPersist();
   }
 
@@ -1496,7 +1504,9 @@ export class AppComponent implements OnInit {
       }
       if (result.project) {
         await this.store.loadProjects();
-        await this.store.selectProject(result.project.project_id);
+        const mindmapView = await this.store.selectProject(result.project.project_id);
+        this.mapViewProjectId = '';
+        this.pendingMapView = mindmapView;
         this.store.notice.set(`Imported "${result.project.title}".`);
       }
     }).catch((error) => {
