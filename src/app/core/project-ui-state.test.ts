@@ -4,6 +4,7 @@ import {
   MIN_MINDMAP_ZOOM,
   mindmapCanvasWorldSpan,
   mindmapScrollFromView,
+  mindmapViewCenteredOnCanvas,
   mindmapViewFromScroll,
   MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX,
   normalizeProjectWorkspaceUiState,
@@ -30,6 +31,12 @@ describe('project-ui-state', () => {
     });
     expect(ui?.pane_width).toBe(280);
     expect(ui?.mindmap_zoom).toBe(0.01);
+  });
+
+  it('centers the viewport on the canvas midpoint', () => {
+    const view = mindmapViewCenteredOnCanvas(102_400, 102_400, 800, 600, 1);
+    expect(view.origin_x + 800 / 2).toBeCloseTo(51_200, 0);
+    expect(view.origin_y + 600 / 2).toBeCloseTo(51_200, 0);
   });
 
   it('sizes world canvas for edge-to-edge view at minimum zoom', () => {

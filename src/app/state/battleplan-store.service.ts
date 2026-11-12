@@ -79,7 +79,7 @@ import {
 } from '../core/task-status-coalesce';
 import type { MindmapViewState, ProjectWorkspaceUiState } from '../core/project-ui-state';
 import type { MindmapLinkRef } from '../core/link-relocation';
-import { projectWorkspaceUiFromMindmap } from '../core/project-ui-state';
+import { mindmapViewFromProjectUiState, projectWorkspaceUiFromMindmap } from '../core/project-ui-state';
 import { isWorkflowTerminalAgentReply } from '../core/agent-run-response';
 import { AgentCommunicationsService } from './agent-communications.service';
 import {
@@ -464,14 +464,8 @@ export class BattleplanStore {
     }
     const persisted = await this.api.getProjectUiState(projectId);
     const paneWidth = persisted?.pane_width ?? workspace.paneWidth;
-    const mindmapView = persisted
-      ? {
-        zoom: persisted.mindmap_zoom,
-        origin_x: persisted.mindmap_origin_x,
-        origin_y: persisted.mindmap_origin_y,
-      }
-      : null;
-    await this.selectProject(projectId);
+    const mindmapView = persisted ? mindmapViewFromProjectUiState(persisted) : null;
+    await this.selectProject(projectId, { mindmapView });
     this.tabSnapshots.set(projectId, this.snapshotWorkspace({ paneWidth, mindmapView }));
     await this.persistOpenSession();
     return { paneWidth, mindmapView };
@@ -495,7 +489,10 @@ export class BattleplanStore {
     await this.preferences.saveOpenSession(this.openTabs(), this.projectId());
   }
 
-  async selectProject(projectId: string): Promise<void> {
+  async selectProject(
+    projectId: string,
+    options?: { mindmapView?: MindmapViewState | null },
+  ): Promise<MindmapViewState | null> {
     await this.withEditorLoading(async () => {
       this.stopWatch();
       this.projectId.set(projectId);
@@ -513,6 +510,11 @@ export class BattleplanStore {
       this.continueProjectWatch(projectId);
       await this.persistOpenSession();
     });
+    if (options?.mindmapView !== undefined) {
+      return options.mindmapView;
+    }
+    const persisted = await this.api.getProjectUiState(projectId);
+    return persisted ? mindmapViewFromProjectUiState(persisted) : null;
   }
 
   async refreshPendingChanges(): Promise<void> {

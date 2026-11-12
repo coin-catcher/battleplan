@@ -57,6 +57,34 @@ export function mindmapScrollFromView(view: MindmapViewState): { scrollLeft: num
   };
 }
 
+/** World origin (top-left of viewport) that centers the canvas in the given viewport. */
+export function mindmapViewCenteredOnCanvas(
+  canvasWidth: number,
+  canvasHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  zoom = 1,
+): MindmapViewState {
+  const safeZoom = clampMindmapZoom(zoom);
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  return {
+    zoom: safeZoom,
+    origin_x: centerX - viewportWidth / (2 * safeZoom),
+    origin_y: centerY - viewportHeight / (2 * safeZoom),
+  };
+}
+
+export function mindmapViewFromProjectUiState(
+  ui: ProjectWorkspaceUiState,
+): MindmapViewState {
+  return {
+    zoom: ui.mindmap_zoom,
+    origin_x: ui.mindmap_origin_x,
+    origin_y: ui.mindmap_origin_y,
+  };
+}
+
 export function normalizeMindmapViewState(
   input: Partial<MindmapViewState> | null | undefined,
 ): MindmapViewState | null {
