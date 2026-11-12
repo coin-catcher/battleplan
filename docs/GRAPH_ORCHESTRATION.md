@@ -6,7 +6,7 @@ Battleplan persists an orchestration run on each `Project` as `graph_orchestrati
 
 **The orchestrator owns all automatic graph execution.** When a task reaches `DONE` (for example after approve/merge), the next wave is dispatched only while `graph_orchestration.status === 'running'`. There is no legacy auto-dispatch outside an active run. Single-task **Execute** is still explicit; chained graph progress requires **Run task graph** / **Run subgraph** (or **Execute Children**, which starts a descendants-only subgraph run).
 
-**REVIEW** is the human-review gate: the run stays open and does not advance past tasks in `REVIEW` until they become `DONE`. Agent-led review of prior outputs belongs on **Critique** tasks downstream, not on skipping REVIEW.
+**REVIEW** is the human-review gate when the agent needs grilling or merge cannot proceed automatically. Task agents are instructed to append `NO_HUMAN_REVIEW_NEEDED` when grilling decisions are clear; Battleplan then merges via **Approve** (PR create/merge → `DONE`) without waiting in the UI. Agent-led review of prior outputs still belongs on **Critique** tasks downstream.
 
 ## Run lifecycle
 

@@ -95,7 +95,9 @@ import {
 import {
   AGENT_RESPONSE_PLACEHOLDER,
   isSubstantiveAgentResponse,
+  agentDeclaresNoHumanReviewNeeded,
   isWorkflowTerminalAgentReply,
+  NO_HUMAN_REVIEW_GRILLING_INSTRUCTION,
 } from '../core/agent-run-response';
 import { isDispatchableNodeKind } from '../core/task-node-kind';
 import { defaultConnectorForTask } from '../core/connector-defaults';
@@ -1969,6 +1971,25 @@ export class LocalEngine {
     }
     task.updated_at = this.now();
     await this.repo.saveTask(task);
+    await this.tryAutoApproveAfterAgentRun(task, assistant.content);
+  }
+
+  private async tryAutoApproveAfterAgentRun(task: ProjectTask, assistantContent: string): Promise<void> {
+    if (!agentDeclaresNoHumanReviewNeeded(assistantContent)) return;
+    if (task.output_type !== 'code' && task.output_type !== 'research') return;
+    const fresh = await this.repo.getTask(task.task_id);
+    if (!fresh || fresh.status !== 'REVIEW') return;
+    const output = fresh.output_type === 'code'
+      ? await this.repo.getCodeOutput(fresh.task_id)
+      : await this.repo.getResearchOutput(fresh.task_id);
+    if (!output?.branch?.trim()) return;
+    const project = await this.requireProject(fresh.project_id);
+    if (!project.github_pat?.trim()) return;
+    try {
+      await this.executeApproveMerge(fresh.task_id);
+    } catch {
+      // Human review when auto-merge fails (conflicts, missing PR data, etc.).
+    }
   }
 
   private async applySubprojectParentRun(projectId: string, run: CursorRun): Promise<void> {
@@ -2193,6 +2214,7 @@ export class LocalEngine {
     if (siblingIds.length > 0) {
       lines.push(`This task depends on these completed task ids: ${siblingIds.join(', ')}.`);
     }
+    lines.push(NO_HUMAN_REVIEW_GRILLING_INSTRUCTION);
     const dar = joinDarSections(await collectTaskDarSections(task, this.darLookup()));
     const firstChat = joinDarSections([dar, userMessage]);
     const created = await this.cursor.createAgent({

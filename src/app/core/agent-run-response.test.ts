@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   AGENT_RESPONSE_PLACEHOLDER,
+  agentDeclaresNoHumanReviewNeeded,
   isSubstantiveAgentResponse,
   isWorkflowTerminalAgentReply,
+  NO_HUMAN_REVIEW_NEEDED_SENTINEL,
 } from './agent-run-response';
 
 describe('isSubstantiveAgentResponse', () => {
@@ -14,6 +16,13 @@ describe('isSubstantiveAgentResponse', () => {
   it('accepts run result or non-empty assistant text', () => {
     expect(isSubstantiveAgentResponse('', { result: 'Done.' })).toBe(true);
     expect(isSubstantiveAgentResponse('Here is the summary.')).toBe(true);
+  });
+});
+
+describe('agentDeclaresNoHumanReviewNeeded', () => {
+  it('detects the sentinel token in assistant text', () => {
+    expect(agentDeclaresNoHumanReviewNeeded(`Summary.\n${NO_HUMAN_REVIEW_NEEDED_SENTINEL}`)).toBe(true);
+    expect(agentDeclaresNoHumanReviewNeeded('Needs your input on scope.')).toBe(false);
   });
 });
 
