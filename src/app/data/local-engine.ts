@@ -1207,10 +1207,13 @@ export class LocalEngine {
       }
       await this.importReferencedRuns({ scope: 'task', projectId: task.project_id, taskId });
     }
-    const updated = await this.repo.getTask(taskId);
+    const messages = await this.repo.listTaskMessages(taskId);
+    let updated = await this.repo.getTask(taskId);
+    if (!updated) updated = task;
+    updated = await this.reconcileTaskStatusWithLatestAgentRun(updated, messages);
     return {
-      messages: await this.repo.listTaskMessages(taskId),
-      task: updated ?? task,
+      messages,
+      task: updated,
       artifacts: await this.repo.listArtifacts('task', taskId),
     };
   }
@@ -1466,6 +1469,7 @@ export class LocalEngine {
       objectivesReminder: taskInitialPrompt(task) || undefined,
     });
     this.markTaskDoingOnAgentChat(task);
+    await this.repo.saveTask(task);
     const run = await this.cursor.createRun(task.cursor_agent_id, {
       text: wrapAgentRunPrompt(body, { baseBranch: base, agentBranch: output?.branch }),
       mode: 'agent',
@@ -1518,6 +1522,7 @@ export class LocalEngine {
     const active = await this.requireTaskById(taskId);
     if (!active.cursor_agent_id) throw new Error('Start the task before sending feedback.');
     this.markTaskDoingOnAgentChat(active);
+    await this.repo.saveTask(active);
     const output = active.output_type === 'code'
       ? await this.repo.getCodeOutput(taskId)
       : await this.repo.getResearchOutput(taskId);
@@ -1796,10 +1801,11 @@ export class LocalEngine {
     const content = text.trim();
     if (!content) throw new Error('message is required.');
     if (!project.cursor_agent_id) throw new Error('This project is not linked to a Cursor agent.');
+    await this.markProjectDoingOnAgentChat(project);
+    await this.repo.saveProject(project);
     const run = await this.cursor.createRun(project.cursor_agent_id, { text: content, mode: 'plan' });
     project.latest_run_id = run.id;
     project.updated_at = this.now();
-    await this.markProjectDoingOnAgentChat(project);
     await this.repo.saveProject(project);
     const message = await this.record({
       scope: 'project',
@@ -2163,6 +2169,61 @@ export class LocalEngine {
     await this.repo.savePendingChanges(projectId, appendPendingChangeRows(current, rows));
   }
 
+  /**
+   * Align persisted task workflow status with the live Cursor run for latest_run_id
+   * (AgentCommunications polls via listTaskMessages).
+   */
+  private async reconcileTaskStatusWithLatestAgentRun(
+    task: ProjectTask,
+    messages: ChatMessage[],
+  ): Promise<ProjectTask> {
+    if (task.output_type === 'subproject' || !task.cursor_agent_id || !task.latest_run_id) return task;
+    if (task.status === 'DONE' || task.status === 'ABANDONED') return task;
+    if (task.status === 'DOING' && task.pending_action === 'merge') return task;
+    const userRun = messages.some(
+      (message) => message.scope === 'task'
+        && message.task_id === task.task_id
+        && message.role === 'user'
+        && message.run_id === task.latest_run_id,
+    );
+    if (!userRun) return task;
+    let run: CursorRun;
+    try {
+      run = await this.cursor.getRun(task.cursor_agent_id, task.latest_run_id);
+    } catch {
+      return task;
+    }
+    const assistant = messages.find(
+      (message) => message.role === 'assistant'
+        && message.run_id === task.latest_run_id
+        && message.scope === 'task'
+        && message.task_id === task.task_id,
+    );
+    const assistantText = assistant?.content ?? await this.assistantText(task.cursor_agent_id, run);
+    const terminalReply = isWorkflowTerminalAgentReply(assistantText, run);
+    if (!TERMINAL_RUN.has(run.status)) {
+      if (task.status !== 'DOING') {
+        try {
+          applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
+        } catch {
+          applyTaskStatusTransition(task, 'DOING', 'manual');
+        }
+        task.updated_at = this.now();
+        await this.repo.saveTask(task);
+      }
+      return task;
+    }
+    if (!terminalReply) {
+      if (task.status === 'REVIEW') {
+        applyTaskStatusTransition(task, 'DOING', 'manual');
+        task.updated_at = this.now();
+        await this.repo.saveTask(task);
+      }
+      return task;
+    }
+    return task;
+  }
+
   private markTaskDoingOnAgentChat(task: ProjectTask): void {
     if (task.status === 'DONE' || task.status === 'ABANDONED' || task.status === 'DOING') return;
     try {
@@ -2233,6 +2294,7 @@ export class LocalEngine {
       return;
     }
     this.markTaskDoingOnAgentChat(task);
+    await this.repo.saveTask(task);
     const run = await this.cursor.createRun(task.cursor_agent_id, {
       text: wrapAgentRunPrompt(instructions, { baseBranch, agentBranch }),
       mode: 'agent',
