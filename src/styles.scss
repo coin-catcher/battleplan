@@ -491,6 +491,40 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   background: transparent;
   z-index: 2;
 }
+.map-start-connect {
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 1.1rem;
+  font-weight: 600;
+  line-height: 1;
+  opacity: 0.92;
+}
+.map-start-connect::after {
+  display: none;
+}
+.map-link-draft {
+  stroke: var(--accent, #6fa8ff);
+  stroke-width: 2.5;
+  stroke-dasharray: 6 4;
+}
+.map-node.connect-drop-target {
+  outline: 2px solid var(--accent, #6fa8ff);
+  outline-offset: 3px;
+}
+.map-connect-drop-hint {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 2px dashed var(--accent, #6fa8ff);
+  pointer-events: none;
+  z-index: 3;
+}
 .map-edge-arrow::after {
   content: '';
   display: block;

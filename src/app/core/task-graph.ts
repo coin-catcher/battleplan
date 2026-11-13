@@ -245,3 +245,52 @@ export function validateAndApplyGraph(project: Project, tasks: ProjectTask[]): P
   project.task_graph_edges = edges;
   return applyGraphEdgesToLegacyFields(tasks, edges);
 }
+
+export function stripOrphanTaskReferences(
+  tasks: ProjectTask[],
+  taskIds: Set<string>,
+): { tasks: ProjectTask[]; changed: boolean } {
+  let changed = false;
+  const next = tasks.map((task) => {
+    const dependencies = task.dependencies.filter((id) => taskIds.has(id));
+    const sibling_dependencies = (task.sibling_dependencies ?? []).filter(
+      (id) => taskIds.has(id) && id !== task.task_id,
+    );
+    if (
+      dependencies.length !== task.dependencies.length
+      || sibling_dependencies.length !== (task.sibling_dependencies ?? []).length
+    ) {
+      changed = true;
+      return { ...task, dependencies, sibling_dependencies };
+    }
+    return task;
+  });
+  return { tasks: next, changed };
+}
+
+/** Drop edges to missing tasks and re-sync legacy hierarchy fields from surviving edges. */
+export function repairProjectTaskGraph(
+  project: Project,
+  tasks: ProjectTask[],
+  options?: { filterOnly?: boolean },
+): { project: Project; tasks: ProjectTask[]; changed: boolean } {
+  const taskIds = new Set(tasks.map((task) => task.task_id));
+  let changed = false;
+  const stripped = stripOrphanTaskReferences(tasks, taskIds);
+  if (stripped.changed) changed = true;
+
+  let edges = (project.task_graph_edges ?? []).filter(
+    (edge) => taskIds.has(edge.from_task_id) && taskIds.has(edge.to_task_id),
+  );
+  if (edges.length !== (project.task_graph_edges ?? []).length) changed = true;
+
+  if (!options?.filterOnly) {
+    const merged = mergeLegacyTreeOrderingIntoGraph(edges, stripped.tasks);
+    if (JSON.stringify(merged) !== JSON.stringify(edges)) changed = true;
+    edges = merged;
+  }
+
+  const synced = applyGraphEdgesToLegacyFields(stripped.tasks, edges);
+  const projectNext = { ...project, task_graph_edges: edges };
+  return { project: projectNext, tasks: synced, changed };
+}

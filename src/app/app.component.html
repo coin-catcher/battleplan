@@ -201,6 +201,17 @@
                 <path d="M0,0 L10,4 L0,8 Z" />
               </marker>
             </defs>
+            @if (mindmapConnectionPreview(); as preview) {
+              <line
+                class="map-link-visible map-link-draft"
+                [attr.x1]="preview.x1"
+                [attr.y1]="preview.y1"
+                [attr.x2]="preview.x2"
+                [attr.y2]="preview.y2"
+                marker-end="url(#arrow-dashed)"
+                pointer-events="none"
+              />
+            }
             @for (edge of displayMindmapEdges(); track mindmapLinkKey(edge)) {
               <line
                 class="map-link-hit"
@@ -261,13 +272,22 @@
             @if (visibleConnectDirection(node.id); as direction) {
               <button
                 type="button"
-                class="map-edge-arrow"
+                class="map-edge-arrow map-start-connect"
                 [class]="connectArrowClass(direction)"
                 [style.left.px]="connectArrowPoint(node.id, direction).x"
                 [style.top.px]="connectArrowPoint(node.id, direction).y"
-                [attr.aria-label]="'Add a task connected to ' + node.label"
+                [attr.aria-label]="'Start connection from ' + node.label"
                 (pointerdown)="onEdgePointerDown(node, direction, $event)"
-              ></button>
+              >+</button>
+            }
+            @if (connectionDropDirection(node.id); as dropDir) {
+              <div
+                class="map-connect-drop-hint"
+                [class]="'dir-' + dropDir"
+                [style.left.px]="connectArrowPoint(node.id, dropDir).x"
+                [style.top.px]="connectArrowPoint(node.id, dropDir).y"
+                aria-hidden="true"
+              ></div>
             }
             @if (showConvertHandle(node)) {
               <button
@@ -339,6 +359,7 @@
               [class.editing]="editingNodeId() === node.id"
               [class.orchestration-in-run]="node.kind === 'task' && store.isTaskInOrchestrationScope(node.id)"
               [class.orchestration-paused]="node.kind === 'task' && store.isOrchestrationTaskPaused(node.id)"
+              [class.connect-drop-target]="isConnectionDropTarget(node.id)"
               [attr.data-status]="node.status ?? null"
               [style.left.px]="node.x"
               [style.top.px]="node.y"
