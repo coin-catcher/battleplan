@@ -12,6 +12,7 @@ type ThemeId = (typeof MENU_THEMES)[number]['id'];
 
 export type MenuAction =
   | 'new-project'
+  | 'close-project'
   | 'import-project'
   | 'export-project'
   | 'save'
@@ -63,6 +64,12 @@ export function rebuildApplicationMenu(
       id: 'open-project',
       label: 'Open Project',
       submenu: openProjectItems,
+    },
+    {
+      id: 'close-project',
+      label: 'Close Project',
+      enabled: false,
+      click: () => sendMenuAction(getWindow(), 'close-project'),
     },
     {
       id: 'import-project',
@@ -144,5 +151,10 @@ export function setExportProjectEnabled(enabled: boolean): void {
 
 export function setSaveEnabled(enabled: boolean): void {
   const item = Menu.getApplicationMenu()?.getMenuItemById('save');
+  if (item) item.enabled = enabled;
+}
+
+export function setCloseProjectEnabled(enabled: boolean): void {
+  const item = Menu.getApplicationMenu()?.getMenuItemById('close-project');
   if (item) item.enabled = enabled;
 }

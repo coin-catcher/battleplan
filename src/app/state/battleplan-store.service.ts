@@ -497,6 +497,44 @@ export class BattleplanStore {
     return this.openProjectTab(projectId, workspace);
   }
 
+  async closeActiveProjectTab(workspace: ProjectWorkspaceSnapshot): Promise<ProjectTabRestore | null> {
+    const closingId = this.projectId();
+    if (!closingId || !this.openTabs().includes(closingId)) return null;
+    this.tabSnapshots.set(closingId, this.snapshotWorkspace(workspace));
+    void this.saveProjectWorkspaceUi(closingId, workspace.paneWidth, workspace.mindmapView);
+    this.cancelEditorLoading();
+    this.stopWatch();
+    for (const task of this.tasks()) {
+      if (task.project_id === closingId) this.taskChatCache.delete(task.task_id);
+    }
+    const tabs = this.openTabs();
+    const closedIndex = tabs.indexOf(closingId);
+    const remaining = tabs.filter((projectId) => projectId !== closingId);
+    this.openTabs.set(remaining);
+    this.tabSnapshots.delete(closingId);
+    this.pendingChangesByProject.update((cache) => {
+      const next = { ...cache };
+      delete next[closingId];
+      return next;
+    });
+    if (remaining.length === 0) {
+      this.projectId.set(null);
+      await this.preferences.setCurrentProjectId(null);
+      this.tasks.set([]);
+      this.messages.set([]);
+      this.artifacts.set([]);
+      this.agents.set([]);
+      this.codeOutputs.set({});
+      this.researchOutputs.set({});
+      this.selection.set({ kind: 'create' });
+      this.error.set(null);
+      await this.persistOpenSession();
+      return null;
+    }
+    const nextId = remaining[Math.min(closedIndex, remaining.length - 1)] ?? remaining[0];
+    return this.openProjectTab(nextId, workspace);
+  }
+
   async saveProjectWorkspaceUi(
     projectId: string,
     paneWidth: number,
