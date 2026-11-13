@@ -849,15 +849,13 @@
                         <span>Initial Prompt</span>
                         <textarea rows="3" [(ngModel)]="taskInitialPrompt" [name]="'taskInitialPrompt-' + task.task_id" (focus)="onTaskFieldFocus()" (blur)="onEditorFieldBlur()" placeholder="Instruction sent when you execute this task."></textarea>
                       </label>
-                      @if (!taskHasChildren(task.task_id)) {
-                        <div class="composer-actions">
-                          @if (store.chatActionPending() === 'execute') {
-                            <span class="inline-spinner" aria-label="Executing task"></span>
-                          } @else {
-                            <button type="button" class="accent" [disabled]="chatActionsLocked() || !taskInitialPrompt.trim() || task.status === 'ABANDONED'" (click)="executeTask()">Execute</button>
-                          }
-                        </div>
-                      }
+                      <div class="composer-actions">
+                        @if (store.chatActionPending() === 'execute') {
+                          <span class="inline-spinner" aria-label="Executing task"></span>
+                        } @else {
+                          <button type="button" class="accent" [disabled]="chatActionsLocked() || !taskInitialPrompt.trim() || task.status === 'ABANDONED'" (click)="executeTask()">Execute</button>
+                        }
+                      </div>
                     </div>
                   }
                 </div>
@@ -892,12 +890,12 @@
                 @if (!isDiscoveryRootTask(task) || taskDiscoveryInterviewActive(task)) {
                   <div class="composer task-chat-composer">
                     <label class="sr-only" for="task-chat">Message</label>
-                    <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" placeholder="Continue this task chat." [disabled]="!taskChatComposerEnabled(task)"></textarea>
+                    <textarea id="task-chat" rows="3" [(ngModel)]="chatDraft" name="taskChat" [attr.placeholder]="taskChatComposerPlaceholder(task)" [disabled]="!taskChatComposerEnabled(task)"></textarea>
                     <div class="composer-actions">
-                      @if (store.chatActionPending() === 'send') {
-                        <span class="inline-spinner" aria-label="Sending message"></span>
+                      @if (store.chatActionPending() === 'send' || store.chatActionPending() === 'execute') {
+                        <span class="inline-spinner" [attr.aria-label]="store.chatActionPending() === 'execute' ? 'Executing task' : 'Sending message'"></span>
                       } @else {
-                        <button type="button" class="primary" [disabled]="chatSendDisabled() || !chatDraft.trim() || !taskChatComposerEnabled(task)" (click)="sendChat()">Send</button>
+                        <button type="button" class="primary" [disabled]="chatSendDisabled() || !taskPendingStartMessage(task) || !taskChatComposerEnabled(task)" (click)="sendChat()">Send</button>
                         @if (store.chatAgentSyncing()) {
                           <span class="inline-spinner" aria-label="Syncing chat with agent"></span>
                         }
