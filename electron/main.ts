@@ -1,7 +1,13 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { buildApplicationMenu, rebuildApplicationMenu, setExportProjectEnabled, setSaveEnabled } from './application-menu';
+import {
+  buildApplicationMenu,
+  rebuildApplicationMenu,
+  setCloseProjectEnabled,
+  setExportProjectEnabled,
+  setSaveEnabled,
+} from './application-menu';
 import { readJsonFile } from './atomic-write';
 import { exportProject, importProject } from './battleplan-archive';
 import type { AppConfigDocument, AppWindowBounds } from './document-types';
@@ -226,12 +232,15 @@ function registerRepositoryHandlers(): void {
     'agent:fetchStatistics': async (params) =>
       fetchAgentStatisticsLive(params as import('./agent-statistics').AgentStatisticsFetchInput),
     'menu:sync-state': async (state) => {
-      const patch = state as { exportEnabled?: boolean; saveEnabled?: boolean };
+      const patch = state as { exportEnabled?: boolean; saveEnabled?: boolean; closeEnabled?: boolean };
       if (typeof patch.exportEnabled === 'boolean') {
         setExportProjectEnabled(patch.exportEnabled);
       }
       if (typeof patch.saveEnabled === 'boolean') {
         setSaveEnabled(patch.saveEnabled);
+      }
+      if (typeof patch.closeEnabled === 'boolean') {
+        setCloseProjectEnabled(patch.closeEnabled);
       }
       return { ok: true };
     },

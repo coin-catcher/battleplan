@@ -497,14 +497,16 @@ export class AppComponent implements OnInit {
     effect(() => {
       if (!this.desktop) return;
       const selection = this.store.selection();
+      const projectId = this.store.projectId();
       const exportEnabled = Boolean(this.store.project());
+      const closeEnabled = Boolean(projectId) && this.store.openTabs().includes(projectId!);
       const saveEnabled = this.editorIsDirty()
         || ((selection.kind === 'project' && Boolean(this.title.trim()))
         || (selection.kind === 'subproject' && Boolean(this.title.trim()))
         || selection.kind === 'task'
         || selection.kind === 'agent'
         || selection.kind === 'agent-create');
-      void electronBridge()?.invoke('menu:sync-state', { exportEnabled, saveEnabled });
+      void electronBridge()?.invoke('menu:sync-state', { exportEnabled, saveEnabled, closeEnabled });
     });
     effect(() => {
       if (!this.desktop) return;
@@ -654,6 +656,11 @@ export class AppComponent implements OnInit {
       case 'new-project':
         void this.guardUnsavedChanges(async () => {
           this.store.showCreate();
+        });
+        break;
+      case 'close-project':
+        void this.guardUnsavedChanges(async () => {
+          await this.closeActiveProject();
         });
         break;
       case 'import-project':
@@ -901,6 +908,22 @@ export class AppComponent implements OnInit {
     this.pendingMapView = restored.mindmapView;
     this.mapViewProjectId = '';
     this.paneWidth.set(restored.paneWidth);
+  }
+
+  async closeActiveProject(): Promise<void> {
+    await this.flushProjectUiPersist();
+    const restored = await this.store.closeActiveProjectTab({
+      paneWidth: this.paneWidth(),
+      mindmapView: this.captureMindmapView(),
+    });
+    if (restored) {
+      this.pendingMapView = restored.mindmapView;
+      this.mapViewProjectId = '';
+      this.paneWidth.set(restored.paneWidth);
+    } else {
+      this.pendingMapView = null;
+      this.mapViewProjectId = '';
+    }
   }
 
   releasePendingChanges(): void {
