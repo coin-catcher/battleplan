@@ -128,6 +128,7 @@ import {
   ensureProjectTaskGraph,
   mergeLegacyTreeOrderingIntoGraph,
   rebuildGraphEdgesFromLegacy,
+  repairProjectTaskGraph,
   prerequisitesMet,
   seedProjectGraphDefaults,
   validateTaskGraphEdges,
@@ -499,6 +500,17 @@ export class LocalEngine {
       project.updated_at = this.now();
       await this.repo.saveProject(project);
     }
+    const repaired = repairProjectTaskGraph(project, workingTasks);
+    if (repaired.changed) {
+      project = repaired.project;
+      workingTasks = repaired.tasks;
+      project.updated_at = this.now();
+      await this.repo.saveProject(project);
+      for (const task of workingTasks) {
+        task.updated_at = this.now();
+        await this.repo.saveTask(task);
+      }
+    }
     return workingTasks;
   }
 
@@ -506,7 +518,9 @@ export class LocalEngine {
     const project = await this.requireProject(projectId);
     const tasks = await this.repo.listTasks(projectId);
     const taskIds = new Set(tasks.map((task) => task.task_id));
-    validateTaskGraphEdges(edges, taskIds);
+    const filtered = filterGraphEdgesToTaskIds(edges, taskIds);
+    validateTaskGraphEdges(filtered, taskIds);
+    edges = filtered;
     project.task_graph_edges = edges;
     project.updated_at = this.now();
     await this.repo.saveProject(project);
@@ -961,6 +975,15 @@ export class LocalEngine {
     const task = await this.requireTask(projectId, taskId);
     if (task.cursor_agent_id) await this.cursor.archiveAgent(task.cursor_agent_id);
     await this.repo.deleteTask(taskId);
+    const project = await this.requireProject(projectId);
+    const tasks = await this.repo.listTasks(projectId);
+    const repaired = repairProjectTaskGraph(project, tasks);
+    if (repaired.changed) {
+      await this.repo.saveProject({ ...repaired.project, updated_at: this.now() });
+      for (const row of repaired.tasks) {
+        await this.repo.saveTask({ ...row, updated_at: this.now() });
+      }
+    }
   }
 
   async reorderTasks(projectId: string, taskIds: string[]): Promise<ProjectTask[]> {

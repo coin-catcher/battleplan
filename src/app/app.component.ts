@@ -47,10 +47,13 @@ import { CursorKey } from './data/cursor-key.service';
 import { ProjectPortability } from './data/project-portability.service';
 import {
   cardinalAnchor,
+  CONNECT_ARROW_LENGTH_PX,
   layoutMindmap,
   mindmapNodesInWorldRect,
   normalizeWorldRect,
+  offsetFromCardinal,
   pickCardinalEdge,
+  pickConnectHoverSide,
   pickNorthWestCorner,
   pointerToWorld,
   type CardinalDirection,
@@ -121,7 +124,16 @@ export class AppComponent implements OnInit {
   readonly githubPatOpen = signal(false);
   readonly zoom = signal(1);
   readonly dragPins = signal<Record<string, { x: number; y: number }>>({});
-  readonly hoveredConnect = signal<{ nodeId: string; direction: CardinalDirection } | null>(null);
+  readonly connectHover = signal<{ nodeId: string; direction: CardinalDirection } | null>(null);
+  readonly connectionSession = signal<{
+    fromNodeId: string;
+    fromKind: 'project' | 'task';
+    direction: CardinalDirection;
+    headX: number;
+    headY: number;
+    draggingHead: boolean;
+  } | null>(null);
+  readonly connectionDropTarget = signal<{ nodeId: string; direction: CardinalDirection } | null>(null);
   readonly connectPanel = signal<{ sourceId: string; sourceKind: 'project' | 'task'; direction: CardinalDirection } | null>(null);
   readonly convertPanel = signal<{ taskId: string } | null>(null);
   readonly hoveredConvert = signal<string | null>(null);
@@ -135,9 +147,12 @@ export class AppComponent implements OnInit {
   private mapGroupProjectId: string | undefined;
   private edgeHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private convertHoldTimer: ReturnType<typeof setTimeout> | undefined;
+  private connectionPointerCleanup: (() => void) | undefined;
   private edgeLongPressFired = false;
   private mapHoverFrame = 0;
-  private readonly connectHoldMs = 250;
+  private readonly addTaskHoldMs = 450;
+  private readonly connectClickMaxMs = 280;
+  private readonly convertHoldMs = 280;
   private readonly onMapPointerMoveCapture = (event: PointerEvent): void => {
     this.onMapPointerMove(event);
   };
@@ -246,6 +261,23 @@ export class AppComponent implements OnInit {
       if (drag.end === 'from') return { ...edge, x1: drag.x, y1: drag.y };
       return { ...edge, x2: drag.x, y2: drag.y };
     });
+  });
+
+  readonly mindmapConnectionPreview = computed(() => {
+    const session = this.connectionSession();
+    if (!session) return null;
+    const fromNode = this.map().nodes.find((node) => node.id === session.fromNodeId);
+    if (!fromNode) return null;
+    const start = cardinalAnchor(fromNode, session.direction);
+    const drop = this.connectionDropTarget();
+    if (drop && session.draggingHead) {
+      const target = this.map().nodes.find((node) => node.id === drop.nodeId);
+      if (target) {
+        const end = cardinalAnchor(target, drop.direction);
+        return { x1: start.x, y1: start.y, x2: end.x, y2: end.y };
+      }
+    }
+    return { x1: start.x, y1: start.y, x2: session.headX, y2: session.headY };
   });
   codeRepo = '';
   codeBranch = '';
@@ -465,14 +497,16 @@ export class AppComponent implements OnInit {
     effect(() => {
       if (!this.desktop) return;
       const selection = this.store.selection();
+      const projectId = this.store.projectId();
       const exportEnabled = Boolean(this.store.project());
+      const closeEnabled = Boolean(projectId) && this.store.openTabs().includes(projectId!);
       const saveEnabled = this.editorIsDirty()
         || ((selection.kind === 'project' && Boolean(this.title.trim()))
         || (selection.kind === 'subproject' && Boolean(this.title.trim()))
         || selection.kind === 'task'
         || selection.kind === 'agent'
         || selection.kind === 'agent-create');
-      void electronBridge()?.invoke('menu:sync-state', { exportEnabled, saveEnabled });
+      void electronBridge()?.invoke('menu:sync-state', { exportEnabled, saveEnabled, closeEnabled });
     });
     effect(() => {
       if (!this.desktop) return;
@@ -622,6 +656,11 @@ export class AppComponent implements OnInit {
       case 'new-project':
         void this.guardUnsavedChanges(async () => {
           this.store.showCreate();
+        });
+        break;
+      case 'close-project':
+        void this.guardUnsavedChanges(async () => {
+          await this.closeActiveProject();
         });
         break;
       case 'import-project':
@@ -869,6 +908,22 @@ export class AppComponent implements OnInit {
     this.pendingMapView = restored.mindmapView;
     this.mapViewProjectId = '';
     this.paneWidth.set(restored.paneWidth);
+  }
+
+  async closeActiveProject(): Promise<void> {
+    await this.flushProjectUiPersist();
+    const restored = await this.store.closeActiveProjectTab({
+      paneWidth: this.paneWidth(),
+      mindmapView: this.captureMindmapView(),
+    });
+    if (restored) {
+      this.pendingMapView = restored.mindmapView;
+      this.mapViewProjectId = '';
+      this.paneWidth.set(restored.paneWidth);
+    } else {
+      this.pendingMapView = null;
+      this.mapViewProjectId = '';
+    }
   }
 
   releasePendingChanges(): void {
@@ -1547,7 +1602,7 @@ export class AppComponent implements OnInit {
 
   onStagePointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-node, .map-edge-arrow, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit, .zoom-controls, .agent-toolbox')) return;
+    if (target.closest('.map-node, .map-connect-btn, .map-connection-head, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit, .zoom-controls, .agent-toolbox')) return;
     this.selectedMindmapLink.set(null);
     if (this.connectPanel()) {
       this.dismissConnectPanel();
@@ -1588,7 +1643,7 @@ export class AppComponent implements OnInit {
 
   onNodePointerDown(node: MindmapNode, event: PointerEvent): void {
     if (this.editingNodeId() === node.id) return;
-    if ((event.target as HTMLElement).closest('.map-edge-arrow, .map-connect-panel, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause')) return;
+    if ((event.target as HTMLElement).closest('.map-connect-btn, .map-connection-head, .map-connect-panel, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause')) return;
     event.stopPropagation();
     const group = this.mapGroupSelection();
     const inGroup = group.includes(node.id);
@@ -1610,7 +1665,7 @@ export class AppComponent implements OnInit {
       if (!dragged && Math.hypot(dx, dy) < 4) return;
       dragged = true;
       this.mapDraggingNodeId.set(node.id);
-      this.hoveredConnect.set(null);
+      this.connectHover.set(null);
       this.dragPins.update((pins) => {
         const next = { ...pins };
         for (const [id, origin] of origins) {
@@ -1965,28 +2020,34 @@ export class AppComponent implements OnInit {
     this.onEditorFieldBlur();
   }
 
-  connectArrowClass(direction: CardinalDirection): string {
-    return `map-edge-arrow dir-${direction}`;
-  }
-
-  connectArrowPoint(nodeId: string, direction: CardinalDirection): { x: number; y: number } {
+  connectButtonPoint(nodeId: string, direction: CardinalDirection): { x: number; y: number } {
     const node = this.map().nodes.find((item) => item.id === nodeId);
     if (!node) return { x: 0, y: 0 };
     return cardinalAnchor(node, direction);
   }
 
   visibleConnectDirection(nodeId: string): CardinalDirection | null {
+    if (this.connectionSession()) return null;
     const panel = this.connectPanel();
     if (panel?.sourceId === nodeId) return panel.direction;
-    const hover = this.hoveredConnect();
+    const hover = this.connectHover();
     if (hover?.nodeId === nodeId) return hover.direction;
     return null;
   }
 
+  isConnectionDropTarget(nodeId: string): boolean {
+    return this.connectionDropTarget()?.nodeId === nodeId;
+  }
+
+  connectionDropDirection(nodeId: string): CardinalDirection | null {
+    const drop = this.connectionDropTarget();
+    return drop?.nodeId === nodeId ? drop.direction : null;
+  }
+
   onMapPointerMove(event: PointerEvent): void {
-    if (this.connectPanel() || this.convertPanel() || this.editingNodeId() || this.mapDraggingNodeId()) return;
+    if (this.connectionSession() || this.connectPanel() || this.convertPanel() || this.editingNodeId() || this.mapDraggingNodeId()) return;
     const target = event.target as HTMLElement;
-    if (target.closest('.map-connect-panel')) return;
+    if (target.closest('.map-connect-panel, .map-connect-btn, .map-connection-head')) return;
     cancelAnimationFrame(this.mapHoverFrame);
     this.mapHoverFrame = requestAnimationFrame(() => {
       const stage = this.mapStage()?.nativeElement;
@@ -1999,16 +2060,18 @@ export class AppComponent implements OnInit {
         stage.scrollTop,
         this.zoom(),
       );
-      const threshold = 28 / this.zoom();
+      const outsidePx = 10 / this.zoom();
       let match: { nodeId: string; direction: CardinalDirection } | null = null;
       for (const node of [...this.map().nodes].reverse()) {
-        const direction = pickCardinalEdge(node, world.x, world.y, threshold);
+        if (node.kind !== 'task' && node.id !== 'project') continue;
+        const direction = pickConnectHoverSide(node, world.x, world.y, outsidePx);
         if (direction) {
           match = { nodeId: node.id, direction };
           break;
         }
       }
-      this.hoveredConnect.set(match);
+      this.connectHover.set(match);
+      const threshold = 28 / this.zoom();
       const selection = this.store.selection();
       const selected = this.map().nodes.find((item) => {
         if (selection.kind === 'project') return item.id === 'project';
@@ -2023,30 +2086,127 @@ export class AppComponent implements OnInit {
     });
   }
 
-  onEdgePointerDown(node: MindmapNode, direction: CardinalDirection, event: PointerEvent): void {
+  onConnectPointerDown(node: MindmapNode, direction: CardinalDirection, event: PointerEvent): void {
     event.stopPropagation();
     event.preventDefault();
-    this.clearEdgeHoldTimer();
-    this.edgeLongPressFired = false;
-    this.edgeHoldTimer = setTimeout(() => {
-      this.edgeLongPressFired = true;
+    if (event.button !== 0) return;
+    this.dismissConnectPanel();
+    this.connectHover.set(null);
+    const downAt = Date.now();
+    const downX = event.clientX;
+    const downY = event.clientY;
+    let addTaskOpened = false;
+    const holdTimer = setTimeout(() => {
+      addTaskOpened = true;
       this.connectPanel.set({
         sourceId: node.id,
         sourceKind: node.kind,
         direction,
       });
-      this.hoveredConnect.set({ nodeId: node.id, direction });
-    }, this.connectHoldMs);
-    const onUp = (): void => {
-      this.clearEdgeHoldTimer();
-      if (!this.edgeLongPressFired && !this.connectPanel()) {
-        void this.quickAddResearchTask(node, direction);
-      }
+    }, this.addTaskHoldMs);
+    const onUp = (upEvent: PointerEvent): void => {
+      clearTimeout(holdTimer);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
+      if (addTaskOpened) return;
+      const elapsed = Date.now() - downAt;
+      const moved = Math.hypot(upEvent.clientX - downX, upEvent.clientY - downY) > 6;
+      if (elapsed > this.connectClickMaxMs || moved) return;
+      this.beginConnectionSession(node, direction);
     };
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
+  }
+
+  private beginConnectionSession(node: MindmapNode, direction: CardinalDirection): void {
+    const head = offsetFromCardinal(node, direction, CONNECT_ARROW_LENGTH_PX);
+    this.connectionSession.set({
+      fromNodeId: node.id,
+      fromKind: node.kind,
+      direction,
+      headX: head.x,
+      headY: head.y,
+      draggingHead: false,
+    });
+    this.connectionDropTarget.set(null);
+    this.connectHover.set(null);
+  }
+
+  onConnectionHeadPointerDown(event: PointerEvent): void {
+    const session = this.connectionSession();
+    if (!session || session.draggingHead) return;
+    event.stopPropagation();
+    event.preventDefault();
+    if (event.button !== 0) return;
+    this.connectionSession.update((current) => current ? { ...current, draggingHead: true } : null);
+    this.connectionDropTarget.set(null);
+
+    const fromNodeId = session.fromNodeId;
+    const onMove = (moveEvent: PointerEvent): void => {
+      const stage = this.mapStage()?.nativeElement;
+      if (!stage) return;
+      const world = pointerToWorld(
+        moveEvent.clientX,
+        moveEvent.clientY,
+        stage.getBoundingClientRect(),
+        stage.scrollLeft,
+        stage.scrollTop,
+        this.zoom(),
+      );
+      this.connectionSession.update((current) => current
+        ? { ...current, headX: world.x, headY: world.y, draggingHead: true }
+        : null);
+      const outsidePx = 10 / this.zoom();
+      let target: { nodeId: string; direction: CardinalDirection } | null = null;
+      for (const candidate of [...this.map().nodes].reverse()) {
+        if (candidate.id === fromNodeId || candidate.id === 'project') continue;
+        const side = pickConnectHoverSide(candidate, world.x, world.y, outsidePx);
+        if (side) {
+          target = { nodeId: candidate.id, direction: side };
+          break;
+        }
+      }
+      this.connectionDropTarget.set(target);
+    };
+
+    const finish = (): void => {
+      const drop = this.connectionDropTarget();
+      const current = this.connectionSession();
+      this.connectionSession.set(null);
+      this.connectionDropTarget.set(null);
+      this.clearConnectionDragListeners();
+      if (!drop || !current || drop.nodeId === current.fromNodeId) return;
+      if (current.fromKind !== 'task') return;
+      void this.linkParentChild(current.fromNodeId, drop.nodeId);
+    };
+
+    const onUp = (): void => finish();
+    const onCancel = (): void => finish();
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    this.connectionPointerCleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+    onMove(event);
+  }
+
+  cancelConnectionSession(): void {
+    this.connectionSession.set(null);
+    this.connectionDropTarget.set(null);
+    this.clearConnectionDragListeners();
+  }
+
+  private clearConnectionDragListeners(): void {
+    this.connectionPointerCleanup?.();
+    this.connectionPointerCleanup = undefined;
+  }
+
+  private async linkParentChild(parentId: string, childId: string): Promise<void> {
+    await this.pushTaskGraphEdge(parentId, parentId, childId, 'tree');
   }
 
   onConvertPointerDown(node: MindmapNode, event: PointerEvent): void {
@@ -2055,7 +2215,7 @@ export class AppComponent implements OnInit {
     this.clearConvertHoldTimer();
     this.convertHoldTimer = setTimeout(() => {
       this.convertPanel.set({ taskId: node.id });
-    }, this.connectHoldMs);
+    }, this.convertHoldMs);
     const onUp = (): void => {
       this.clearConvertHoldTimer();
       window.removeEventListener('pointerup', onUp);
@@ -2087,22 +2247,11 @@ export class AppComponent implements OnInit {
     });
   }
 
-  private async quickAddResearchTask(node: MindmapNode, direction: CardinalDirection): Promise<void> {
-    await this.guardUnsavedChanges(async () => {
-      const taskId = await this.store.addConnectedTask({
-        sourceId: node.id,
-        sourceKind: node.kind,
-        direction,
-        output_type: 'research',
-      });
-      if (taskId) this.startInlineEdit(taskId, 'New research task');
-    });
-  }
-
   onMapDismissPointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-connect-panel, .map-convert-panel, .map-edge-arrow, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit')) return;
+    if (target.closest('.map-connect-panel, .map-convert-panel, .map-connect-btn, .map-connection-head, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit')) return;
     this.dismissConnectPanel();
+    this.cancelConnectionSession();
     this.convertPanel.set(null);
   }
 
@@ -2135,7 +2284,8 @@ export class AppComponent implements OnInit {
 
   startInlineEdit(nodeId: string, label: string): void {
     this.dismissConnectPanel();
-    this.hoveredConnect.set(null);
+    this.cancelConnectionSession();
+    this.connectHover.set(null);
     this.editingNodeId.set(nodeId);
     this.editDraft.set(label);
   }
@@ -2362,13 +2512,18 @@ export class AppComponent implements OnInit {
   }
 
   resolveTaskTitle(taskId: string): string {
-    return this.store.tasks().find((item) => item.task_id === taskId)?.title ?? taskId;
+    const hit = this.store.tasks().find((item) => item.task_id === taskId);
+    if (hit) return hit.title;
+    return `(missing task ${taskId.slice(0, 8)}…)`;
   }
 
   async removeTaskGraphEdge(edgeId: string): Promise<void> {
     const project = this.store.project();
     if (!project) return;
-    const edges = (project.task_graph_edges ?? []).filter((edge) => edge.edge_id !== edgeId);
+    const taskIds = new Set(this.store.tasks().map((task) => task.task_id));
+    const edges = (project.task_graph_edges ?? []).filter(
+      (edge) => edge.edge_id !== edgeId && taskIds.has(edge.from_task_id) && taskIds.has(edge.to_task_id),
+    );
     await this.store.updateProjectTaskGraph(edges);
   }
 

@@ -4,8 +4,10 @@ import {
   mergeLegacyTreeOrderingIntoGraph,
   mnemosyneDefaultRelativePath,
   rebuildGraphEdgesFromLegacy,
+  repairProjectTaskGraph,
   validateTaskGraphEdges,
 } from './task-graph';
+import type { Project } from './models';
 
 function task(id: string, partial: Partial<ProjectTask> = {}): ProjectTask {
   return {
@@ -72,5 +74,37 @@ describe('task-graph', () => {
     expect(merged.some((edge) => edge.kind === 'tree')).toBe(true);
     expect(merged.some((edge) => edge.kind === 'cycle')).toBe(true);
     expect(merged.some((edge) => edge.kind === 'fork')).toBe(true);
+  });
+
+  it('drops orphan graph edges and legacy references on repair', () => {
+    const live = task('a', { dependencies: ['ghost'] });
+    const project: Project = {
+      project_id: 'p1',
+      title: 'P',
+      initial_prompt: '',
+      cursor_chat_link: '',
+      dar: '',
+      status: 'TODO',
+      created_at: '',
+      updated_at: '',
+      task_graph_edges: [
+        {
+          edge_id: 'tree:a->ghost',
+          from_task_id: 'a',
+          to_task_id: 'ghost',
+          kind: 'tree',
+        },
+        {
+          edge_id: 'tree:ghost->a',
+          from_task_id: 'ghost',
+          to_task_id: 'a',
+          kind: 'tree',
+        },
+      ],
+    };
+    const repaired = repairProjectTaskGraph(project, [live]);
+    expect(repaired.changed).toBe(true);
+    expect(repaired.project.task_graph_edges?.some((edge) => edge.to_task_id === 'ghost')).toBe(false);
+    expect(repaired.tasks[0]!.dependencies).not.toContain('ghost');
   });
 });
