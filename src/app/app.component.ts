@@ -1448,7 +1448,23 @@ export class AppComponent implements OnInit {
 
   taskChatComposerEnabled(task: ProjectTask): boolean {
     if (taskIsDiscoveryRoot(task)) return this.taskDiscoveryInterviewActive(task);
-    return this.taskAgentStarted(task);
+    if (task.status === 'ABANDONED') return false;
+    return true;
+  }
+
+  /** First chat message for a task that has not been executed yet (composer or Initial Prompt). */
+  taskPendingStartMessage(task: ProjectTask): string {
+    const draft = this.chatDraft.trim();
+    if (draft) return draft;
+    if (!this.taskAgentStarted(task)) return this.taskInitialPrompt.trim();
+    return '';
+  }
+
+  taskChatComposerPlaceholder(task: ProjectTask): string {
+    if (!this.taskAgentStarted(task) && !taskIsDiscoveryRoot(task)) {
+      return 'Message to start this task, or use Initial Prompt above.';
+    }
+    return 'Continue this task chat.';
   }
 
   taskAgentStarted(task: ProjectTask): boolean {
@@ -2356,11 +2372,28 @@ export class AppComponent implements OnInit {
   }
 
   async sendChat(): Promise<void> {
-    const message = this.chatDraft.trim();
+    const selection = this.store.selection();
+    const task = selection.kind === 'task' || selection.kind === 'subproject'
+      ? this.store.selectedTask()
+      : null;
+    const message = task && !this.taskAgentStarted(task)
+      ? this.taskPendingStartMessage(task)
+      : this.chatDraft.trim();
     if (!message) return;
+    if (task && !this.taskAgentStarted(task) && !taskIsDiscoveryRoot(task)) {
+      this.store.chatActionPending.set('execute');
+      try {
+        this.taskInitialPrompt = message;
+        this.chatDraft = '';
+        await this.saveTask();
+        if (!this.store.error()) await this.store.executeTask();
+      } finally {
+        this.store.chatActionPending.set(null);
+      }
+      return;
+    }
     this.store.chatActionPending.set('send');
     try {
-      const selection = this.store.selection();
       if (selection.kind === 'task' || selection.kind === 'subproject') await this.store.sendTaskMessage(message);
       else await this.store.sendProjectMessage(message);
       if (!this.store.error()) this.chatDraft = '';
