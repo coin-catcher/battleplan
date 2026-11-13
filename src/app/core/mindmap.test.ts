@@ -6,9 +6,11 @@ import {
   mindmapNodesInWorldRect,
   normalizeWorldRect,
   pickCardinalEdge,
+  pickConnectHoverSide,
   pointerToWorld,
   positionConnectedNode,
 } from './mindmap';
+import type { MindmapNode } from './mindmap';
 import { mindmapCanvasCenter, mindmapCanvasWorldSpan } from './project-ui-state';
 
 function task(id: string, partial: Partial<ProjectTask> = {}, order = 0): ProjectTask {
@@ -147,5 +149,23 @@ describe('mindmap', () => {
     const notesAfter = after.nodes.find((node) => node.id === 'notes');
     expect(notesBefore && notesAfter).toBeTruthy();
     expect(notesAfter!.x === notesBefore!.x && notesAfter!.y === notesBefore!.y).toBe(false);
+  });
+
+  it('detects connect hover band on task sides', () => {
+    const node: MindmapNode = {
+      id: 't1',
+      kind: 'task',
+      shape: 'code',
+      label: 'Task',
+      status: 'TODO',
+      x: 200,
+      y: 200,
+      width: 156,
+      height: 64,
+    };
+    const eastMidY = node.y;
+    const eastOutsideX = node.x + node.width / 2 + 6;
+    expect(pickConnectHoverSide(node, eastOutsideX, eastMidY, 10)).toBe('east');
+    expect(pickConnectHoverSide(node, node.x, node.y, 10)).toBe(null);
   });
 });

@@ -82,6 +82,49 @@ export function pickNorthWestCorner(
   return Math.hypot(worldX - cornerX, worldY - cornerY) <= thresholdPx;
 }
 
+export const CONNECT_ARROW_LENGTH_PX = 100;
+
+/** Point `distancePx` outward from the side anchor (used for initial connection arrow). */
+export function offsetFromCardinal(
+  node: MindmapNode,
+  direction: CardinalDirection,
+  distancePx: number,
+): { x: number; y: number } {
+  const anchor = cardinalAnchor(node, direction);
+  const { ux, uy } = CARDINAL_UNIT[direction];
+  return { x: anchor.x + ux * distancePx, y: anchor.y + uy * distancePx };
+}
+
+/**
+ * Hover band for the connect control: middle 40–60% of a side, up to `outsidePx` outside the node.
+ */
+export function pickConnectHoverSide(
+  node: MindmapNode,
+  worldX: number,
+  worldY: number,
+  outsidePx = 10,
+): CardinalDirection | null {
+  const bounds = mindmapNodeBounds(node);
+  const insideX = worldX > bounds.left && worldX < bounds.right;
+  const insideY = worldY > bounds.top && worldY < bounds.bottom;
+  if (insideX && insideY) return null;
+
+  const midXMin = bounds.left + node.width * 0.4;
+  const midXMax = bounds.left + node.width * 0.6;
+  const midYMin = bounds.top + node.height * 0.4;
+  const midYMax = bounds.top + node.height * 0.6;
+
+  if (worldX >= midXMin && worldX <= midXMax) {
+    if (worldY >= bounds.top - outsidePx && worldY <= bounds.top) return 'north';
+    if (worldY >= bounds.bottom && worldY <= bounds.bottom + outsidePx) return 'south';
+  }
+  if (worldY >= midYMin && worldY <= midYMax) {
+    if (worldX >= bounds.right && worldX <= bounds.right + outsidePx) return 'east';
+    if (worldX >= bounds.left - outsidePx && worldX <= bounds.left) return 'west';
+  }
+  return null;
+}
+
 export function pickCardinalEdge(
   node: MindmapNode,
   worldX: number,

@@ -272,20 +272,19 @@
             @if (visibleConnectDirection(node.id); as direction) {
               <button
                 type="button"
-                class="map-edge-arrow map-start-connect"
-                [class]="connectArrowClass(direction)"
-                [style.left.px]="connectArrowPoint(node.id, direction).x"
-                [style.top.px]="connectArrowPoint(node.id, direction).y"
-                [attr.aria-label]="'Start connection from ' + node.label"
-                (pointerdown)="onEdgePointerDown(node, direction, $event)"
+                class="map-connect-btn"
+                [style.left.px]="connectButtonPoint(node.id, direction).x"
+                [style.top.px]="connectButtonPoint(node.id, direction).y"
+                [attr.aria-label]="'Connect from ' + node.label"
+                (pointerdown)="onConnectPointerDown(node, direction, $event)"
               >+</button>
             }
             @if (connectionDropDirection(node.id); as dropDir) {
               <div
                 class="map-connect-drop-hint"
                 [class]="'dir-' + dropDir"
-                [style.left.px]="connectArrowPoint(node.id, dropDir).x"
-                [style.top.px]="connectArrowPoint(node.id, dropDir).y"
+                [style.left.px]="connectButtonPoint(node.id, dropDir).x"
+                [style.top.px]="connectButtonPoint(node.id, dropDir).y"
                 aria-hidden="true"
               ></div>
             }
@@ -386,11 +385,21 @@
               }
             </div>
           }
+          @if (connectionSession(); as session) {
+            <button
+              type="button"
+              class="map-connection-head"
+              [style.left.px]="session.headX"
+              [style.top.px]="session.headY"
+              aria-label="Drag connection to another task"
+              (pointerdown)="onConnectionHeadPointerDown($event)"
+            ></button>
+          }
           @if (connectPanel(); as panel) {
             <div
               class="map-connect-panel"
-              [style.left.px]="connectArrowPoint(panel.sourceId, panel.direction).x"
-              [style.top.px]="connectArrowPoint(panel.sourceId, panel.direction).y + 28"
+              [style.left.px]="connectButtonPoint(panel.sourceId, panel.direction).x"
+              [style.top.px]="connectButtonPoint(panel.sourceId, panel.direction).y + 34"
               (pointerdown)="$event.stopPropagation()"
             >
               @for (kind of mindmapConnectTaskKinds; track kind) {
