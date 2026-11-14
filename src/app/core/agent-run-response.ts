@@ -58,7 +58,8 @@ const TERMINAL_AGENT_RUN_STATUSES = new Set([
 
 /** Cursor (or adapter) reports the agent run has ended. */
 export function isTerminalAgentRunStatus(status?: string): boolean {
-  return Boolean(status && TERMINAL_AGENT_RUN_STATUSES.has(status));
+  const normalized = (status ?? '').trim().toUpperCase();
+  return Boolean(normalized && TERMINAL_AGENT_RUN_STATUSES.has(normalized));
 }
 
 function looksLikeInterimAcknowledgment(text: string): boolean {
@@ -105,7 +106,8 @@ export function isWorkflowTerminalAgentReply(content: string, run?: AgentRunText
   const result = run?.result?.trim() ?? '';
   const body = (result || content).trim();
 
-  if (isTerminalAgentRunStatus(run?.status)) {
+  const runStatus = (run?.status ?? '').trim().toUpperCase();
+  if (isTerminalAgentRunStatus(runStatus)) {
     return true;
   }
 

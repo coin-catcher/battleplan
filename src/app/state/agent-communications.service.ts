@@ -24,6 +24,7 @@ export type TaskConversationUpdate = {
   messages: ChatMessage[];
   task: ProjectTask;
   artifacts: ChatArtifact[];
+  latestAgentRun?: import('../core/agent-run-response').AgentRunTextSource;
 };
 
 export type TaskConversationObserver = (update: TaskConversationUpdate) => void;
@@ -214,7 +215,7 @@ export class AgentCommunicationsService {
         const refreshed = await this.api.listTaskMessages(taskId);
         if (this.taskGeneration.get(taskId) !== generation) return;
         this.broadcastTaskUpdate(refreshed);
-        this.maybeStopTaskWatch(taskId, refreshed.task, refreshed.messages, generation);
+        this.maybeStopTaskWatch(taskId, refreshed, generation);
       } else {
         const result = await this.api.listTaskMessages(taskId);
         if (this.taskGeneration.get(taskId) !== generation) return;
@@ -222,7 +223,7 @@ export class AgentCommunicationsService {
         if (!this.watchingNeedsContinue(result.task, result.messages, forced)) {
           if (bridge.isWatchingTaskChat(taskId)) await bridge.refreshOutput(result.task);
         }
-        this.maybeStopTaskWatch(taskId, result.task, result.messages, generation);
+        this.maybeStopTaskWatch(taskId, result, generation);
       }
     } catch {
       // Keep polling through transient failures.
@@ -247,20 +248,28 @@ export class AgentCommunicationsService {
 
   private maybeStopTaskWatch(
     taskId: string,
-    task: ProjectTask,
-    messages: ChatMessage[],
+    update: TaskConversationUpdate,
     generation: number,
   ): void {
     if (this.taskGeneration.get(taskId) !== generation) return;
     const bridge = this.bridge;
+    const { task, messages } = update;
     const subprojectAgent = task.subproject_id && bridge
       ? bridge.subprojectCursorAgentId(task.subproject_id)
       : undefined;
     const forced = this.pendingReply.has(taskId);
-    if (runReceivedWorkflowTerminalReply(messages, taskId, task.latest_run_id)) {
+    if (runReceivedWorkflowTerminalReply(
+      messages,
+      taskId,
+      task.latest_run_id,
+      update.latestAgentRun,
+    )) {
       this.clearPendingReply(taskId);
     }
-    if (!taskNeedsAgentSessionWatch(task, messages, subprojectAgent, { forcePending: forced })) {
+    if (!taskNeedsAgentSessionWatch(task, messages, subprojectAgent, {
+      forcePending: forced,
+      latestRun: update.latestAgentRun,
+    })) {
       this.stopTaskWatch(taskId);
     }
   }

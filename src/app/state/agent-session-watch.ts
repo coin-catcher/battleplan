@@ -1,8 +1,6 @@
 import type { ChatMessage, ProjectTask } from '../core/models';
-import {
-  isWorkflowTerminalAgentReply,
-  type AgentRunTextSource,
-} from '../core/agent-run-response';
+import { agentTurnMayCompleteWorkflow } from '../core/agent-run-completion';
+import type { AgentRunTextSource } from '../core/agent-run-response';
 import { taskChatAwaitingWorkflowReply } from '../core/task-status-coalesce';
 import { taskNeedsDoingBackgroundPoll } from '../core/task-state-machine';
 
@@ -11,12 +9,17 @@ export function taskNeedsAgentSessionWatch(
   task: ProjectTask,
   messages: ChatMessage[],
   subprojectCursorAgentId: string | undefined,
-  options?: { forcePending?: boolean },
+  options?: { forcePending?: boolean; latestRun?: AgentRunTextSource },
 ): boolean {
   if (options?.forcePending) return true;
   if (task.pending_action === 'merge') return true;
   if (taskNeedsDoingBackgroundPoll(task, subprojectCursorAgentId)) return true;
-  return taskChatAwaitingWorkflowReply(messages, task.task_id, task.latest_run_id);
+  return taskChatAwaitingWorkflowReply(
+    messages,
+    task.task_id,
+    task.latest_run_id,
+    options?.latestRun,
+  );
 }
 
 export function agentSessionWatchTaskIds(
@@ -51,6 +54,8 @@ export function runReceivedWorkflowTerminalReply(
     && message.role === 'assistant'
     && message.run_id === latestRunId
   ));
-  if (!assistant) return false;
-  return isWorkflowTerminalAgentReply(assistant.content, run);
+  if (!assistant) {
+    return agentTurnMayCompleteWorkflow('', run);
+  }
+  return agentTurnMayCompleteWorkflow(assistant.content, run);
 }

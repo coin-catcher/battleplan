@@ -670,6 +670,46 @@ describe('LocalEngine', () => {
     });
     const page = await engine.listTaskMessages(task.task_id);
     expect(page.task.status).toBe('REVIEW');
+    expect(page.latestAgentRun?.status).toBe('FINISHED');
+  });
+
+  it('moves DOING to REVIEW when FINISHED run has result but assistant row was missing', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    client.getRun = async () => ({
+      id: 'run-done',
+      agentId: 'agent-task',
+      status: 'FINISHED',
+      result: 'All changes are committed.',
+    });
+    const engine = new LocalEngine(repo, client, () => '2026-10-02T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const task = await engine.createTask('p1', { title: 'Work', output_type: 'code', initial_prompt: 'Go' });
+    task.cursor_agent_id = 'agent-task';
+    task.status = 'DOING';
+    task.latest_run_id = 'run-done';
+    await repo.saveTask(task);
+    await repo.saveMessage({
+      message_id: 'm-user',
+      scope: 'task',
+      project_id: 'p1',
+      task_id: task.task_id,
+      role: 'user',
+      content: 'go',
+      run_id: 'run-done',
+      intent: 'feedback',
+      created_at: '2026-10-02T00:00:00.000Z',
+    });
+    const page = await engine.listTaskMessages(task.task_id);
+    expect(page.task.status).toBe('REVIEW');
+    expect(page.messages.some((message) => message.role === 'assistant' && message.run_id === 'run-done')).toBe(true);
   });
 
   it('marks a task DOING when chat feedback is sent', async () => {
