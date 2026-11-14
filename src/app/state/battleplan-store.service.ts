@@ -1743,6 +1743,7 @@ export class BattleplanStore {
     const taskId = task.task_id;
     const statusBeforeExecute = task.status;
     this.patchTaskStatus(taskId, 'DOING');
+    this.agentComms.registerPendingReply(taskId);
     let runId: string | undefined;
     await this.run(async () => {
       const sent = await this.api.executeTask(taskId);
@@ -1910,6 +1911,7 @@ export class BattleplanStore {
     }
     this.clearTaskPanelError(taskId);
     this.patchTaskStatus(taskId, 'DOING');
+    this.agentComms.registerPendingReply(taskId);
     let runId: string | undefined;
     let watchProjectId: string | undefined;
     await this.run(async () => {
@@ -1974,7 +1976,8 @@ export class BattleplanStore {
       this.syncDoingBackgroundWatches();
       return;
     }
-        this.agentComms.ensureTaskWatch(taskId);
+    this.agentComms.registerPendingReply(taskId);
+    this.agentComms.ensureTaskWatch(taskId);
     void this.finishApproveMerge(taskId);
   }
 
@@ -2114,7 +2117,11 @@ export class BattleplanStore {
   }
 
   private syncDoingBackgroundWatches(): void {
-    this.agentComms.syncTaskWatches(this.tasks(), (id) => this.subprojectCursorAgentId(id));
+    this.agentComms.syncTaskWatches(
+      this.tasks(),
+      (id) => this.subprojectCursorAgentId(id),
+      (taskId) => this.taskChatCache.get(taskId)?.messages ?? [],
+    );
   }
 
   private async syncTaskPanelAfterOpen(
