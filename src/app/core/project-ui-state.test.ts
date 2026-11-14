@@ -8,6 +8,7 @@ import {
   mindmapViewCenteredOnWorldPoint,
   mindmapViewFromScroll,
   MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX,
+  MINDMAP_WORLD_CANVAS_FRACTION,
   normalizeProjectWorkspaceUiState,
   projectWorkspaceUiFromMindmap,
 } from './project-ui-state';
@@ -40,9 +41,14 @@ describe('project-ui-state', () => {
     expect(view.origin_y + 600 / 2).toBeCloseTo(25_600, 0);
   });
 
-  it('sizes world canvas for edge-to-edge view at minimum zoom', () => {
-    expect(mindmapCanvasWorldSpan()).toBe(Math.ceil(MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX / MIN_MINDMAP_ZOOM));
-    expect(MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX / mindmapCanvasWorldSpan()).toBe(MIN_MINDMAP_ZOOM);
+  it('keeps viewport reference at full size but halves world canvas span', () => {
+    const fullSpan = MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX / MIN_MINDMAP_ZOOM;
+    expect(mindmapCanvasWorldSpan()).toBe(Math.ceil(fullSpan * MINDMAP_WORLD_CANVAS_FRACTION));
+    expect(mindmapCanvasWorldSpan()).toBeLessThan(fullSpan);
+    expect(mindmapCanvasWorldSpan() * MIN_MINDMAP_ZOOM).toBeCloseTo(
+      MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX * MINDMAP_WORLD_CANVAS_FRACTION,
+      0,
+    );
   });
 
   it('centers the viewport on a world point', () => {
