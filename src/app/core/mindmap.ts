@@ -57,7 +57,7 @@ export const PROJECT_RADIUS = 68;
 export const TASK_WIDTH = 156;
 export const TASK_HEIGHT = 64;
 /** Bumped when persisted map coordinates are re-centered on the world canvas. */
-export const MINDMAP_PLACEMENT_VERSION = 1;
+export const MINDMAP_PLACEMENT_VERSION = 2;
 export const MINDMAP_CANVAS_MARGIN_PX = 80;
 
 export type CardinalDirection = 'north' | 'south' | 'east' | 'west';
