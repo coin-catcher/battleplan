@@ -48,4 +48,21 @@ Manual transitions (`manual: true` from Task page):
 
 - **Manual status wins** over in-flight agent reconciliation (no `reconcileStatus` on manual refresh).
 - Orchestration dispatch on DONE may exceed 1s — candidate for async follow-up if humans mark DONE during active graph runs.
-- Project-level status dropdown uses `transitionProject` + `listProjectMessages` (still full project sync) — separate audit if needed.
+## Root project status (Task page project dropdown)
+
+Same **≤1s** rule as tasks (`onProjectStatusChange` → `store.transitionProject`):
+
+| Step | Notes |
+| --- | --- |
+| Optimistic | `patchRootProjectStatus` |
+| Engine | `updateProject` — local `applyProjectStatusTransition` + change message (no GitHub/Cursor on critical path) |
+| Chat | `listProjectMessages({ syncAgent: false })` |
+| Background | `syncDoingBackgroundWatches()` after transition |
+
+## Manual vs agent status (product)
+
+| Source | Behavior |
+| --- | --- |
+| Human dropdown | Immediate; manual choice sticks until the next agent reconcile |
+| Agent reply (background poll) | Reconcile may move the task to workflow-true status; human may override again |
+| DONE + orchestration | `autoDispatchReadyTasks` runs **async** (does not block status dropdown) |

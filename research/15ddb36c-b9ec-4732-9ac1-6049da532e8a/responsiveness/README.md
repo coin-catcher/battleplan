@@ -14,6 +14,8 @@
 | Reopen task panel | **Cache-first** + `chatAgentSyncing` until background sync completes — acceptable. |
 | `registerPendingReply` | **Only user Send, Execute, and Approve** — not graph orchestration dispatch (orchestration uses DOING + `syncTaskWatches`). |
 | Naming | Product/docs: **AgentService** (`AgentCommunicationsService` in code). Other `Agent*` injectables (`AgentConnectionService`, `AgentStatisticsService`) are different categories (credentials, stats), not a second session coordinator. |
+| Manual status | **Immediate** for human dropdown (task + root project, ≤1s local path). **Agent polls** may reconcile to workflow-true status afterward; human may override again. |
+| Orchestration on DONE | **Async** — does not block status UI. |
 
 ## Distilled understanding (grilling round — 2026-11-14)
 

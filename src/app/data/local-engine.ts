@@ -922,7 +922,7 @@ export class LocalEngine {
         await this.cascadeAbandonChildren(projectId, task);
       }
       if (patch.status === 'DONE') {
-        await this.autoDispatchReadyTasks(projectId);
+        void this.autoDispatchReadyTasks(projectId);
       }
     }
     if (patch.map_x !== undefined) task.map_x = patch.map_x;
