@@ -56,6 +56,9 @@ export interface MindmapLayout {
 export const PROJECT_RADIUS = 68;
 export const TASK_WIDTH = 156;
 export const TASK_HEIGHT = 64;
+/** Bumped when persisted map coordinates are re-centered on the world canvas. */
+export const MINDMAP_PLACEMENT_VERSION = 1;
+export const MINDMAP_CANVAS_MARGIN_PX = 80;
 
 export type CardinalDirection = 'north' | 'south' | 'east' | 'west';
 
@@ -224,6 +227,57 @@ export function mindmapNodesInWorldRect(nodes: MindmapNode[], rect: WorldRect): 
     .map((node) => node.id);
 }
 
+export function mindmapNodesWorldExtent(nodes: MindmapNode[]): {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+} {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const node of nodes) {
+    const bounds = mindmapNodeBounds(node);
+    minX = Math.min(minX, bounds.left);
+    minY = Math.min(minY, bounds.top);
+    maxX = Math.max(maxX, bounds.right);
+    maxY = Math.max(maxY, bounds.bottom);
+  }
+  if (!Number.isFinite(minX)) {
+    return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/** Move (and scale uniformly about the project) so the graph is centered and fits the canvas. */
+export function applyMindmapCanvasFrame(nodes: MindmapNode[], canvasSpan: number): void {
+  const margin = MINDMAP_CANVAS_MARGIN_PX;
+  const project = nodes.find((node) => node.id === 'project');
+  if (!project) return;
+  const target = canvasSpan / 2;
+  const dx = target - project.x;
+  const dy = target - project.y;
+  for (const node of nodes) {
+    node.x += dx;
+    node.y += dy;
+  }
+
+  const inner = canvasSpan - margin * 2;
+  let extent = mindmapNodesWorldExtent(nodes);
+  let width = extent.maxX - extent.minX;
+  let height = extent.maxY - extent.minY;
+  const scale = Math.min(1, inner / Math.max(width, 1), inner / Math.max(height, 1));
+  if (scale < 1) {
+    const cx = project.x;
+    const cy = project.y;
+    for (const node of nodes) {
+      node.x = cx + (node.x - cx) * scale;
+      node.y = cy + (node.y - cy) * scale;
+    }
+  }
+}
+
 export function layoutMindmap(
   title: string,
   tasks: ProjectTask[],
@@ -312,19 +366,7 @@ export function layoutMindmap(
     });
   }
   separateUnpinned(nodes, tasks);
-
-  let maxX = projectX + 800;
-  let maxY = projectY + 600;
-  let minX = projectX - 800;
-  let minY = projectY - 600;
-  for (const node of nodes) {
-    maxX = Math.max(maxX, node.x + node.width / 2 + 80);
-    maxY = Math.max(maxY, node.y + node.height / 2 + 80);
-    minX = Math.min(minX, node.x - node.width / 2 - 80);
-    minY = Math.min(minY, node.y - node.height / 2 - 80);
-  }
-  const contentWidth = maxX - minX;
-  const contentHeight = maxY - minY;
+  applyMindmapCanvasFrame(nodes, minCanvasSpan);
 
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const project = nodeById.get('project');
@@ -360,8 +402,8 @@ export function layoutMindmap(
     }
   }
   return {
-    width: Math.max(minCanvasSpan, contentWidth, maxX + 80),
-    height: Math.max(minCanvasSpan, contentHeight, maxY + 80),
+    width: minCanvasSpan,
+    height: minCanvasSpan,
     nodes,
     edges,
   };

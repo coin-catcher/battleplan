@@ -22,7 +22,12 @@ import { defaultOptionValues, getAgentTypeDefinition } from '../core/agent-types
 import { isAgentDraftId, newDraftAgentId } from '../core/agent-id';
 import type { AgentEditorSaveInput } from '../api/battleplan-api.service';
 import { fieldsFromTaskEditorKind } from '../core/task-editor-kind';
-import { layoutMindmap, positionConnectedNode, type CardinalDirection } from '../core/mindmap';
+import {
+  layoutMindmap,
+  MINDMAP_PLACEMENT_VERSION,
+  positionConnectedNode,
+  type CardinalDirection,
+} from '../core/mindmap';
 import {
   findLastAssistantTaskGraph,
   generateTasksSourceTaskId,
@@ -573,8 +578,46 @@ export class BattleplanStore {
     if (options?.mindmapView !== undefined) {
       return options.mindmapView;
     }
+    const remapped = await this.ensureMindmapPlacementMigrated(projectId);
     const persisted = await this.api.getProjectUiState(projectId);
+    if (remapped) return null;
     return persisted ? mindmapViewFromProjectUiState(persisted) : null;
+  }
+
+  private async ensureMindmapPlacementMigrated(projectId: string): Promise<boolean> {
+    const project = this.project();
+    if (!project || project.project_id !== projectId) return false;
+    if ((project.mindmap_placement_version ?? 0) >= MINDMAP_PLACEMENT_VERSION) return false;
+    const tasks = this.tasks().filter((task) => task.project_id === projectId);
+    const layout = layoutMindmap(
+      project.title,
+      tasks,
+      Number.isFinite(project.map_x) && Number.isFinite(project.map_y)
+        ? { x: project.map_x as number, y: project.map_y as number }
+        : undefined,
+      project.status,
+      project.task_graph_edges,
+    );
+    const projectNode = layout.nodes.find((node) => node.id === 'project');
+    if (!projectNode) return false;
+    await this.run(async () => {
+      await this.api.updateProject(projectId, {
+        map_x: Math.round(projectNode.x),
+        map_y: Math.round(projectNode.y),
+        mindmap_placement_version: MINDMAP_PLACEMENT_VERSION,
+      });
+      for (const task of tasks) {
+        const node = layout.nodes.find((item) => item.id === task.task_id);
+        if (!node) continue;
+        const updated = await this.api.updateTask(projectId, task.task_id, {
+          map_x: Math.round(node.x),
+          map_y: Math.round(node.y),
+        });
+        this.replaceTask(updated);
+      }
+      await this.reloadProjects();
+    });
+    return true;
   }
 
   async refreshPendingChanges(): Promise<void> {

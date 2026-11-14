@@ -68,7 +68,7 @@ import { linkKey, type MindmapLinkRef } from './core/link-relocation';
 import {
   clampMindmapZoom,
   mindmapScrollFromView,
-  mindmapViewCenteredOnCanvas,
+  mindmapViewCenteredOnWorldPoint,
   mindmapViewFromScroll,
   type MindmapViewState,
 } from './core/project-ui-state';
@@ -1088,9 +1088,10 @@ export class AppComponent implements OnInit {
     const stage = this.mapStage()?.nativeElement;
     if (!stage) return;
     const layout = this.map();
-    const view = mindmapViewCenteredOnCanvas(
-      layout.width,
-      layout.height,
+    const project = layout.nodes.find((node) => node.id === 'project');
+    const view = mindmapViewCenteredOnWorldPoint(
+      project?.x ?? layout.width / 2,
+      project?.y ?? layout.height / 2,
       stage.clientWidth,
       stage.clientHeight,
       this.zoom(),

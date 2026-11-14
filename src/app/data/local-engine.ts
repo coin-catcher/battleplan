@@ -352,6 +352,7 @@ export class LocalEngine {
     release_source_ref?: string;
     release_target_ref?: string;
     mindmap_theme?: import('../core/mindmap-theme').MindmapThemeId;
+    mindmap_placement_version?: number;
   }): Promise<Project> {
     const project = await this.requireProject(projectId);
     const changes: string[] = [];
@@ -404,6 +405,9 @@ export class LocalEngine {
       const next = patch.mindmap_theme === 'light' ? 'light' : 'dark';
       if (next !== (project.mindmap_theme ?? 'dark')) changes.push(`Mindmap theme: ${next}`);
       project.mindmap_theme = next;
+    }
+    if (patch.mindmap_placement_version !== undefined) {
+      project.mindmap_placement_version = patch.mindmap_placement_version;
     }
     if (patch.default_research_agent_id !== undefined) {
       const next = patch.default_research_agent_id.trim();

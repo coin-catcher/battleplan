@@ -14,7 +14,7 @@ export interface ProjectWorkspaceUiState {
 /** 0.01 ⇒ 100 world px render as 1 screen px (100× zoom out from 1:1). */
 export const MIN_MINDMAP_ZOOM = 0.01;
 /** Reference viewport edge length when sizing the mindmap world canvas. */
-export const MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX = 1024;
+export const MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX = 512;
 const MAX_ZOOM = 2.5;
 const MIN_PANE = 280;
 const MAX_PANE = 720;
@@ -72,6 +72,22 @@ export function mindmapViewCenteredOnCanvas(
     zoom: safeZoom,
     origin_x: centerX - viewportWidth / (2 * safeZoom),
     origin_y: centerY - viewportHeight / (2 * safeZoom),
+  };
+}
+
+/** Scroll origin so `worldX`,`worldY` sits at the viewport center. */
+export function mindmapViewCenteredOnWorldPoint(
+  worldX: number,
+  worldY: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  zoom = 1,
+): MindmapViewState {
+  const safeZoom = clampMindmapZoom(zoom);
+  return {
+    zoom: safeZoom,
+    origin_x: worldX - viewportWidth / (2 * safeZoom),
+    origin_y: worldY - viewportHeight / (2 * safeZoom),
   };
 }
 

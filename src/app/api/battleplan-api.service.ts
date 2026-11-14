@@ -67,6 +67,7 @@ export class BattleplanApi {
     release_source_ref?: string;
     release_target_ref?: string;
     mindmap_theme?: import('../core/mindmap-theme').MindmapThemeId;
+    mindmap_placement_version?: number;
   }): Promise<Project> {
     return this.engine.updateProject(projectId, patch);
   }
