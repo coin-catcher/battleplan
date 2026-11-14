@@ -824,13 +824,17 @@ export class BattleplanStore {
   async transitionProject(status: TaskStatus, manual: boolean): Promise<void> {
     const project = this.project();
     if (!project) return;
+    const projectId = project.project_id;
+    if (manual) this.patchRootProjectStatus(projectId, status);
     await this.run(async () => {
-      const updated = await this.api.transitionProject(project.project_id, status, manual);
+      const updated = await this.api.transitionProject(projectId, status, manual);
       this.projects.update((projects) => projects.map((item) => (
         item.project_id === updated.project_id ? updated : item
       )));
-      this.applyConversation(await this.api.listProjectMessages(project.project_id));
+      const page = await this.api.listProjectMessages(projectId, { syncAgent: false });
+      this.applyConversation(page);
     });
+    this.syncDoingBackgroundWatches();
   }
 
   async approveProjectRelease(): Promise<void> {
@@ -1736,14 +1740,15 @@ export class BattleplanStore {
   async transition(taskId: string, status: TaskStatus, manual: boolean): Promise<void> {
     const task = this.tasks().find((item) => item.task_id === taskId);
     if (!task) return;
+    if (manual) this.patchTaskStatus(taskId, status);
     await this.run(async () => {
       const updated = await this.api.transition(task.project_id, taskId, status, manual);
       this.replaceTask(updated);
-      if (updated.cursor_agent_id) {
-        const result = await this.api.listTaskMessages(taskId);
-        this.applyTaskConversation(result);
-        await this.refreshOutput(result.task);
-      }
+      const result = await this.api.listTaskMessages(taskId, {
+        syncAgent: false,
+        reconcileStatus: manual ? false : undefined,
+      });
+      this.applyTaskConversation(result);
     });
     if (this.selection().kind === 'task') this.continueTaskWatch(taskId);
     this.syncDoingBackgroundWatches();
@@ -2544,6 +2549,16 @@ export class BattleplanStore {
       const next = exists ? tasks.map((item) => item.task_id === task.task_id ? task : item) : [...tasks, task];
       return next.sort((left, right) => left.order - right.order);
     });
+  }
+
+  /** Optimistic root project status before async engine calls complete. */
+  private patchRootProjectStatus(projectId: string, status: TaskStatus): void {
+    const timestamp = new Date().toISOString();
+    this.projects.update((projects) => projects.map((item) => (
+      item.project_id === projectId
+        ? { ...item, status, updated_at: timestamp }
+        : item
+    )));
   }
 
   /** Optimistic status for mindmap/kanban before async engine calls complete. */

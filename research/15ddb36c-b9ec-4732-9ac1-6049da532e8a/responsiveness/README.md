@@ -14,6 +14,8 @@
 | Reopen task panel | **Cache-first** + `chatAgentSyncing` until background sync completes — acceptable. |
 | `registerPendingReply` | **Only user Send, Execute, and Approve** — not graph orchestration dispatch (orchestration uses DOING + `syncTaskWatches`). |
 | Naming | Product/docs: **AgentService** (`AgentCommunicationsService` in code). Other `Agent*` injectables (`AgentConnectionService`, `AgentStatisticsService`) are different categories (credentials, stats), not a second session coordinator. |
+| Manual status | **Immediate** for human dropdown (task + root project, ≤1s local path). **Agent polls** may reconcile to workflow-true status afterward; human may override again. |
+| Orchestration on DONE | **Async** — does not block status UI. |
 
 ## Distilled understanding (grilling round — 2026-11-14)
 
@@ -33,6 +35,14 @@
 | Workflow transitions | `isWorkflowTerminalAgentReply` gates `applyTaskRun` and “answered run” detection; interim messages still appear in chat. |
 | Focus switch | Task cache + `coalesceCachedTaskStatus` keeps DOING on mindmap while background poll active. |
 | **AgentService coordinator** (grill 2026-11-14) | Global async coordinator: `registerPendingReply` on Send/Execute/Approve only; `pendingReply` set; `taskNeedsAgentSessionWatch` + cached messages in `syncTaskWatches`; broadcast via bridge `onTaskConversation` (persists task + cache / mindmap). Optional `observeTask` for focused live transcript. |
+
+### Manual task status latency (grill 2026-11-14)
+
+**Goal:** Status dropdown → save + mindmap color + history line in **≤1s**.
+
+**Finding:** After local save, store awaited **`listTaskMessages` with full Cursor sync** for any task with `cursor_agent_id` (~10s). See **`status-change-audit.md`**.
+
+**Fix on branch:** Optimistic `patchTaskStatus`; manual transitions reload chat with `syncAgent: false` and **`reconcileStatus: false`** (manual override respected); AgentService handles background Cursor sync.
 
 ### User-reported bug (grill 2026-11-14)
 
