@@ -4,6 +4,17 @@
 
 **Implementation branch (code):** `cursor/responsiveness-1a9f` (synced with `develop`).
 
+## Distilled understanding (grilling round — 2026-11-14, updated)
+
+### Human decisions (same round)
+
+| Topic | Decision |
+| --- | --- |
+| Mindmap while agents run | **No per-node spinners**; update status when the workflow-terminal reply lands. |
+| Reopen task panel | **Cache-first** + `chatAgentSyncing` until background sync completes — acceptable. |
+| `registerPendingReply` | **Only user Send, Execute, and Approve** — not graph orchestration dispatch (orchestration uses DOING + `syncTaskWatches`). |
+| Naming | Product/docs: **AgentService** (`AgentCommunicationsService` in code). Other `Agent*` injectables (`AgentConnectionService`, `AgentStatisticsService`) are different categories (credentials, stats), not a second session coordinator. |
+
 ## Distilled understanding (grilling round — 2026-11-14)
 
 ### Problem
@@ -18,10 +29,10 @@
 | --- | --- |
 | Panel open | Local/cache transcript immediately; `syncAgent: false` first; background sync + `chatAgentSyncing` (Send disabled, spinner beside button). |
 | Approve / Release | `prepare*` updates status + chat synchronously; heavy GitHub/agent work in background; user can navigate away. |
-| Session polling | `AgentCommunicationsService` + store bridge; `docs/AGENT_COMMUNICATIONS.md`; orchestrator uses `ensureTaskWatch` / `syncTaskWatches` (see also `docs/GRAPH_ORCHESTRATION.md`). |
+| Session polling | **AgentService** (`AgentCommunicationsService`) + store bridge; `docs/AGENT_COMMUNICATIONS.md`; orchestrator uses `ensureTaskWatch` / `syncTaskWatches` only (see `docs/GRAPH_ORCHESTRATION.md`). |
 | Workflow transitions | `isWorkflowTerminalAgentReply` gates `applyTaskRun` and “answered run” detection; interim messages still appear in chat. |
 | Focus switch | Task cache + `coalesceCachedTaskStatus` keeps DOING on mindmap while background poll active. |
-| **AgentService coordinator** (grill 2026-11-14) | `AgentCommunicationsService` acts as global async coordinator: `registerPendingReply`, `pendingReply` set, `taskNeedsAgentSessionWatch` + cached messages in `syncTaskWatches`, broadcast via bridge `onTaskConversation` (always persists task + cache / mindmap). Optional `observeTask` for focused live transcript. |
+| **AgentService coordinator** (grill 2026-11-14) | Global async coordinator: `registerPendingReply` on Send/Execute/Approve only; `pendingReply` set; `taskNeedsAgentSessionWatch` + cached messages in `syncTaskWatches`; broadcast via bridge `onTaskConversation` (persists task + cache / mindmap). Optional `observeTask` for focused live transcript. |
 
 ### User-reported bug (grill 2026-11-14)
 
@@ -41,10 +52,10 @@ Send on **Task A**, switch to **Task B** → Task A agent status and mindmap sta
 1. Written spec: responsibilities split (UI / agent comms / engine / orchestrator hooks) — **PASS** (`docs/AGENT_COMMUNICATIONS.md`, `docs/GRAPH_ORCHESTRATION.md` cross-ref).
 2. Written spec: terminal vs interim agent replies and status semantics — **PASS** (`src/app/core/agent-run-response.ts` + tests).
 3. Checklist mapping original product feedback (panel load, async merge/release, focus switch) to shipped behaviors — **this folder `dod-checklist.md`**.
-4. Open questions resolved with human (provider matrix, Hermes timeline, e2e acceptance) — **PENDING**.
+4. Open questions resolved with human (provider matrix, Hermes timeline, e2e acceptance) — **PARTIAL** (AgentService UX + naming resolved this round; provider matrix + e2e still open).
 5. Human confirms research complete / code task DoD for any remaining gaps — **PENDING**.
 
 ## References
 
-- Code: `AgentCommunicationsService`, `BattleplanStore` bridge, `LocalEngine.prepareApprove` / `executeApproveMerge`, fast `openTask`.
+- Code: **AgentService** (`agent-communications.service.ts`, `agent-session-watch.ts`), `BattleplanStore` bridge, `LocalEngine.prepareApprove` / `executeApproveMerge`, fast `openTask`.
 - Prior merges: responsiveness UX, state-transitions work on `develop`.

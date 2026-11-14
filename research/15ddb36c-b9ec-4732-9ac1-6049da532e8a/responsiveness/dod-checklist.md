@@ -5,32 +5,41 @@
 
 | # | Criterion | Status | Notes |
 |---|-----------|--------|-------|
-| 1 | Scope & DoD grilled with human | **PARTIAL** | README DoD proposed; human synced branch + grilling continuation this round |
-| 2 | UI/agent separation documented for orchestrator | **PASS** | AGENT_COMMUNICATIONS.md + GRAPH_ORCHESTRATION.md on develop |
+| 1 | Scope & DoD grilled with human | **PARTIAL** | AgentService UX, pending-reply scope, naming locked; scope spec-vs-code + handoff still open |
+| 2 | UI/agent separation documented for orchestrator | **PASS** | AGENT_COMMUNICATIONS.md + GRAPH_ORCHESTRATION.md |
 | 3 | Premature DOING→REVIEW bug root cause & fix documented | **PASS** | isWorkflowTerminalAgentReply + engine applyTaskRun gating |
-| 4 | Fast focus switch + background updates documented | **PASS** | cache, coalesceCachedTaskStatus, agent comms service |
-| 4b | Unfocused task keeps agent session until terminal reply | **PASS (code)** | `registerPendingReply`, `agent-session-watch`, broadcast persist via bridge; **human UX sign-off pending** |
-| 5 | Async Approve & Release semantics documented | **PASS** | prepare/execute split in engine + store |
+| 4 | Fast focus switch + background updates documented | **PASS** | cache, coalesceCachedTaskStatus, AgentService |
+| 4b | Unfocused task keeps agent session until terminal reply | **PASS (code + spec)** | registerPendingReply, agent-session-watch, bridge persist; **desktop acceptance not recorded** |
+| 4c | Mindmap / panel UX while unfocused | **PASS (spec)** | No per-node spinners; cache-first + chatAgentSyncing on reopen |
+| 5 | Async Approve & Release semantics documented | **PASS** | prepare/execute split; Approve registers pending; Release uses project watch |
 | 6 | Open provider matrix (Cursor / OpenAI / Hermes) | **PENDING** | sessionKind stub only |
 | 7 | Human acceptance: manual UX checklist passed on desktop | **PENDING** | Not recorded in repo |
 | 8 | Human declares research handoff complete | **PENDING** | |
 
 ## Blockers (deliverables not yet sufficient)
 
-1. **Human:** Confirm whether this research task is **spec-only** or must also track **remaining code gaps** on `cursor/responsiveness-1a9f` vs what already landed via merged PR #195 and follow-on `develop` commits (orchestration, state-transitions).
+1. **Human:** Confirm whether this research task is **spec-only** or must also track **remaining code gaps** on `cursor/responsiveness-1a9f` vs merged PR #195 + `develop`.
 2. **Human:** Provide official **`task_id` UUID** if artifacts must move to `research/{project_id}/{uuid}/`.
-3. **Human:** Sign off on **acceptance tests** (mindmap switch latency, approve-and-navigate-away, release-from-task-view, no spurious REVIEW while agent typing).
-4. **Engineering:** Hermes/OpenAI session polling not implemented in `AgentCommunicationsService` — document as follow-on or in-scope for a child code task.
+3. **Human:** Sign off on **acceptance tests** (send on A → switch to B → A mindmap/chat updates; approve-and-navigate-away; no spurious REVIEW on interim ack).
+4. **Engineering:** Hermes/OpenAI session polling not implemented in AgentService — follow-on child task unless human expands scope.
+5. **Human:** Confirm **project-level Release** (async merge) unfocused behavior matches task-level expectations — currently project DOING watch only, not `registerPendingReply`.
 
-## This round incorporated
+## Resolved this round (human)
 
-- Git workflow: single branch `cursor/responsiveness-1a9f`, merge `develop`, push only, no agent-opened PRs.
-- Branch synced to `develop` (includes graph orchestration, state transition fixes post-responsiveness merge).
-- **AgentService** observer/pending-reply design from human message; implementation on branch (`agent-session-watch`, extended `AgentCommunicationsService`, store `registerPendingReply` on send/execute/approve).
+| Question | Answer |
+| --- | --- |
+| Mindmap indicators for multiple in-flight agents | Correct status when reply lands — **no extra spinners** |
+| Reopen panel while sync in flight | **Cache-first + chatAgentSyncing OK** |
+| Orchestration + `registerPendingReply` | **Only Send / Execute / Approve** |
+| AgentService vs AgentCommunicationsService | **AgentService** in product/docs; keep TS class name; `AgentConnectionService` / `AgentStatisticsService` are separate concerns |
 
 ## Open clarifying questions (human)
 
-1. Should **multiple tasks** in flight show distinct mindmap indicators (e.g. spinner per node) or is “correct status when polling completes” enough?
-2. When switching back to a task, is **cache-first panel open** acceptable if background sync is still running (`chatAgentSyncing`), or must transcript always match server before showing?
-3. Should **orchestration-dispatched** tasks auto-call `registerPendingReply`, or only user-initiated Send/Execute/Approve?
-4. Rename in product copy: **AgentCommunicationsService** vs **AgentService** — alias documented in code; prefer one name in UI/docs?
+1. **Research scope:** Is this folder **done** once specs + checklist pass, or must it include a **code merge checklist** until `cursor/responsiveness-1a9f` is merged?
+2. **Release from project chat:** When user starts **Release** and navigates to a task, should project chat/status get the same “pending until terminal” guarantees as Send/Execute (today: root project poll only)?
+3. **Provider matrix:** For research closure, is a **one-page stub** (Cursor = shipped, OpenAI/Hermes = future, same AgentService API) enough, or do you need dates/owners?
+
+## History
+
+- Git workflow: single branch `cursor/responsiveness-1a9f`, merge `develop`, push only, no agent-opened PRs.
+- AgentService observer/pending-reply design + implementation on branch (`agent-session-watch`, extended `AgentCommunicationsService`, store `registerPendingReply` on send/execute/approve).

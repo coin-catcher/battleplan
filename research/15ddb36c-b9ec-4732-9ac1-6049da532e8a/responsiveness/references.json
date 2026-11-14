@@ -8,7 +8,9 @@
   ],
   "code_anchors": [
     "src/app/state/agent-communications.service.ts",
+    "src/app/state/agent-session-watch.ts",
     "src/app/core/agent-run-response.ts",
     "src/app/core/task-status-coalesce.ts"
-  ]
+  ],
+  "product_name": "AgentService"
 }
