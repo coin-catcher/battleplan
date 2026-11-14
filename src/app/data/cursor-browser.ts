@@ -96,7 +96,7 @@ function mapRun(value: unknown): CursorRun {
   return {
     id: String(record['id'] ?? ''),
     agentId: String(record['agentId'] ?? ''),
-    status: String(record['status'] ?? ''),
+    status: String(record['status'] ?? '').trim().toUpperCase(),
     result: typeof record['result'] === 'string' ? record['result'] : undefined,
     git: branches ? { branches } : undefined,
   };

@@ -95,12 +95,18 @@ import {
   type TaskBriefBuildInput,
 } from '../core/task-brief';
 import {
+  agentTurnMayCompleteWorkflow,
+  normalizeAgentRunStatus,
+} from '../core/agent-run-completion';
+import {
   AGENT_RESPONSE_PLACEHOLDER,
   isSubstantiveAgentResponse,
   agentDeclaresNoHumanReviewNeeded,
   buildOrchestrationReExecuteMessage,
+  isTerminalAgentRunStatus,
   isWorkflowTerminalAgentReply,
   NO_HUMAN_REVIEW_GRILLING_INSTRUCTION,
+  type AgentRunTextSource,
 } from '../core/agent-run-response';
 import { isDispatchableNodeKind } from '../core/task-node-kind';
 import { defaultConnectorForTask } from '../core/connector-defaults';
@@ -1306,7 +1312,12 @@ export class LocalEngine {
   async listTaskMessages(
     taskId: string,
     options?: { syncAgent?: boolean; reconcileStatus?: boolean },
-  ): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }> {
+  ): Promise<{
+    messages: ChatMessage[];
+    task: ProjectTask;
+    artifacts: ChatArtifact[];
+    latestAgentRun?: AgentRunTextSource;
+  }> {
     const task = await this.requireTaskById(taskId);
     if (options?.syncAgent !== false) {
       if (task.cursor_agent_id) {
@@ -1315,16 +1326,31 @@ export class LocalEngine {
       }
       await this.importReferencedRuns({ scope: 'task', projectId: task.project_id, taskId });
     }
-    const messages = await this.repo.listTaskMessages(taskId);
+    let messages = await this.repo.listTaskMessages(taskId);
     let updated = await this.repo.getTask(taskId);
     if (!updated) updated = task;
     if (options?.reconcileStatus !== false) {
       updated = await this.reconcileTaskStatusWithLatestAgentRun(updated, messages);
+      messages = await this.repo.listTaskMessages(taskId);
+    }
+    let latestAgentRun: AgentRunTextSource | undefined;
+    if (updated.cursor_agent_id && updated.latest_run_id) {
+      try {
+        const live = await this.cursor.getRun(updated.cursor_agent_id, updated.latest_run_id);
+        latestAgentRun = {
+          status: normalizeAgentRunStatus(live.status),
+          result: live.result,
+          git: live.git,
+        };
+      } catch {
+        // Cursor temporarily unavailable; UI falls back to transcript-only heuristics.
+      }
     }
     return {
       messages,
       task: updated,
       artifacts: await this.repo.listArtifacts('task', taskId),
+      latestAgentRun,
     };
   }
 
@@ -1971,7 +1997,7 @@ export class LocalEngine {
       }
       const assistantAfter = existing.find((message) => message.run_id === run.id && message.role === 'assistant');
       const replyText = assistantAfter?.content ?? content;
-      if (!isWorkflowTerminalAgentReply(replyText, run)) continue;
+      if (!agentTurnMayCompleteWorkflow(replyText, { ...run, status: normalizeAgentRunStatus(run.status) })) continue;
       if (target.scope === 'task') {
         await this.applyTaskRun(target.taskId, run);
       }
@@ -2111,12 +2137,27 @@ export class LocalEngine {
   }
 
   private async applyTaskRun(taskId: string, run: CursorRun): Promise<void> {
+    const runStatus = normalizeAgentRunStatus(run.status);
     const task = await this.repo.getTask(taskId);
-    if (!task || task.latest_run_id !== run.id || run.status !== 'FINISHED') return;
+    if (!task || task.latest_run_id !== run.id || runStatus !== 'FINISHED') return;
     if (task.output_type === 'subproject') return;
+    const runSource: AgentRunTextSource = { ...run, status: runStatus };
     const transcript = await this.repo.listTaskMessages(taskId);
-    const assistant = transcript.find((message) => message.role === 'assistant' && message.run_id === run.id);
-    if (!assistant || !isWorkflowTerminalAgentReply(assistant.content, run)) return;
+    let assistant = transcript.find((message) => message.role === 'assistant' && message.run_id === run.id);
+    const replyText = assistant?.content ?? await this.assistantText(task.cursor_agent_id!, run);
+    if (!assistant && isSubstantiveAgentResponse(replyText, runSource)) {
+      const user = transcript.find((message) => message.role === 'user' && message.run_id === run.id);
+      assistant = await this.record({
+        scope: 'task',
+        project_id: task.project_id,
+        task_id: taskId,
+        role: 'assistant',
+        content: replyText,
+        run_id: run.id,
+        intent: user?.intent ?? 'chat',
+      });
+    }
+    if (!assistant || !agentTurnMayCompleteWorkflow(assistant.content, runSource)) return;
     const project = await this.requireProject(task.project_id);
     const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
     const existingOutput = task.output_type === 'code'
@@ -2317,9 +2358,11 @@ export class LocalEngine {
         && message.scope === 'task'
         && message.task_id === task.task_id,
     );
+    const runStatus = normalizeAgentRunStatus(run.status);
+    const runSource: AgentRunTextSource = { ...run, status: runStatus };
     const assistantText = assistant?.content ?? await this.assistantText(task.cursor_agent_id, run);
-    const terminalReply = isWorkflowTerminalAgentReply(assistantText, run);
-    if (!TERMINAL_RUN.has(run.status)) {
+    const terminalReply = agentTurnMayCompleteWorkflow(assistantText, runSource);
+    if (!isTerminalAgentRunStatus(runStatus)) {
       if (task.status !== 'DOING') {
         try {
           applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
@@ -2339,8 +2382,8 @@ export class LocalEngine {
       }
       return task;
     }
-    if (run.status === 'FINISHED' && task.status === 'DOING') {
-      await this.applyTaskRun(task.task_id, run);
+    if (runStatus === 'FINISHED' && task.status === 'DOING') {
+      await this.applyTaskRun(task.task_id, { ...run, status: runStatus });
       const updated = await this.repo.getTask(task.task_id);
       return updated ?? task;
     }

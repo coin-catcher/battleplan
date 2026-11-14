@@ -86,7 +86,8 @@ import {
 import type { MindmapViewState, ProjectWorkspaceUiState } from '../core/project-ui-state';
 import type { MindmapLinkRef } from '../core/link-relocation';
 import { mindmapViewFromProjectUiState, projectWorkspaceUiFromMindmap } from '../core/project-ui-state';
-import { isWorkflowTerminalAgentReply } from '../core/agent-run-response';
+import { agentTurnMayCompleteWorkflow } from '../core/agent-run-completion';
+import { isWorkflowTerminalAgentReply, type AgentRunTextSource } from '../core/agent-run-response';
 import { AgentCommunicationsService } from './agent-communications.service';
 import {
   isOrchestrationRunActive,
@@ -2393,7 +2394,7 @@ export class BattleplanStore {
       if (!this.stillWatching(generation) || !this.watchingTaskChat(taskId, current)) return true;
       this.applyTaskConversation(result);
       await this.refreshOutput(result.task);
-      return hasAssistant(result.messages, runId);
+      return hasAssistant(result.messages, runId, result.latestAgentRun);
     });
   }
 
@@ -2463,7 +2464,12 @@ export class BattleplanStore {
     }
   }
 
-  private applyTaskConversation(result: { messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }): void {
+  private applyTaskConversation(result: {
+    messages: ChatMessage[];
+    task: ProjectTask;
+    artifacts: ChatArtifact[];
+    latestAgentRun?: AgentRunTextSource;
+  }): void {
     const taskId = result.task.task_id;
     const live = this.tasks().find((item) => item.task_id === taskId);
     const previous = live?.status;
@@ -2479,6 +2485,7 @@ export class BattleplanStore {
       inbound,
       result.messages,
       backgroundPollActive,
+      result.latestAgentRun,
     );
     const task = coalesceCachedTaskStatus(live, inbound, pollActive);
     this.cacheTaskConversation({ ...result, task });
@@ -2701,11 +2708,15 @@ function unansweredRunForTask(messages: ChatMessage[], taskId: string): string |
   return unansweredRun(scoped);
 }
 
-function hasAssistant(messages: ChatMessage[], runId: string): boolean {
+function hasAssistant(
+  messages: ChatMessage[],
+  runId: string,
+  latestRun?: AgentRunTextSource,
+): boolean {
   return messages.some((message) => (
     message.run_id === runId
     && message.role === 'assistant'
-    && isWorkflowTerminalAgentReply(message.content)
+    && agentTurnMayCompleteWorkflow(message.content, latestRun)
   ));
 }
 

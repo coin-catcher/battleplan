@@ -18,7 +18,7 @@ There is **one** session-coordination service today; connectors and the engine h
 | --- | --- |
 | **AgentService** | Project-wide async coordinator: tracks pending agent replies, polls sessions in the background, and **broadcasts** conversation + task updates through the store bridge (and optional per-task observers) whether or not the task panel is focused. |
 | `BattleplanStore` | Owns selection, cached task panels, mindmap task rows, and chat transcript signals. Applies persistence results from the engine; does not embed polling loops. |
-| `LocalEngine` | Persists chat, applies workflow transitions only when `isWorkflowTerminalAgentReply` is true (not for interim acks). |
+| `LocalEngine` | Persists chat; workflow completion uses `agentTurnMayCompleteWorkflow` (run status first, transcript heuristics while in-flight). |
 
 ## Provider kinds
 
@@ -36,6 +36,14 @@ When the task-graph orchestrator dispatches work:
 2. Rely on **`syncTaskWatches`** after `reloadTasks` when status is `DOING` (and `ensureTaskWatch` for active orchestration rows). **Do not** call `registerPendingReply` from orchestration — only **user-initiated** Send / Execute / Approve register pending replies.
 3. Do **not** poll agent backends from orchestration code; read task status and chat from the store after the bridge applies engine results.
 4. Treat workflow completion when task status leaves `DOING` or when `activeTaskSessions` no longer lists the task id.
+
+## When is an agent reply “final”?
+
+Battleplan uses **backend run status as source of truth**, not chat length alone:
+
+1. While a Cursor run is **non-terminal** (`RUNNING`, …), short acknowledgments in chat do not move the task to `REVIEW`.
+2. When `getRun` reports **`FINISHED`** and the transcript/result is substantive (not the sync placeholder), the turn is complete → `DOING` → `REVIEW`.
+3. `listTaskMessages` returns `latestAgentRun` so `AgentCommunicationsService` and the store can apply the same rule without re-fetching.
 5. Foreground “Waiting for Cursor…” in the open panel still uses store foreground watch; background watches continue when the user changes mindmap focus.
 
 ## Pending replies and observers

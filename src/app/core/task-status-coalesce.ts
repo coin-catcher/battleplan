@@ -1,5 +1,6 @@
 import type { ChatMessage, ProjectTask, TaskStatus } from './models';
-import { isSubstantiveAgentResponse, isWorkflowTerminalAgentReply } from './agent-run-response';
+import { agentTurnMayCompleteWorkflow, taskTurnAwaitingCompletion } from './agent-run-completion';
+import { isSubstantiveAgentResponse, type AgentRunTextSource } from './agent-run-response';
 import { taskNeedsDoingBackgroundPoll } from './task-state-machine';
 
 const TERMINAL_WHILE_POLLING: TaskStatus[] = ['TODO', 'REVIEW', 'DONE', 'BLOCKED', 'ABANDONED'];
@@ -50,14 +51,9 @@ export function taskChatAwaitingWorkflowReply(
   messages: ChatMessage[],
   taskId: string,
   latestRunId?: string,
+  latestRun?: AgentRunTextSource,
 ): boolean {
-  if (!latestRunId) return false;
-  const scoped = messages.filter((message) => message.scope === 'task' && message.task_id === taskId);
-  const userSent = scoped.some((message) => message.role === 'user' && message.run_id === latestRunId);
-  if (!userSent) return false;
-  const assistant = scoped.find((message) => message.role === 'assistant' && message.run_id === latestRunId);
-  if (!assistant) return true;
-  return !isWorkflowTerminalAgentReply(assistant.content);
+  return taskTurnAwaitingCompletion(messages, taskId, latestRunId, latestRun);
 }
 
 function latestRunAssistantMessage(
@@ -79,16 +75,21 @@ export function shouldCoalesceInboundTaskStatus(
   inbound: ProjectTask,
   messages: ChatMessage[],
   backgroundPollActive: boolean,
+  latestRun?: AgentRunTextSource,
 ): boolean {
   if (!live || live.status !== 'DOING') return backgroundPollActive;
   if (!TERMINAL_WHILE_POLLING.includes(inbound.status)) return backgroundPollActive;
 
   const runId = live.latest_run_id ?? inbound.latest_run_id;
   const assistant = latestRunAssistantMessage(messages, inbound.task_id, runId);
-  if (inbound.status === 'REVIEW' && assistant && isSubstantiveAgentResponse(assistant.content)) {
+  if (
+    inbound.status === 'REVIEW'
+    && assistant
+    && agentTurnMayCompleteWorkflow(assistant.content, latestRun ?? { result: assistant.content })
+  ) {
     return false;
   }
 
   return backgroundPollActive
-    || taskChatAwaitingWorkflowReply(messages, inbound.task_id, runId);
+    || taskChatAwaitingWorkflowReply(messages, inbound.task_id, runId, latestRun);
 }
