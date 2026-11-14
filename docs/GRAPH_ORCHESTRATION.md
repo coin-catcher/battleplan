@@ -25,7 +25,7 @@ Battleplan persists an orchestration run on each `Project` as `graph_orchestrati
 
 - `run_id`, optional `root_task_id`, optional `descendants_only`, `status`, `paused_task_ids`, `active_task_ids`, `last_agent_runs`, and `transitions`.
 
-Agent polling stays in `AgentCommunicationsService` (`ensureTaskWatch`); orchestration code does not poll Cursor directly.
+Agent polling stays in **AgentService** (`AgentCommunicationsService`, `ensureTaskWatch` / `syncTaskWatches`); orchestration does not call `registerPendingReply` or poll Cursor directly.
 
 ## Related modules
 
