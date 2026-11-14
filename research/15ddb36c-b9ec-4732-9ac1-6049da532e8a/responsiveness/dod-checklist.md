@@ -11,6 +11,7 @@
 | 4 | Fast focus switch + background updates documented | **PASS** | cache, coalesceCachedTaskStatus, AgentService |
 | 4b | Unfocused task keeps agent session until terminal reply | **PASS (code + spec)** | registerPendingReply, agent-session-watch, bridge persist; **desktop acceptance not recorded** |
 | 4c | Mindmap / panel UX while unfocused | **PASS (spec)** | No per-node spinners; cache-first + chatAgentSyncing on reopen |
+| 4d | Manual task status change ≤1s (save, mindmap, history) | **PASS (code)** | Fast local path; audit in status-change-audit.md; **desktop timing not recorded** |
 | 5 | Async Approve & Release semantics documented | **PASS** | prepare/execute split; Approve registers pending; Release uses project watch |
 | 6 | Open provider matrix (Cursor / OpenAI / Hermes) | **PENDING** | sessionKind stub only |
 | 7 | Human acceptance: manual UX checklist passed on desktop | **PENDING** | Not recorded in repo |
@@ -38,6 +39,8 @@
 1. **Research scope:** Is this folder **done** once specs + checklist pass, or must it include a **code merge checklist** until `cursor/responsiveness-1a9f` is merged?
 2. **Release from project chat:** When user starts **Release** and navigates to a task, should project chat/status get the same “pending until terminal” guarantees as Send/Execute (today: root project poll only)?
 3. **Provider matrix:** For research closure, is a **one-page stub** (Cursor = shipped, OpenAI/Hermes = future, same AgentService API) enough, or do you need dates/owners?
+4. **Manual status vs in-flight agent:** Confirm **manual dropdown always wins** (no auto snap-back to DOING while Cursor run continues) — implemented via `reconcileStatus: false` on manual transition.
+5. **DONE during graph orchestration:** If setting DONE triggers `autoDispatchReadyTasks` synchronously, is **>1s acceptable** for that edge, or should dispatch move to background like Approve?
 
 ## History
 

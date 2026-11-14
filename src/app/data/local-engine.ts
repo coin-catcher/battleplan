@@ -1232,7 +1232,7 @@ export class LocalEngine {
 
   async listTaskMessages(
     taskId: string,
-    options?: { syncAgent?: boolean },
+    options?: { syncAgent?: boolean; reconcileStatus?: boolean },
   ): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }> {
     const task = await this.requireTaskById(taskId);
     if (options?.syncAgent !== false) {
@@ -1245,7 +1245,9 @@ export class LocalEngine {
     const messages = await this.repo.listTaskMessages(taskId);
     let updated = await this.repo.getTask(taskId);
     if (!updated) updated = task;
-    updated = await this.reconcileTaskStatusWithLatestAgentRun(updated, messages);
+    if (options?.reconcileStatus !== false) {
+      updated = await this.reconcileTaskStatusWithLatestAgentRun(updated, messages);
+    }
     return {
       messages,
       task: updated,

@@ -1724,14 +1724,15 @@ export class BattleplanStore {
   async transition(taskId: string, status: TaskStatus, manual: boolean): Promise<void> {
     const task = this.tasks().find((item) => item.task_id === taskId);
     if (!task) return;
+    if (manual) this.patchTaskStatus(taskId, status);
     await this.run(async () => {
       const updated = await this.api.transition(task.project_id, taskId, status, manual);
       this.replaceTask(updated);
-      if (updated.cursor_agent_id) {
-        const result = await this.api.listTaskMessages(taskId);
-        this.applyTaskConversation(result);
-        await this.refreshOutput(result.task);
-      }
+      const result = await this.api.listTaskMessages(taskId, {
+        syncAgent: false,
+        reconcileStatus: manual ? false : undefined,
+      });
+      this.applyTaskConversation(result);
     });
     if (this.selection().kind === 'task') this.continueTaskWatch(taskId);
     this.syncDoingBackgroundWatches();

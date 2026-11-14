@@ -4,7 +4,8 @@
   "docs": [
     "docs/AGENT_COMMUNICATIONS.md",
     "docs/GRAPH_ORCHESTRATION.md",
-    "docs/TASK_WORKFLOW_LIFECYCLES.md"
+    "docs/TASK_WORKFLOW_LIFECYCLES.md",
+    "research/15ddb36c-b9ec-4732-9ac1-6049da532e8a/responsiveness/status-change-audit.md"
   ],
   "code_anchors": [
     "src/app/state/agent-communications.service.ts",
