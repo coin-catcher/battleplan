@@ -63,11 +63,64 @@ export function applyGraphEdgesToLegacyFields(tasks: ProjectTask[], edges: TaskG
       parent.dependencies = [...new Set([...parent.dependencies, edge.to_task_id])];
       continue;
     }
-    const dependent = byId.get(edge.to_task_id)!;
-    if (edge.from_task_id === edge.to_task_id) continue;
-    dependent.sibling_dependencies = [...new Set([...(dependent.sibling_dependencies ?? []), edge.from_task_id])];
+    if (edge.kind === 'ordering') {
+      const dependent = byId.get(edge.to_task_id)!;
+      if (edge.from_task_id === edge.to_task_id) continue;
+      dependent.sibling_dependencies = [
+        ...new Set([...(dependent.sibling_dependencies ?? []), edge.from_task_id]),
+      ];
+    }
   }
   return copy;
+}
+
+const FORWARD_TO_CRITIQUE_KINDS = new Set<TaskEdgeKind>(['tree', 'ordering', 'fork', 'join']);
+
+function isCritiqueTask(task: ProjectTask): boolean {
+  return task.node_kind === 'critique' || task.graph_type === 'critique';
+}
+
+/** Add critique → work cycle back-edges when critique is linked forward but no cycle is stored. */
+export function ensureCritiqueBackEdges(tasks: ProjectTask[], edges: TaskGraphEdge[]): TaskGraphEdge[] {
+  const byId = new Map(tasks.map((task) => [task.task_id, task]));
+  const critiqueIds = new Set(tasks.filter(isCritiqueTask).map((task) => task.task_id));
+  if (critiqueIds.size === 0) return edges;
+
+  const hasCycleBack = (fromId: string, toId: string): boolean =>
+    edges.some(
+      (edge) => edge.kind === 'cycle' && edge.from_task_id === fromId && edge.to_task_id === toId,
+    );
+
+  const next = [...edges];
+  const seen = new Set(next.map((edge) => edge.edge_id));
+
+  const addCycle = (critiqueId: string, workId: string): void => {
+    const key = edgeKey(critiqueId, workId, 'cycle');
+    if (seen.has(key) || hasCycleBack(critiqueId, workId)) return;
+    seen.add(key);
+    next.push({
+      edge_id: key,
+      from_task_id: critiqueId,
+      to_task_id: workId,
+      kind: 'cycle',
+      break_condition: 'human:REVIEW',
+    });
+  };
+
+  for (const edge of edges) {
+    if (!critiqueIds.has(edge.to_task_id) || edge.kind === 'cycle') continue;
+    if (!FORWARD_TO_CRITIQUE_KINDS.has(edge.kind)) continue;
+    if (!byId.has(edge.from_task_id)) continue;
+    addCycle(edge.to_task_id, edge.from_task_id);
+  }
+
+  for (const critique of tasks.filter(isCritiqueTask)) {
+    for (const childId of normalChildIds(critique, byId)) {
+      addCycle(critique.task_id, childId);
+    }
+  }
+
+  return next;
 }
 
 export function incomingEdges(taskId: string, edges: TaskGraphEdge[]): TaskGraphEdge[] {
@@ -285,9 +338,13 @@ export function repairProjectTaskGraph(
   if (edges.length !== (project.task_graph_edges ?? []).length) changed = true;
 
   if (!options?.filterOnly) {
-    const merged = mergeLegacyTreeOrderingIntoGraph(edges, stripped.tasks);
+    let merged = mergeLegacyTreeOrderingIntoGraph(edges, stripped.tasks);
+    const withCritiqueCycles = ensureCritiqueBackEdges(stripped.tasks, merged);
+    if (JSON.stringify(withCritiqueCycles) !== JSON.stringify(merged)) changed = true;
+    merged = withCritiqueCycles;
     if (JSON.stringify(merged) !== JSON.stringify(edges)) changed = true;
     edges = merged;
+    validateTaskGraphEdges(edges, taskIds);
   }
 
   const synced = applyGraphEdgesToLegacyFields(stripped.tasks, edges);

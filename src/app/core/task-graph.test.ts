@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectTask } from './models';
 import {
+  ensureCritiqueBackEdges,
   mergeLegacyTreeOrderingIntoGraph,
   mnemosyneDefaultRelativePath,
   rebuildGraphEdgesFromLegacy,
@@ -74,6 +75,57 @@ describe('task-graph', () => {
     expect(merged.some((edge) => edge.kind === 'tree')).toBe(true);
     expect(merged.some((edge) => edge.kind === 'cycle')).toBe(true);
     expect(merged.some((edge) => edge.kind === 'fork')).toBe(true);
+  });
+
+  it('adds a critique back-edge when forward link exists without a cycle', () => {
+    const work = task('work');
+    const critique = task('critique', { output_type: 'research', node_kind: 'critique' });
+    const base = [
+      {
+        edge_id: 'tree:work->critique',
+        from_task_id: 'work',
+        to_task_id: 'critique',
+        kind: 'tree' as const,
+      },
+    ];
+    const next = ensureCritiqueBackEdges([work, critique], base);
+    expect(next).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from_task_id: 'critique',
+          to_task_id: 'work',
+          kind: 'cycle',
+          break_condition: 'human:REVIEW',
+        }),
+      ]),
+    );
+  });
+
+  it('repairs critique graphs with an inferred rework cycle edge', () => {
+    const work = task('work', { dependencies: ['critique'] });
+    const critique = task('critique', { output_type: 'research', node_kind: 'critique' });
+    const project: Project = {
+      project_id: 'p1',
+      title: 'P',
+      initial_prompt: '',
+      cursor_chat_link: '',
+      dar: '',
+      status: 'TODO',
+      created_at: '',
+      updated_at: '',
+      task_graph_edges: [
+        {
+          edge_id: 'tree:work->critique',
+          from_task_id: 'work',
+          to_task_id: 'critique',
+          kind: 'tree',
+        },
+      ],
+    };
+    const repaired = repairProjectTaskGraph(project, [work, critique]);
+    expect(repaired.project.task_graph_edges?.some(
+      (edge) => edge.kind === 'cycle' && edge.from_task_id === 'critique' && edge.to_task_id === 'work',
+    )).toBe(true);
   });
 
   it('drops orphan graph edges and legacy references on repair', () => {

@@ -62,6 +62,7 @@ import {
   mindmapNodeAtPoint,
   type WorldRect,
 } from './core/mindmap';
+import { graphEdgesForMindmap } from './core/task-ready';
 import { linkKey, type MindmapLinkRef } from './core/link-relocation';
 import {
   clampMindmapZoom,
@@ -183,7 +184,7 @@ export class AppComponent implements OnInit {
       tasks,
       projectPin,
       project?.status,
-      project?.task_graph_edges,
+      graphEdgesForMindmap(project ?? null, tasks),
     );
   });
 
