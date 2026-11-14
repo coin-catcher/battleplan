@@ -45,6 +45,8 @@ export interface Project {
   release_target_ref?: string;
   map_x?: number;
   map_y?: number;
+  /** Mindmap canvas and task chrome: light or dark (per-project). */
+  mindmap_theme?: import('./mindmap-theme').MindmapThemeId;
   /** Mindmap status for the root project node (nested subprojects use their task node). */
   status?: TaskStatus;
   /** Version-bump branch created by the project agent after Release Changes. */

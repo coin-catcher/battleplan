@@ -11,6 +11,7 @@ export interface ProjectEditorForm {
   github_pat: string;
   dar: string;
   initial_prompt?: string;
+  mindmap_theme?: string;
 }
 
 export interface TaskEditorForm {
@@ -54,11 +55,14 @@ export function projectEditorDirty(form: ProjectEditorForm, project: Project | n
   const savedDar = (project.dar ?? '').trim();
   const initialDirty = form.initial_prompt !== undefined
     && form.initial_prompt.trim() !== (project.initial_prompt ?? '').trim();
+  const savedTheme = project.mindmap_theme ?? 'dark';
+  const formTheme = form.mindmap_theme ?? savedTheme;
   return form.title.trim() !== project.title
     || form.repo_url.trim() !== (project.repo_url ?? '').trim()
     || branch !== savedBranch
     || form.github_pat.trim() !== (project.github_pat ?? '').trim()
     || form.dar.trim() !== savedDar
+    || formTheme !== savedTheme
     || initialDirty;
 }
 

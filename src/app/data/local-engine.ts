@@ -351,6 +351,7 @@ export class LocalEngine {
     battleplan_storage_version?: number;
     release_source_ref?: string;
     release_target_ref?: string;
+    mindmap_theme?: import('../core/mindmap-theme').MindmapThemeId;
   }): Promise<Project> {
     const project = await this.requireProject(projectId);
     const changes: string[] = [];
@@ -399,6 +400,11 @@ export class LocalEngine {
     }
     if (patch.map_x !== undefined) project.map_x = patch.map_x;
     if (patch.map_y !== undefined) project.map_y = patch.map_y;
+    if (patch.mindmap_theme !== undefined) {
+      const next = patch.mindmap_theme === 'light' ? 'light' : 'dark';
+      if (next !== (project.mindmap_theme ?? 'dark')) changes.push(`Mindmap theme: ${next}`);
+      project.mindmap_theme = next;
+    }
     if (patch.default_research_agent_id !== undefined) {
       const next = patch.default_research_agent_id.trim();
       if (next !== (project.default_research_agent_id ?? '')) changes.push('Default research agent updated.');

@@ -84,7 +84,7 @@
         </div>
       </section>
 
-      <div class="map-frame">
+      <div class="map-frame" [attr.data-mindmap-theme]="activeMindmapTheme()">
         @if (store.graphOrchestrationActive()) {
           <div class="orchestration-controls" aria-live="polite">
             <button type="button" class="ghost" [disabled]="store.busy()" (click)="store.stopGraphOrchestration()">Stop Execution</button>
@@ -613,6 +613,14 @@
                     <option value="">None</option>
                     @for (agent of libraryAgents('code'); track agent.agent_id) {
                       <option [value]="agent.agent_id">{{ agent.name }}</option>
+                    }
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Mindmap theme</span>
+                  <select [(ngModel)]="mindmapTheme" name="mindmapTheme" (change)="onMindmapThemeChange()">
+                    @for (theme of mindmapThemes; track theme.id) {
+                      <option [value]="theme.id">{{ theme.label }}</option>
                     }
                   </select>
                 </label>

@@ -15,7 +15,7 @@ Every `POST /v1/agents` from Battleplan (`BrowserCursor.createAgent`) sets:
 
 Caller-supplied `autoCreatePr` / `prUrl` on `CreateAgentInput` are **ignored** so no code path can re-enable platform PRs.
 
-Follow-up runs (`POST …/runs`) reuse the agent record; they do not pass `autoCreatePR`. Prompt text on every run repeats the no-PR policy.
+Follow-up runs (`POST …/runs`) reuse the agent record; they do not pass `autoCreatePR`. Prompt text on every run repeats the no-PR policy and **global session policy** (including: show created or updated images in the chat reply for visual inspection).
 
 ## One branch per task agent
 
