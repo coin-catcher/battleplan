@@ -393,14 +393,22 @@ function mindmapKindForGraphEdge(kind: TaskGraphEdge['kind']): MindmapLinkKind {
   return 'sibling';
 }
 
+/**
+ * Mindmap strokes:
+ * - solid: parent→child flow (tree, fork, join) — outputs feed inputs on the dependency edge
+ * - dashed: rework / back-control (cycle), e.g. critique fail → upstream work
+ * - dotted: execution hints only (ordering, cross-graph sibling) — considered for scheduling/scope,
+ *   not treated as an output→input dependency between the linked tasks
+ */
 export function mindmapStrokeForGraphEdgeKind(kind: TaskGraphEdge['kind']): MindmapLineStroke {
-  if (kind === 'tree') return 'solid';
+  if (kind === 'tree' || kind === 'fork' || kind === 'join') return 'solid';
   if (kind === 'cycle') return 'dashed';
+  if (kind === 'ordering') return 'dotted';
   return 'dotted';
 }
 
 export function mindmapStrokeForLinkKind(kind: MindmapLinkKind): MindmapLineStroke {
-  if (kind === 'child' || kind === 'project-root') return 'solid';
+  if (kind === 'child' || kind === 'project-root' || kind === 'fork' || kind === 'join') return 'solid';
   if (kind === 'cycle') return 'dashed';
   return 'dotted';
 }

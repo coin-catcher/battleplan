@@ -73,7 +73,7 @@ describe('mindmap', () => {
     expect(sibling).toEqual([expect.objectContaining({ from: 'alpha', to: 'beta', stroke: 'dotted' })]);
   });
 
-  it('uses dashed arrows for cycle back-edges and dotted for ordering in the graph', () => {
+  it('uses solid for tree/fork/join, dashed for cycles, dotted for ordering only', () => {
     const work = task('work');
     const critique = task('critique', { output_type: 'research', node_kind: 'critique' });
     const graphEdges = [
@@ -96,9 +96,23 @@ describe('mindmap', () => {
         to_task_id: 'work',
         kind: 'ordering' as const,
       },
+      {
+        edge_id: 'fork:work->a',
+        from_task_id: 'work',
+        to_task_id: 'a',
+        kind: 'fork' as const,
+      },
+      {
+        edge_id: 'join:b->work',
+        from_task_id: 'b',
+        to_task_id: 'work',
+        kind: 'join' as const,
+      },
     ];
     const extra = task('x', {}, 2);
-    const layout = layoutMindmap('Plan', [work, critique, extra], undefined, undefined, graphEdges);
+    const a = task('a', {}, 3);
+    const b = task('b', {}, 4);
+    const layout = layoutMindmap('Plan', [work, critique, extra, a, b], undefined, undefined, graphEdges);
     expect(layout.edges.find((edge) => edge.kind === 'cycle')).toMatchObject({
       from: 'critique',
       to: 'work',
@@ -108,6 +122,12 @@ describe('mindmap', () => {
       stroke: 'dotted',
     });
     expect(layout.edges.find((edge) => edge.kind === 'child')).toMatchObject({
+      stroke: 'solid',
+    });
+    expect(layout.edges.find((edge) => edge.kind === 'fork')).toMatchObject({
+      stroke: 'solid',
+    });
+    expect(layout.edges.find((edge) => edge.kind === 'join')).toMatchObject({
       stroke: 'solid',
     });
   });
