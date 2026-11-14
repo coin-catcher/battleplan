@@ -44,7 +44,7 @@ describe('mindmap', () => {
 
   it('points a solid arrow from the project to each root task', () => {
     const layout = layoutMindmap('Plan', [task('survey'), task('build', {}, 1)]);
-    const solid = layout.edges.filter((edge) => !edge.dashed);
+    const solid = layout.edges.filter((edge) => edge.stroke === 'solid');
     expect(solid.map((edge) => edge.to).sort()).toEqual(['build', 'survey']);
     expect(solid.every((edge) => edge.from === 'project')).toBe(true);
     expect(layout.nodes.find((node) => node.id === 'project')?.kind).toBe('project');
@@ -54,8 +54,8 @@ describe('mindmap', () => {
     const survey = task('survey', { dependencies: ['build'] });
     const build = task('build');
     const layout = layoutMindmap('Plan', [survey, build]);
-    const taskEdges = layout.edges.filter((edge) => !edge.dashed && edge.from !== 'project');
-    expect(taskEdges).toEqual([expect.objectContaining({ from: 'survey', to: 'build', dashed: false })]);
+    const taskEdges = layout.edges.filter((edge) => edge.stroke === 'solid' && edge.from !== 'project');
+    expect(taskEdges).toEqual([expect.objectContaining({ from: 'survey', to: 'build', stroke: 'solid' })]);
     const project = layout.nodes.find((node) => node.id === 'project');
     const surveyNode = layout.nodes.find((node) => node.id === 'survey');
     const buildNode = layout.nodes.find((node) => node.id === 'build');
@@ -65,12 +65,51 @@ describe('mindmap', () => {
     expect(buildDistance).toBeGreaterThan(surveyDistance);
   });
 
-  it('draws a dashed one-way arrow for sibling dependencies', () => {
+  it('draws a dotted one-way arrow for sibling dependencies', () => {
     const left = task('alpha', { sibling_dependencies: ['beta'] });
     const right = task('beta', {}, 1);
     const layout = layoutMindmap('Plan', [left, right]);
-    const sibling = layout.edges.filter((edge) => edge.dashed);
-    expect(sibling).toEqual([expect.objectContaining({ from: 'alpha', to: 'beta', dashed: true })]);
+    const sibling = layout.edges.filter((edge) => edge.stroke === 'dotted');
+    expect(sibling).toEqual([expect.objectContaining({ from: 'alpha', to: 'beta', stroke: 'dotted' })]);
+  });
+
+  it('uses dashed arrows for cycle back-edges and dotted for ordering in the graph', () => {
+    const work = task('work');
+    const critique = task('critique', { output_type: 'research', node_kind: 'critique' });
+    const graphEdges = [
+      {
+        edge_id: 'tree:work->critique',
+        from_task_id: 'work',
+        to_task_id: 'critique',
+        kind: 'tree' as const,
+      },
+      {
+        edge_id: 'cycle:critique->work',
+        from_task_id: 'critique',
+        to_task_id: 'work',
+        kind: 'cycle' as const,
+        break_condition: 'human:REVIEW',
+      },
+      {
+        edge_id: 'ordering:x->work',
+        from_task_id: 'x',
+        to_task_id: 'work',
+        kind: 'ordering' as const,
+      },
+    ];
+    const extra = task('x', {}, 2);
+    const layout = layoutMindmap('Plan', [work, critique, extra], undefined, undefined, graphEdges);
+    expect(layout.edges.find((edge) => edge.kind === 'cycle')).toMatchObject({
+      from: 'critique',
+      to: 'work',
+      stroke: 'dashed',
+    });
+    expect(layout.edges.find((edge) => edge.kind === 'ordering')).toMatchObject({
+      stroke: 'dotted',
+    });
+    expect(layout.edges.find((edge) => edge.kind === 'child')).toMatchObject({
+      stroke: 'solid',
+    });
   });
 
   it('moves an unpinned root when another root is added', () => {

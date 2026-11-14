@@ -33,11 +33,13 @@ export interface MindmapNode {
   height: number;
 }
 
+export type MindmapLineStroke = 'solid' | 'dashed' | 'dotted';
+
 export interface MindmapEdge {
   kind: MindmapLinkKind;
   from: string;
   to: string;
-  dashed: boolean;
+  stroke: MindmapLineStroke;
   x1: number;
   y1: number;
   x2: number;
@@ -330,7 +332,7 @@ export function layoutMindmap(
   if (project) {
     for (const task of direct) {
       const target = nodeById.get(task.task_id);
-      if (target) edges.push(drawEdge('project-root', project, target, false));
+      if (target) edges.push(drawEdge('project-root', project, target, 'solid'));
     }
   }
   if (graphEdges?.length) {
@@ -339,8 +341,7 @@ export function layoutMindmap(
       const to = nodeById.get(edge.to_task_id);
       if (!from || !to || from.id === to.id) continue;
       const linkKind = mindmapKindForGraphEdge(edge.kind);
-      const dashed = edge.kind !== 'tree';
-      edges.push(drawEdge(linkKind, from, to, dashed));
+      edges.push(drawEdge(linkKind, from, to, mindmapStrokeForGraphEdgeKind(edge.kind)));
     }
   } else {
     for (const task of tasks) {
@@ -349,12 +350,12 @@ export function layoutMindmap(
       for (const childId of normalChildIds(task, byId)) {
         const child = nodeById.get(childId);
         if (!child || child.id === parent.id) continue;
-        edges.push(drawEdge('child', parent, child, false));
+        edges.push(drawEdge('child', parent, child, 'solid'));
       }
       for (const siblingId of siblingDependencyIds(task)) {
         const sibling = nodeById.get(siblingId);
         if (!sibling || sibling.id === parent.id) continue;
-        edges.push(drawEdge('sibling', parent, sibling, true));
+        edges.push(drawEdge('sibling', parent, sibling, 'dotted'));
       }
     }
   }
@@ -392,7 +393,24 @@ function mindmapKindForGraphEdge(kind: TaskGraphEdge['kind']): MindmapLinkKind {
   return 'sibling';
 }
 
-function drawEdge(kind: MindmapLinkKind, from: MindmapNode, to: MindmapNode, dashed: boolean): MindmapEdge {
+export function mindmapStrokeForGraphEdgeKind(kind: TaskGraphEdge['kind']): MindmapLineStroke {
+  if (kind === 'tree') return 'solid';
+  if (kind === 'cycle') return 'dashed';
+  return 'dotted';
+}
+
+export function mindmapStrokeForLinkKind(kind: MindmapLinkKind): MindmapLineStroke {
+  if (kind === 'child' || kind === 'project-root') return 'solid';
+  if (kind === 'cycle') return 'dashed';
+  return 'dotted';
+}
+
+function drawEdge(
+  kind: MindmapLinkKind,
+  from: MindmapNode,
+  to: MindmapNode,
+  stroke: MindmapLineStroke,
+): MindmapEdge {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const length = Math.hypot(dx, dy) || 1;
@@ -404,7 +422,7 @@ function drawEdge(kind: MindmapLinkKind, from: MindmapNode, to: MindmapNode, das
     kind,
     from: from.id,
     to: to.id,
-    dashed,
+    stroke,
     x1: start.x,
     y1: start.y,
     x2: end.x - ux * 6,

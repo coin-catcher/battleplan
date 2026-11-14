@@ -411,6 +411,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   fill: none;
 }
 .map-canvas line.map-link-visible.dashed { stroke: #d7c4a1; stroke-dasharray: 7 5; }
+.map-canvas line.map-link-visible.dotted { stroke: #b8c4d4; stroke-dasharray: 2 5; }
 .map-canvas line.map-link-visible.selected { stroke-width: 2.4; }
 .map-canvas line.map-link-hit {
   stroke: transparent;
@@ -436,6 +437,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .map-link-handle:active { cursor: grabbing; }
 .map-canvas #arrow-solid path, .map-canvas marker path { fill: #f4efe6; }
 .map-canvas marker#arrow-dashed path { fill: #d7c4a1; }
+.map-canvas marker#arrow-dotted path { fill: #b8c4d4; }
 
 .map-node {
   position: absolute;

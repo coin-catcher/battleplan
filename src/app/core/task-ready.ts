@@ -1,6 +1,6 @@
 import type { ProjectTask } from './models';
 import type { TaskGraphEdge } from './task-graph';
-import { prerequisitesMet, rebuildGraphEdgesFromLegacy } from './task-graph';
+import { ensureCritiqueBackEdges, prerequisitesMet, rebuildGraphEdgesFromLegacy } from './task-graph';
 import type { Project } from './models';
 import { isDispatchableNodeKind } from './task-node-kind';
 import { independentBatch } from './execute-children';
@@ -8,6 +8,11 @@ import { independentBatch } from './execute-children';
 export function graphEdgesForRun(project: Project | null, tasks: ProjectTask[]): TaskGraphEdge[] {
   if (project?.task_graph_edges?.length) return project.task_graph_edges;
   return rebuildGraphEdgesFromLegacy(tasks);
+}
+
+/** Graph edges for mindmap rendering (includes inferred critique rework back-edges). */
+export function graphEdgesForMindmap(project: Project | null, tasks: ProjectTask[]): TaskGraphEdge[] {
+  return ensureCritiqueBackEdges(tasks, graphEdgesForRun(project, tasks));
 }
 
 export function isAutoDispatchCandidate(
