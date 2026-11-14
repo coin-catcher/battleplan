@@ -98,6 +98,7 @@ export interface TaskBriefBuildInput {
 const DEFAULT_STANDING = [
   'Follow project Data and Rules and Battleplan agent branch policy.',
   'Push work to the agent branch; do not create or merge pull requests unless the human approves in Battleplan.',
+  'When creating or updating images or other visuals, include them in the agent reply so the human can inspect them visually.',
 ].join(' ');
 
 /** Generates a complete brief from task metadata (Graph of Agents default). */

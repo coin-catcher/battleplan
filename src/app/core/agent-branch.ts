@@ -67,6 +67,14 @@ export async function pickTaskAgentBranch(input: {
   return withCommits[0];
 }
 
+/** Session-wide instructions prepended to every Cursor agent run launched from Battleplan. */
+export function globalAgentSessionPolicyLines(): string[] {
+  return [
+    'Artifacts and images (required):',
+    'When the user asks you to create or update images, diagrams, mockups, icons, or other visual assets, show the results in your chat reply for visual inspection (inline images or markdown image links). Do not only write files to disk or describe visuals in prose — the user must be able to see them in the response.',
+  ];
+}
+
 export function agentBranchPolicyLines(input: {
   baseBranch: string;
   agentBranch?: string;
@@ -104,7 +112,11 @@ export function wrapAgentRunPrompt(
   policy: { baseBranch: string; agentBranch?: string },
 ): string {
   const trimmed = body.trim();
-  const header = agentBranchPolicyLines(policy).join('\n');
+  const header = [
+    ...agentBranchPolicyLines(policy),
+    '',
+    ...globalAgentSessionPolicyLines(),
+  ].join('\n');
   return `${header}\n\n${trimmed}`;
 }
 
