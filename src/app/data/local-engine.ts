@@ -926,7 +926,7 @@ export class LocalEngine {
         await this.cascadeAbandonChildren(projectId, task);
       }
       if (patch.status === 'DONE') {
-        await this.autoDispatchReadyTasks(projectId);
+        void this.autoDispatchReadyTasks(projectId);
       }
     }
     if (patch.map_x !== undefined) task.map_x = patch.map_x;
@@ -1242,7 +1242,7 @@ export class LocalEngine {
 
   async listTaskMessages(
     taskId: string,
-    options?: { syncAgent?: boolean },
+    options?: { syncAgent?: boolean; reconcileStatus?: boolean },
   ): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }> {
     const task = await this.requireTaskById(taskId);
     if (options?.syncAgent !== false) {
@@ -1255,7 +1255,9 @@ export class LocalEngine {
     const messages = await this.repo.listTaskMessages(taskId);
     let updated = await this.repo.getTask(taskId);
     if (!updated) updated = task;
-    updated = await this.reconcileTaskStatusWithLatestAgentRun(updated, messages);
+    if (options?.reconcileStatus !== false) {
+      updated = await this.reconcileTaskStatusWithLatestAgentRun(updated, messages);
+    }
     return {
       messages,
       task: updated,

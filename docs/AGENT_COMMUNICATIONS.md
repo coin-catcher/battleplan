@@ -51,6 +51,11 @@ When the task-graph orchestrator dispatches work:
 - **Mindmap:** No per-node spinners required; **correct status when the reply lands** is sufficient.
 - **Reopen task panel:** **Cache-first** transcript is fine; **`chatAgentSyncing`** disables Send and shows a spinner beside it until background sync finishes.
 
+## Manual status vs agent-driven status
+
+- **Human** status dropdown (task or root project): immediate local persist + optimistic mindmap; chat reload uses `syncAgent: false` and (for tasks) `reconcileStatus: false` so the edit is not blocked on Cursor.
+- **Agent** updates: when AgentService polls with full sync, the engine may **reconcile** workflow status from the latest run (`reconcileTaskStatusWithLatestAgentRun`) so the task reflects the agent’s true state. The human can override again via the dropdown.
+
 ## UI focus switching
 
 - Opening a task uses local/cache transcript first, then background `syncAgent` import.

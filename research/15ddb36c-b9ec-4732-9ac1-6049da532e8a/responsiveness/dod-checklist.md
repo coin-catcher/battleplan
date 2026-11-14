@@ -11,6 +11,10 @@
 | 4 | Fast focus switch + background updates documented | **PASS** | cache, coalesceCachedTaskStatus, AgentService |
 | 4b | Unfocused task keeps agent session until terminal reply | **PASS (code + spec)** | registerPendingReply, agent-session-watch, bridge persist; **desktop acceptance not recorded** |
 | 4c | Mindmap / panel UX while unfocused | **PASS (spec)** | No per-node spinners; cache-first + chatAgentSyncing on reopen |
+| 4d | Manual task status change ≤1s (save, mindmap, history) | **PASS (code)** | Fast local path; audit in status-change-audit.md; **desktop timing not recorded** |
+| 4e | Manual root project status ≤1s | **PASS (code)** | Same pattern as 4d; `transitionProject` + `syncAgent: false` |
+| 4f | Manual vs agent status semantics | **PASS (spec)** | Human immediate; agent reconcile on background poll; human may override again |
+| 4g | Orchestration advance on DONE | **PASS (code)** | `autoDispatchReadyTasks` async (non-blocking) |
 | 5 | Async Approve & Release semantics documented | **PASS** | prepare/execute split; Approve registers pending; Release uses project watch |
 | 6 | Open provider matrix (Cursor / OpenAI / Hermes) | **PENDING** | sessionKind stub only |
 | 7 | Human acceptance: manual UX checklist passed on desktop | **PENDING** | Not recorded in repo |
@@ -20,9 +24,9 @@
 
 1. **Human:** Confirm whether this research task is **spec-only** or must also track **remaining code gaps** on `cursor/responsiveness-1a9f` vs merged PR #195 + `develop`.
 2. **Human:** Provide official **`task_id` UUID** if artifacts must move to `research/{project_id}/{uuid}/`.
-3. **Human:** Sign off on **acceptance tests** (send on A → switch to B → A mindmap/chat updates; approve-and-navigate-away; no spurious REVIEW on interim ack).
+3. **Human:** Sign off on **acceptance tests** (send on A → switch to B; status dropdown ≤1s task **and** project; approve-and-navigate-away; no spurious REVIEW on interim ack).
 4. **Engineering:** Hermes/OpenAI session polling not implemented in AgentService — follow-on child task unless human expands scope.
-5. **Human:** Confirm **project-level Release** (async merge) unfocused behavior matches task-level expectations — currently project DOING watch only, not `registerPendingReply`.
+5. **Human:** Confirm **project-level Release** unfocused behavior — still open (not the same as project **status** dropdown).
 
 ## Resolved this round (human)
 
@@ -32,6 +36,10 @@
 | Reopen panel while sync in flight | **Cache-first + chatAgentSyncing OK** |
 | Orchestration + `registerPendingReply` | **Only Send / Execute / Approve** |
 | AgentService vs AgentCommunicationsService | **AgentService** in product/docs; keep TS class name; `AgentConnectionService` / `AgentStatisticsService` are separate concerns |
+| Manual status vs agent | Human change is **immediate**; **agent updates** reconcile true status on background poll; human may override again |
+| Orchestration on DONE | **Async** advance (`autoDispatchReadyTasks` non-blocking) |
+| Project status 1s rule | **Yes** — same as task status |
+| Desktop acceptance timing | **Agreed** — human records when signed off |
 
 ## Open clarifying questions (human)
 

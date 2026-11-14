@@ -87,6 +87,7 @@ describe('taskEditorDirty', () => {
       brief: brief(),
       initial_prompt: 'Go',
       output_type: 'code',
+      editor_kind: 'code',
       dependencies: ['t0'],
       sibling_dependencies: [],
     }, task)).toBe(false);
@@ -95,6 +96,7 @@ describe('taskEditorDirty', () => {
       brief: { ...brief(), context: 'Updated' },
       initial_prompt: 'Go',
       output_type: 'code',
+      editor_kind: 'code',
       dependencies: ['t0'],
       sibling_dependencies: [],
     }, task)).toBe(true);
@@ -103,6 +105,7 @@ describe('taskEditorDirty', () => {
       brief: brief(),
       initial_prompt: 'Updated',
       output_type: 'code',
+      editor_kind: 'code',
       dependencies: ['t0'],
       sibling_dependencies: [],
     }, task)).toBe(true);
@@ -111,6 +114,33 @@ describe('taskEditorDirty', () => {
       brief: brief(),
       initial_prompt: 'Go',
       output_type: 'code',
+      editor_kind: 'code',
+      dependencies: [],
+      sibling_dependencies: [],
+    }, task)).toBe(true);
+  });
+
+  it('detects workflow kind changes when output_type stays research', () => {
+    const task = { ...baseTask(), output_type: 'research' as const, brief: brief() };
+    expect(taskEditorDirty({
+      title: 'Task',
+      brief: brief(),
+      initial_prompt: '',
+      output_type: 'research',
+      editor_kind: 'brainstorming',
+      dependencies: [],
+      sibling_dependencies: [],
+    }, task)).toBe(true);
+  });
+
+  it('detects research to code kind changes', () => {
+    const task = { ...baseTask(), output_type: 'research' as const, brief: brief() };
+    expect(taskEditorDirty({
+      title: 'Task',
+      brief: brief(),
+      initial_prompt: '',
+      output_type: 'code',
+      editor_kind: 'code',
       dependencies: [],
       sibling_dependencies: [],
     }, task)).toBe(true);
@@ -123,6 +153,7 @@ describe('taskEditorDirty', () => {
       brief: brief(),
       initial_prompt: 'Changed',
       output_type: 'code',
+      editor_kind: 'code',
       dependencies: ['t0'],
       sibling_dependencies: [],
     }, task)).toBe(false);

@@ -246,7 +246,7 @@ export class BattleplanApi {
 
   listTaskMessages(
     taskId: string,
-    options?: { syncAgent?: boolean },
+    options?: { syncAgent?: boolean; reconcileStatus?: boolean },
   ): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ConversationPage['artifacts'] }> {
     return this.engine.listTaskMessages(taskId, options);
   }

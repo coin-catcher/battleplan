@@ -74,6 +74,7 @@ import {
 } from './core/project-ui-state';
 import { MarkdownComponent } from 'ngx-markdown';
 import { editorPanelDirty } from './core/editor-dirty';
+import { buildTaskEditorSavePatch } from './core/task-editor-save';
 import { taskDar, taskInitialPrompt } from './core/task-fields';
 import {
   buildDefaultTaskBrief,
@@ -725,8 +726,12 @@ export class AppComponent implements OnInit {
         brief: this.taskBriefForm,
         initial_prompt: this.taskInitialPrompt,
         output_type: this.outputType,
+        editor_kind: this.taskEditorKind,
         dependencies: this.dependencies,
         sibling_dependencies: this.siblingDependencies,
+        research_agent_id: this.taskResearchAgentId,
+        code_agent_id: this.taskCodeAgentId,
+        repo_path: this.taskRepoPath,
       },
       project,
       this.store.selectedTask(),
@@ -823,21 +828,23 @@ export class AppComponent implements OnInit {
         initial_prompt: this.subprojectInitialPrompt,
       });
     } else if (selection.kind === 'task') {
-      const kindFields = this.taskKindPatch();
-      await this.store.saveTask({
+      const task = this.store.selectedTask();
+      if (!task) return false;
+      await this.store.saveTask(buildTaskEditorSavePatch(task, {
         title: this.taskTitle,
         initial_prompt: this.taskInitialPrompt,
-        output_type: kindFields.output_type,
-        node_kind: kindFields.node_kind,
-        lifecycle_phase: kindFields.lifecycle_phase,
-        repo_path: this.taskRepoPath.trim() || undefined,
-        execute_config: this.taskExecuteConfigPatch(),
+        editor_kind: this.taskEditorKind,
         dependencies: this.dependencies,
         sibling_dependencies: this.siblingDependencies,
         research_agent_id: this.taskResearchAgentId,
         code_agent_id: this.taskCodeAgentId,
+        repo_path: this.taskRepoPath,
         brief: this.taskBriefForm,
-      });
+        execute_config: this.taskExecuteConfigPatch(),
+      }));
+      if (!this.store.error()) {
+        this.outputType = fieldsFromTaskEditorKind(this.taskEditorKind).output_type;
+      }
     } else if (selection.kind === 'agent' || selection.kind === 'agent-create') {
       await this.store.saveAgentFromEditor(this.agentEditorForm());
       this.agentApiKeyEdited = false;
@@ -871,10 +878,10 @@ export class AppComponent implements OnInit {
 
   private async resolveUnsavedChoice(choice: 'no' | 'yes' | 'yes-always'): Promise<void> {
     const navigate = this.pendingNavigation;
-    this.pendingNavigation = null;
-    this.unsavedPromptOpen.set(false);
     if (!navigate) return;
     if (choice === 'no') {
+      this.pendingNavigation = null;
+      this.unsavedPromptOpen.set(false);
       await navigate();
       return;
     }
@@ -882,7 +889,13 @@ export class AppComponent implements OnInit {
       this.autoSaveEnabled.set(true);
       await this.preferences.saveAutoSave(true);
     }
-    if (await this.persistEditorChanges()) await navigate();
+    const saved = await this.persistEditorChanges();
+    if (!saved) {
+      return;
+    }
+    this.pendingNavigation = null;
+    this.unsavedPromptOpen.set(false);
+    await navigate();
   }
 
   checkForUpdates(): void {
@@ -2469,21 +2482,23 @@ export class AppComponent implements OnInit {
   }
 
   async saveTask(): Promise<void> {
-    const kindFields = this.taskKindPatch();
-    await this.store.saveTask({
+    const task = this.store.selectedTask();
+    if (!task) return;
+    await this.store.saveTask(buildTaskEditorSavePatch(task, {
       title: this.taskTitle,
       initial_prompt: this.taskInitialPrompt,
-      output_type: kindFields.output_type,
-      node_kind: kindFields.node_kind,
-      lifecycle_phase: kindFields.lifecycle_phase,
-      repo_path: this.taskRepoPath.trim() || undefined,
-      execute_config: this.taskExecuteConfigPatch(),
+      editor_kind: this.taskEditorKind,
       dependencies: this.dependencies,
       sibling_dependencies: this.siblingDependencies,
       research_agent_id: this.taskResearchAgentId,
       code_agent_id: this.taskCodeAgentId,
+      repo_path: this.taskRepoPath,
       brief: this.taskBriefForm,
-    });
+      execute_config: this.taskExecuteConfigPatch(),
+    }));
+    if (!this.store.error()) {
+      this.outputType = fieldsFromTaskEditorKind(this.taskEditorKind).output_type;
+    }
   }
 
   regenerateTaskBrief(): void {
