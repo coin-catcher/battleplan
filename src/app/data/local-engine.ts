@@ -2264,6 +2264,11 @@ export class LocalEngine {
       }
       return task;
     }
+    if (run.status === 'FINISHED' && task.status === 'DOING') {
+      await this.applyTaskRun(task.task_id, run);
+      const updated = await this.repo.getTask(task.task_id);
+      return updated ?? task;
+    }
     return task;
   }
 
