@@ -1,0 +1,14 @@
+{
+  "topic": "Responsiveness and agent communications",
+  "branch": "cursor/responsiveness-1a9f",
+  "docs": [
+    "docs/AGENT_COMMUNICATIONS.md",
+    "docs/GRAPH_ORCHESTRATION.md",
+    "docs/TASK_WORKFLOW_LIFECYCLES.md"
+  ],
+  "code_anchors": [
+    "src/app/state/agent-communications.service.ts",
+    "src/app/core/agent-run-response.ts",
+    "src/app/core/task-status-coalesce.ts"
+  ]
+}
