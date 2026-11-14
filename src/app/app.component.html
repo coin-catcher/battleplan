@@ -746,7 +746,7 @@
                     </label>
                     <label class="field task-meta-field">
                       <span>Kind</span>
-                      <select [(ngModel)]="taskEditorKind" name="taskEditorKind" (change)="onTaskKindChange()">
+                      <select [(ngModel)]="taskEditorKind" name="taskEditorKind" (ngModelChange)="onTaskKindChange()">
                         <option value="code">code</option>
                         <option value="research">research</option>
                         <option value="brainstorming">brainstorm</option>

@@ -1698,7 +1698,7 @@ export class BattleplanStore {
   async saveTask(patch: {
     title: string;
     dar?: string;
-    initial_prompt: string;
+    initial_prompt?: string;
     output_type: OutputType;
     node_kind?: import('../core/task-node-kind').TaskNodeKind;
     lifecycle_phase?: import('../core/models').LifecyclePhase;
