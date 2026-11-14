@@ -13,6 +13,9 @@ export function graphEdgesForRun(project: Project | null, tasks: ProjectTask[]):
 
 /** Graph edges for mindmap rendering (includes inferred critique rework back-edges when valid). */
 export function graphEdgesForMindmap(project: Project | null, tasks: ProjectTask[]): TaskGraphEdge[] {
+  if (project?.graph_recovery_session?.active) {
+    return project.graph_recovery_session.confirmed_edges;
+  }
   const base = graphEdgesForDisplay(project, tasks);
   const taskIds = new Set(tasks.map((task) => task.task_id));
   if (taskGraphValidationIssues(base, taskIds).length > 0) return base;

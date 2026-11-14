@@ -1754,6 +1754,23 @@ export class BattleplanStore {
     });
   }
 
+  async resolveGraphRecovery(
+    resolution: import('../core/task-graph-interactive-recovery').GraphRecoveryResolution,
+  ): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    await this.run(async () => {
+      const project = await this.api.resolveGraphRecovery(projectId, resolution);
+      this.applyProject(project);
+      await this.reloadTasks();
+      if (project.graph_recovery_session?.pending) {
+        this.notice.set('Choose how to connect the highlighted task graph link.');
+      } else if (!project.graph_recovery_session?.active) {
+        this.notice.set('Task graph recovery complete.');
+      }
+    });
+  }
+
   async saveTask(patch: {
     title: string;
     dar?: string;

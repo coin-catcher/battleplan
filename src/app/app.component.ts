@@ -233,7 +233,11 @@ export class AppComponent implements OnInit {
   graphFlowFromId = '';
   graphFlowKind: TaskEdgeKind = 'fork';
   graphFlowBreakCondition = '';
+  graphRecoveryDraftKind: TaskEdgeKind = 'ordering';
+  graphRecoveryBreakCondition = 'human:REVIEW';
   readonly taskEdgeKinds = TASK_EDGE_KINDS;
+  readonly graphRecoverySession = computed(() => this.store.project()?.graph_recovery_session);
+  readonly graphRecoveryModalOpen = computed(() => Boolean(this.graphRecoverySession()?.pending));
   readonly taskEdgeKindLabel = taskEdgeKindLabel;
   private taskLinkSyncKey = '';
 
@@ -550,6 +554,12 @@ export class AppComponent implements OnInit {
       const current = this.kanbanScopeId();
       if (options.some((option) => option.id === current)) return;
       this.kanbanScopeId.set(options[0]?.id ?? 'main');
+    });
+    effect(() => {
+      const pending = this.graphRecoverySession()?.pending;
+      if (!pending) return;
+      this.graphRecoveryDraftKind = pending.edge.kind;
+      this.graphRecoveryBreakCondition = pending.edge.break_condition ?? 'human:REVIEW';
     });
     effect((onCleanup) => {
       if (!this.convertPanel()) return;
@@ -2629,6 +2639,31 @@ export class AppComponent implements OnInit {
     const hit = this.store.tasks().find((item) => item.task_id === taskId);
     if (hit) return hit.title;
     return `(missing task ${taskId.slice(0, 8)}…)`;
+  }
+
+  applyGraphRecoveryAlternative(alt: TaskGraphEdge): void {
+    this.graphRecoveryDraftKind = alt.kind;
+    this.graphRecoveryBreakCondition = alt.break_condition ?? 'human:REVIEW';
+  }
+
+  async confirmGraphRecoveryEdge(): Promise<void> {
+    const pending = this.graphRecoverySession()?.pending;
+    if (!pending) return;
+    const kind = this.graphRecoveryDraftKind;
+    const edge: TaskGraphEdge = {
+      edge_id: edgeKey(pending.edge.from_task_id, pending.edge.to_task_id, kind),
+      from_task_id: pending.edge.from_task_id,
+      to_task_id: pending.edge.to_task_id,
+      kind,
+      ...(kind === 'cycle'
+        ? { break_condition: this.graphRecoveryBreakCondition.trim() || 'human:REVIEW' }
+        : {}),
+    };
+    await this.store.resolveGraphRecovery({ action: 'apply', edge });
+  }
+
+  skipGraphRecoveryEdge(): void {
+    void this.store.resolveGraphRecovery({ action: 'skip' });
   }
 
   async removeTaskGraphEdge(edgeId: string): Promise<void> {

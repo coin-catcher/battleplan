@@ -153,6 +153,13 @@ export class BattleplanApi {
     return this.engine.updateProjectTaskGraph(projectId, edges);
   }
 
+  resolveGraphRecovery(
+    projectId: string,
+    resolution: import('../core/task-graph-interactive-recovery').GraphRecoveryResolution,
+  ): Promise<Project> {
+    return this.engine.resolveGraphRecovery(projectId, resolution);
+  }
+
   reorderTasks(projectId: string, taskIds: string[]): Promise<ProjectTask[]> {
     return this.engine.reorderTasks(projectId, taskIds);
   }

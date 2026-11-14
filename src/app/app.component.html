@@ -189,11 +189,15 @@
             </button>
           </div>
         </nav>
-        @if (store.project()?.task_graph_validation_issue; as graphIssue) {
+        @if (graphRecoverySession()?.active) {
           <p class="map-graph-recovery-notice" role="status">
-            {{ graphIssue }}
-            Tasks and links were recovered from local storage; fix the graph in the task editor when ready.
+            Recovering task graph from local storage:
+            {{ graphRecoverySession()!.confirmed_edges.length }} connection(s) confirmed,
+            {{ graphRecoverySession()!.remaining_candidates.length }} waiting.
+            Tasks are shown at their saved positions; links appear as each step is confirmed.
           </p>
+        } @else if (store.project()?.task_graph_validation_issue; as graphIssue) {
+          <p class="map-graph-recovery-notice" role="status">{{ graphIssue }}</p>
         }
         <div #mapStage class="map-stage" aria-label="Project mindmap" (scroll)="onMapStageScroll()" (pointerdown)="onStagePointerDown($event)">
           <div class="map-scaler" [style.width.px]="map().width * zoom()" [style.height.px]="map().height * zoom()">
@@ -1656,6 +1660,52 @@
       </div>
     </section>
   </div>
+}
+
+@if (graphRecoveryModalOpen()) {
+  @if (graphRecoverySession()?.pending; as pending) {
+  <div class="modal-backdrop graph-recovery-backdrop" role="presentation">
+    <section class="modal graph-recovery-modal" role="dialog" aria-labelledby="graph-recovery-title">
+      <header class="panel-head">
+        <h2 id="graph-recovery-title">Confirm task graph connection</h2>
+        <p>Recovery paused. The mindmap behind this dialog shows all tasks plus links confirmed so far.</p>
+      </header>
+      <p class="banner warn" role="alert">{{ pending.issue }}</p>
+      <dl class="graph-recovery-edge">
+        <div><dt>From</dt><dd>{{ resolveTaskTitle(pending.edge.from_task_id) }}</dd></div>
+        <div><dt>To</dt><dd>{{ resolveTaskTitle(pending.edge.to_task_id) }}</dd></div>
+        <div><dt>Stored as</dt><dd>{{ taskEdgeKindLabel(pending.edge.kind) }}</dd></div>
+      </dl>
+      <label class="field">
+        <span>Connection kind</span>
+        <select [(ngModel)]="graphRecoveryDraftKind" name="graphRecoveryDraftKind">
+          @for (kind of taskEdgeKinds; track kind) {
+            <option [value]="kind">{{ taskEdgeKindLabel(kind) }}</option>
+          }
+        </select>
+      </label>
+      @if (graphRecoveryDraftKind === 'cycle') {
+        <label class="field">
+          <span>Break condition</span>
+          <input [(ngModel)]="graphRecoveryBreakCondition" name="graphRecoveryBreakCondition" placeholder="human:REVIEW" />
+        </label>
+      }
+      <p class="eyebrow">Suggestions from storage</p>
+      <div class="graph-recovery-alternatives">
+        @for (alt of pending.alternatives; track alt.edge_id) {
+          <button type="button" class="ghost" (click)="applyGraphRecoveryAlternative(alt)">
+            {{ resolveTaskTitle(alt.from_task_id) }} → {{ resolveTaskTitle(alt.to_task_id) }}
+            ({{ taskEdgeKindLabel(alt.kind) }})
+          </button>
+        }
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="ghost" (click)="skipGraphRecoveryEdge()">Skip this link</button>
+        <button type="button" class="primary" (click)="confirmGraphRecoveryEdge()">Add connection</button>
+      </div>
+    </section>
+  </div>
+  }
 }
 
 @if (releaseChangesModalOpen()) {

@@ -454,6 +454,37 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
     radial-gradient(circle at 50% 50%, var(--map-canvas-spot), transparent 42%),
     var(--map-canvas-bg);
 }
+.graph-recovery-backdrop {
+  background: rgba(8, 10, 14, 0.55);
+  pointer-events: auto;
+}
+.graph-recovery-modal {
+  max-width: 34rem;
+}
+.graph-recovery-edge {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+.graph-recovery-edge div {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: 8px;
+}
+.graph-recovery-edge dt {
+  margin: 0;
+  color: var(--muted);
+}
+.graph-recovery-edge dd {
+  margin: 0;
+}
+.graph-recovery-alternatives {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
 .map-graph-recovery-notice {
   margin: 0;
   padding: 8px 12px;
