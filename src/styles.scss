@@ -418,6 +418,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   fill: none;
   cursor: pointer;
 }
+.map-canvas line.map-link-hit:hover {
+  cursor: grab;
+}
 .map-link-handle {
   position: absolute;
   transform: translate(-50%, -50%);
