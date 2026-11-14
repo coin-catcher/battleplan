@@ -47,6 +47,20 @@ export interface AgentRunTextSource {
   git?: { branches?: unknown[] };
 }
 
+const TERMINAL_AGENT_RUN_STATUSES = new Set([
+  'FINISHED',
+  'ERROR',
+  'CANCELLED',
+  'CANCELED',
+  'FAILED',
+  'EXPIRED',
+]);
+
+/** Cursor (or adapter) reports the agent run has ended. */
+export function isTerminalAgentRunStatus(status?: string): boolean {
+  return Boolean(status && TERMINAL_AGENT_RUN_STATUSES.has(status));
+}
+
 function looksLikeInterimAcknowledgment(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return true;
@@ -81,17 +95,24 @@ export function isSubstantiveAgentResponse(
 }
 
 /**
- * True when an agent run should drive workflow transitions (DOING → REVIEW/DONE),
- * as opposed to interim acks or reasoning traces that can still be shown in chat.
+ * True when an agent run should drive workflow transitions (DOING → REVIEW/DONE).
+ * When the backend run is terminal, substantive transcript/result means the agent turn is complete.
+ * While the run is still in progress, use length/heuristics so early acks do not flip the task to REVIEW.
  */
 export function isWorkflowTerminalAgentReply(content: string, run?: AgentRunTextSource): boolean {
   if (!isSubstantiveAgentResponse(content, run)) return false;
-  const branches = run?.git?.branches;
-  if (Array.isArray(branches) && branches.length > 0) return true;
+
   const result = run?.result?.trim() ?? '';
   const body = (result || content).trim();
+
+  if (isTerminalAgentRunStatus(run?.status)) {
+    return true;
+  }
+
   if (looksLikeInterimAcknowledgment(body)) return false;
-  if (run?.status === 'FINISHED' && result && !looksLikeInterimAcknowledgment(result)) return true;
+  const branches = run?.git?.branches;
+  if (Array.isArray(branches) && branches.length > 0) return true;
+  if (result && !looksLikeInterimAcknowledgment(result)) return true;
   if (body.length >= 160) return true;
   return body.length >= 40 && !looksLikeInterimAcknowledgment(body);
 }

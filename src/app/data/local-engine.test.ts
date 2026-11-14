@@ -621,6 +621,57 @@ describe('LocalEngine', () => {
     expect(page.task.status).toBe('DOING');
   });
 
+  it('moves task to REVIEW when latest run is FINISHED with assistant reply', async () => {
+    const repo = new MemoryRepository();
+    const client = cursor();
+    client.getRun = async () => ({
+      id: 'run-done',
+      agentId: 'agent-task',
+      status: 'FINISHED',
+      result: 'Implemented the requested change.',
+    });
+    const engine = new LocalEngine(repo, client, () => '2026-10-02T00:00:00.000Z', () => 'id-1');
+    await repo.saveProject({
+      project_id: 'p1',
+      title: 'Plan',
+      initial_prompt: 'Plan',
+      cursor_chat_link: 'https://cursor.com/agents/agent-1',
+      cursor_agent_id: 'agent-1',
+      repo_url: 'https://github.com/coin-catcher/custom',
+      created_at: '2026-10-02T00:00:00.000Z',
+      updated_at: '2026-10-02T00:00:00.000Z',
+    });
+    const task = await engine.createTask('p1', { title: 'Work', output_type: 'code', initial_prompt: 'Go' });
+    task.cursor_agent_id = 'agent-task';
+    task.status = 'DOING';
+    task.latest_run_id = 'run-done';
+    await repo.saveTask(task);
+    await repo.saveMessage({
+      message_id: 'm-user',
+      scope: 'task',
+      project_id: 'p1',
+      task_id: task.task_id,
+      role: 'user',
+      content: 'go',
+      run_id: 'run-done',
+      intent: 'feedback',
+      created_at: '2026-10-02T00:00:00.000Z',
+    });
+    await repo.saveMessage({
+      message_id: 'm-asst',
+      scope: 'task',
+      project_id: 'p1',
+      task_id: task.task_id,
+      role: 'assistant',
+      content: 'Implemented the requested change.',
+      run_id: 'run-done',
+      intent: 'feedback',
+      created_at: '2026-10-02T00:00:01.000Z',
+    });
+    const page = await engine.listTaskMessages(task.task_id);
+    expect(page.task.status).toBe('REVIEW');
+  });
+
   it('marks a task DOING when chat feedback is sent', async () => {
     const repo = new MemoryRepository();
     const engine = new LocalEngine(repo, cursor(), () => '2026-10-02T00:00:00.000Z', () => 'id-1');
