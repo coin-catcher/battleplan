@@ -56,6 +56,37 @@ describe('task-status-coalesce', () => {
     expect(taskChatAwaitingWorkflowReply(messages, 't1', 'r1')).toBe(true);
   });
 
+  it('accepts engine REVIEW when assistant reply is substantive', () => {
+    const live = task({ status: 'DOING', cursor_agent_id: 'a1', latest_run_id: 'r1' });
+    const inbound = task({ status: 'REVIEW' });
+    const messages: ChatMessage[] = [
+      {
+        message_id: 'u1',
+        scope: 'task',
+        project_id: 'p1',
+        task_id: 't1',
+        role: 'user',
+        content: 'go',
+        run_id: 'r1',
+        intent: 'feedback',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        message_id: 'a1',
+        scope: 'task',
+        project_id: 'p1',
+        task_id: 't1',
+        role: 'assistant',
+        content: 'Done. Updated the module and added tests.',
+        run_id: 'r1',
+        intent: 'feedback',
+        created_at: '2026-01-01T00:00:01.000Z',
+      },
+    ];
+    expect(shouldCoalesceInboundTaskStatus(live, inbound, messages, true)).toBe(false);
+    expect(coalesceCachedTaskStatus(live, inbound, false).status).toBe('REVIEW');
+  });
+
   it('coalesces when awaiting workflow reply even before background poll registers', () => {
     const live = task({ status: 'DOING', cursor_agent_id: 'a1', latest_run_id: 'r1' });
     const inbound = task({ status: 'REVIEW' });

@@ -84,7 +84,7 @@
         </div>
       </section>
 
-      <div class="map-frame">
+      <div class="map-frame" [attr.data-mindmap-theme]="activeMindmapTheme()">
         @if (store.graphOrchestrationActive()) {
           <div class="orchestration-controls" aria-live="polite">
             <button type="button" class="ghost" [disabled]="store.busy()" (click)="store.stopGraphOrchestration()">Stop Execution</button>
@@ -200,6 +200,9 @@
               <marker id="arrow-dashed" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
                 <path d="M0,0 L10,4 L0,8 Z" />
               </marker>
+              <marker id="arrow-dotted" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L10,4 L0,8 Z" />
+              </marker>
             </defs>
             @if (mindmapConnectionPreview(); as preview) {
               <line
@@ -208,7 +211,7 @@
                 [attr.y1]="preview.y1"
                 [attr.x2]="preview.x2"
                 [attr.y2]="preview.y2"
-                marker-end="url(#arrow-dashed)"
+                marker-end="url(#arrow-solid)"
                 pointer-events="none"
               />
             }
@@ -223,13 +226,16 @@
               />
               <line
                 class="map-link-visible"
-                [class.dashed]="edge.dashed"
+                [class.dashed]="edge.stroke === 'dashed'"
+                [class.dotted]="edge.stroke === 'dotted'"
                 [class.selected]="isMindmapLinkSelected(edge)"
                 [attr.x1]="edge.x1"
                 [attr.y1]="edge.y1"
                 [attr.x2]="edge.x2"
                 [attr.y2]="edge.y2"
-                [attr.marker-end]="edge.dashed ? 'url(#arrow-dashed)' : 'url(#arrow-solid)'"
+                [attr.marker-end]="edge.stroke === 'dashed'
+                  ? 'url(#arrow-dashed)'
+                  : (edge.stroke === 'dotted' ? 'url(#arrow-dotted)' : 'url(#arrow-solid)')"
                 pointer-events="none"
               />
             }
@@ -408,7 +414,7 @@
                   class="map-panel-option"
                   [class.primary]="kind === 'code'"
                   [class.ghost]="kind !== 'code'"
-                  (click)="confirmAddConnectedTask(kind, $event)"
+                  (pointerdown)="onConnectMenuPick(kind, $event)"
                 >{{ mindmapConnectTaskLabel(kind) }}</button>
               }
             </div>
@@ -610,6 +616,14 @@
                     }
                   </select>
                 </label>
+                <label class="field">
+                  <span>Mindmap theme</span>
+                  <select [(ngModel)]="mindmapTheme" name="mindmapTheme" (change)="onMindmapThemeChange()">
+                    @for (theme of mindmapThemes; track theme.id) {
+                      <option [value]="theme.id">{{ theme.label }}</option>
+                    }
+                  </select>
+                </label>
               </div>
               <p class="pending">Task agents branch from this base. After Release Changes, Approve and merge merges the version bump branch into develop using the token above.</p>
               @if (project.release_version_branch) {
@@ -740,7 +754,7 @@
                     </label>
                     <label class="field task-meta-field">
                       <span>Kind</span>
-                      <select [(ngModel)]="taskEditorKind" name="taskEditorKind" (change)="onTaskKindChange()">
+                      <select [(ngModel)]="taskEditorKind" name="taskEditorKind" (ngModelChange)="onTaskKindChange()">
                         <option value="code">code</option>
                         <option value="research">research</option>
                         <option value="brainstorming">brainstorm</option>

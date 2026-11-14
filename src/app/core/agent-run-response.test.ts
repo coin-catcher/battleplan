@@ -4,6 +4,7 @@ import {
   agentDeclaresNoHumanReviewNeeded,
   buildOrchestrationReExecuteMessage,
   isSubstantiveAgentResponse,
+  isTerminalAgentRunStatus,
   isWorkflowTerminalAgentReply,
   NO_HUMAN_REVIEW_NEEDED_SENTINEL,
 } from './agent-run-response';
@@ -41,14 +42,29 @@ describe('agentDeclaresNoHumanReviewNeeded', () => {
   });
 });
 
+describe('isTerminalAgentRunStatus', () => {
+  it('treats FINISHED and ERROR as terminal', () => {
+    expect(isTerminalAgentRunStatus('FINISHED')).toBe(true);
+    expect(isTerminalAgentRunStatus('RUNNING')).toBe(false);
+  });
+});
+
 describe('isWorkflowTerminalAgentReply', () => {
-  it('rejects short working acknowledgments', () => {
-    expect(isWorkflowTerminalAgentReply('Working on that now.')).toBe(false);
-    expect(isWorkflowTerminalAgentReply('Got it.')).toBe(false);
+  it('rejects short working acknowledgments while run is in progress', () => {
+    expect(isWorkflowTerminalAgentReply('Working on that now.', { status: 'RUNNING' })).toBe(false);
+    expect(isWorkflowTerminalAgentReply('Got it.', { status: 'RUNNING' })).toBe(false);
   });
 
-  it('accepts substantive completion text or git branches', () => {
-    expect(isWorkflowTerminalAgentReply('Here is the completed implementation with tests and documentation that covers the requested feature end to end.')).toBe(true);
+  it('accepts substantive completion text or git branches while run is in progress', () => {
+    expect(isWorkflowTerminalAgentReply(
+      'Here is the completed implementation with tests and documentation that covers the requested feature end to end.',
+      { status: 'RUNNING' },
+    )).toBe(true);
     expect(isWorkflowTerminalAgentReply('Done', { git: { branches: [{ branch: 'feat/x' }] } })).toBe(true);
+  });
+
+  it('accepts any substantive reply when the run is terminal', () => {
+    expect(isWorkflowTerminalAgentReply('Fixed the bug.', { status: 'FINISHED', result: 'Fixed the bug.' })).toBe(true);
+    expect(isWorkflowTerminalAgentReply('Short fix.', { status: 'FINISHED' })).toBe(true);
   });
 });

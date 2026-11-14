@@ -824,13 +824,17 @@ export class BattleplanStore {
   async transitionProject(status: TaskStatus, manual: boolean): Promise<void> {
     const project = this.project();
     if (!project) return;
+    const projectId = project.project_id;
+    if (manual) this.patchRootProjectStatus(projectId, status);
     await this.run(async () => {
-      const updated = await this.api.transitionProject(project.project_id, status, manual);
+      const updated = await this.api.transitionProject(projectId, status, manual);
       this.projects.update((projects) => projects.map((item) => (
         item.project_id === updated.project_id ? updated : item
       )));
-      this.applyConversation(await this.api.listProjectMessages(project.project_id));
+      const page = await this.api.listProjectMessages(projectId, { syncAgent: false });
+      this.applyConversation(page);
     });
+    this.syncDoingBackgroundWatches();
   }
 
   async approveProjectRelease(): Promise<void> {
@@ -877,6 +881,17 @@ export class BattleplanStore {
     }
   }
 
+  async saveMindmapTheme(theme: import('../core/mindmap-theme').MindmapThemeId): Promise<void> {
+    const project = this.project();
+    if (!project) return;
+    await this.run(async () => {
+      const updated = await this.api.updateProject(project.project_id, { mindmap_theme: theme });
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === updated.project_id ? updated : item
+      )));
+    });
+  }
+
   async saveProject(patch: {
     title: string;
     repo_url: string;
@@ -886,6 +901,7 @@ export class BattleplanStore {
     initial_prompt?: string;
     default_research_agent_id?: string;
     default_code_agent_id?: string;
+    mindmap_theme?: import('../core/mindmap-theme').MindmapThemeId;
   }): Promise<void> {
     const project = this.project();
     if (!project) return;
@@ -1626,28 +1642,26 @@ export class BattleplanStore {
       : { output_type: input.output_type ?? 'research' as OutputType };
     this.stopWatch();
     let taskId = '';
-    await this.withEditorLoading(async () => {
-      await this.run(async () => {
-        const task = await this.api.createTask(projectId, {
-          depends_on,
-          map_x,
-          map_y,
-          output_type: taskFields.output_type,
-          node_kind: taskFields.node_kind,
-          lifecycle_phase: taskFields.lifecycle_phase,
-        });
-        taskId = task.task_id;
-        await this.reloadProjects();
-        await this.reloadTasks();
-        const kind = task.output_type === 'subproject' ? 'subproject' : 'task';
-        this.selection.set({ kind, taskId: task.task_id });
-        if (kind === 'subproject' && task.subproject_id) {
-          this.applyConversation(await this.api.listProjectMessages(task.subproject_id));
-        }
-        const result = await this.api.listTaskMessages(task.task_id);
-        this.applyTaskConversation(result);
-        this.notice.set('Task added. Fill in the details.');
+    await this.run(async () => {
+      const task = await this.api.createTask(projectId, {
+        depends_on,
+        map_x,
+        map_y,
+        output_type: taskFields.output_type,
+        node_kind: taskFields.node_kind,
+        lifecycle_phase: taskFields.lifecycle_phase,
       });
+      taskId = task.task_id;
+      await this.reloadProjects();
+      await this.reloadTasks();
+      const kind = task.output_type === 'subproject' ? 'subproject' : 'task';
+      this.selection.set({ kind, taskId: task.task_id });
+      if (kind === 'subproject' && task.subproject_id) {
+        this.applyConversation(await this.api.listProjectMessages(task.subproject_id));
+      }
+      const result = await this.api.listTaskMessages(task.task_id);
+      this.applyTaskConversation(result);
+      this.notice.set('Task added. Fill in the details.');
     });
     if (taskId) this.continueTaskWatch(taskId);
     return taskId || null;
@@ -1700,7 +1714,7 @@ export class BattleplanStore {
   async saveTask(patch: {
     title: string;
     dar?: string;
-    initial_prompt: string;
+    initial_prompt?: string;
     output_type: OutputType;
     node_kind?: import('../core/task-node-kind').TaskNodeKind;
     lifecycle_phase?: import('../core/models').LifecyclePhase;
@@ -1726,14 +1740,15 @@ export class BattleplanStore {
   async transition(taskId: string, status: TaskStatus, manual: boolean): Promise<void> {
     const task = this.tasks().find((item) => item.task_id === taskId);
     if (!task) return;
+    if (manual) this.patchTaskStatus(taskId, status);
     await this.run(async () => {
       const updated = await this.api.transition(task.project_id, taskId, status, manual);
       this.replaceTask(updated);
-      if (updated.cursor_agent_id) {
-        const result = await this.api.listTaskMessages(taskId);
-        this.applyTaskConversation(result);
-        await this.refreshOutput(result.task);
-      }
+      const result = await this.api.listTaskMessages(taskId, {
+        syncAgent: false,
+        reconcileStatus: manual ? false : undefined,
+      });
+      this.applyTaskConversation(result);
     });
     if (this.selection().kind === 'task') this.continueTaskWatch(taskId);
     this.syncDoingBackgroundWatches();
@@ -1745,6 +1760,7 @@ export class BattleplanStore {
     const taskId = task.task_id;
     const statusBeforeExecute = task.status;
     this.patchTaskStatus(taskId, 'DOING');
+    this.agentComms.registerPendingReply(taskId);
     let runId: string | undefined;
     await this.run(async () => {
       const sent = await this.api.executeTask(taskId);
@@ -1912,6 +1928,7 @@ export class BattleplanStore {
     }
     this.clearTaskPanelError(taskId);
     this.patchTaskStatus(taskId, 'DOING');
+    this.agentComms.registerPendingReply(taskId);
     let runId: string | undefined;
     let watchProjectId: string | undefined;
     await this.run(async () => {
@@ -1976,7 +1993,8 @@ export class BattleplanStore {
       this.syncDoingBackgroundWatches();
       return;
     }
-        this.agentComms.ensureTaskWatch(taskId);
+    this.agentComms.registerPendingReply(taskId);
+    this.agentComms.ensureTaskWatch(taskId);
     void this.finishApproveMerge(taskId);
   }
 
@@ -2116,7 +2134,11 @@ export class BattleplanStore {
   }
 
   private syncDoingBackgroundWatches(): void {
-    this.agentComms.syncTaskWatches(this.tasks(), (id) => this.subprojectCursorAgentId(id));
+    this.agentComms.syncTaskWatches(
+      this.tasks(),
+      (id) => this.subprojectCursorAgentId(id),
+      (taskId) => this.taskChatCache.get(taskId)?.messages ?? [],
+    );
   }
 
   private async syncTaskPanelAfterOpen(
@@ -2527,6 +2549,16 @@ export class BattleplanStore {
       const next = exists ? tasks.map((item) => item.task_id === task.task_id ? task : item) : [...tasks, task];
       return next.sort((left, right) => left.order - right.order);
     });
+  }
+
+  /** Optimistic root project status before async engine calls complete. */
+  private patchRootProjectStatus(projectId: string, status: TaskStatus): void {
+    const timestamp = new Date().toISOString();
+    this.projects.update((projects) => projects.map((item) => (
+      item.project_id === projectId
+        ? { ...item, status, updated_at: timestamp }
+        : item
+    )));
   }
 
   /** Optimistic status for mindmap/kanban before async engine calls complete. */

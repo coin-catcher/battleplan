@@ -351,6 +351,7 @@ export class LocalEngine {
     battleplan_storage_version?: number;
     release_source_ref?: string;
     release_target_ref?: string;
+    mindmap_theme?: import('../core/mindmap-theme').MindmapThemeId;
   }): Promise<Project> {
     const project = await this.requireProject(projectId);
     const changes: string[] = [];
@@ -399,6 +400,11 @@ export class LocalEngine {
     }
     if (patch.map_x !== undefined) project.map_x = patch.map_x;
     if (patch.map_y !== undefined) project.map_y = patch.map_y;
+    if (patch.mindmap_theme !== undefined) {
+      const next = patch.mindmap_theme === 'light' ? 'light' : 'dark';
+      if (next !== (project.mindmap_theme ?? 'dark')) changes.push(`Mindmap theme: ${next}`);
+      project.mindmap_theme = next;
+    }
     if (patch.default_research_agent_id !== undefined) {
       const next = patch.default_research_agent_id.trim();
       if (next !== (project.default_research_agent_id ?? '')) changes.push('Default research agent updated.');
@@ -916,7 +922,7 @@ export class LocalEngine {
         await this.cascadeAbandonChildren(projectId, task);
       }
       if (patch.status === 'DONE') {
-        await this.autoDispatchReadyTasks(projectId);
+        void this.autoDispatchReadyTasks(projectId);
       }
     }
     if (patch.map_x !== undefined) task.map_x = patch.map_x;
@@ -1232,7 +1238,7 @@ export class LocalEngine {
 
   async listTaskMessages(
     taskId: string,
-    options?: { syncAgent?: boolean },
+    options?: { syncAgent?: boolean; reconcileStatus?: boolean },
   ): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }> {
     const task = await this.requireTaskById(taskId);
     if (options?.syncAgent !== false) {
@@ -1245,7 +1251,9 @@ export class LocalEngine {
     const messages = await this.repo.listTaskMessages(taskId);
     let updated = await this.repo.getTask(taskId);
     if (!updated) updated = task;
-    updated = await this.reconcileTaskStatusWithLatestAgentRun(updated, messages);
+    if (options?.reconcileStatus !== false) {
+      updated = await this.reconcileTaskStatusWithLatestAgentRun(updated, messages);
+    }
     return {
       messages,
       task: updated,
@@ -2263,6 +2271,11 @@ export class LocalEngine {
         await this.repo.saveTask(task);
       }
       return task;
+    }
+    if (run.status === 'FINISHED' && task.status === 'DOING') {
+      await this.applyTaskRun(task.task_id, run);
+      const updated = await this.repo.getTask(task.task_id);
+      return updated ?? task;
     }
     return task;
   }

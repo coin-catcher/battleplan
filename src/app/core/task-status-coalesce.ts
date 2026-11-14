@@ -1,5 +1,5 @@
 import type { ChatMessage, ProjectTask, TaskStatus } from './models';
-import { isWorkflowTerminalAgentReply } from './agent-run-response';
+import { isSubstantiveAgentResponse, isWorkflowTerminalAgentReply } from './agent-run-response';
 import { taskNeedsDoingBackgroundPoll } from './task-state-machine';
 
 const TERMINAL_WHILE_POLLING: TaskStatus[] = ['TODO', 'REVIEW', 'DONE', 'BLOCKED', 'ABANDONED'];
@@ -60,6 +60,20 @@ export function taskChatAwaitingWorkflowReply(
   return !isWorkflowTerminalAgentReply(assistant.content);
 }
 
+function latestRunAssistantMessage(
+  messages: ChatMessage[],
+  taskId: string,
+  latestRunId?: string,
+): ChatMessage | undefined {
+  if (!latestRunId) return undefined;
+  return messages.find((message) => (
+    message.scope === 'task'
+    && message.task_id === taskId
+    && message.role === 'assistant'
+    && message.run_id === latestRunId
+  ));
+}
+
 export function shouldCoalesceInboundTaskStatus(
   live: ProjectTask | undefined,
   inbound: ProjectTask,
@@ -68,6 +82,13 @@ export function shouldCoalesceInboundTaskStatus(
 ): boolean {
   if (!live || live.status !== 'DOING') return backgroundPollActive;
   if (!TERMINAL_WHILE_POLLING.includes(inbound.status)) return backgroundPollActive;
+
+  const runId = live.latest_run_id ?? inbound.latest_run_id;
+  const assistant = latestRunAssistantMessage(messages, inbound.task_id, runId);
+  if (inbound.status === 'REVIEW' && assistant && isSubstantiveAgentResponse(assistant.content)) {
+    return false;
+  }
+
   return backgroundPollActive
-    || taskChatAwaitingWorkflowReply(messages, inbound.task_id, live.latest_run_id ?? inbound.latest_run_id);
+    || taskChatAwaitingWorkflowReply(messages, inbound.task_id, runId);
 }

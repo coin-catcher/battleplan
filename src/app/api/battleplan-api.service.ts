@@ -66,6 +66,7 @@ export class BattleplanApi {
     battleplan_storage_version?: number;
     release_source_ref?: string;
     release_target_ref?: string;
+    mindmap_theme?: import('../core/mindmap-theme').MindmapThemeId;
   }): Promise<Project> {
     return this.engine.updateProject(projectId, patch);
   }
@@ -244,7 +245,7 @@ export class BattleplanApi {
 
   listTaskMessages(
     taskId: string,
-    options?: { syncAgent?: boolean },
+    options?: { syncAgent?: boolean; reconcileStatus?: boolean },
   ): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ConversationPage['artifacts'] }> {
     return this.engine.listTaskMessages(taskId, options);
   }

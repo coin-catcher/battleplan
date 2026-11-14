@@ -40,6 +40,7 @@ import { isAgentDraftId } from './core/agent-id';
 import { AgentStatsComponent } from './components/agent-stats/agent-stats.component';
 import { AgentConnectionService } from './data/agent-connection.service';
 import { isMarkdownPath, prepareMarkdown } from './core/markdown';
+import { MINDMAP_THEMES, normalizeMindmapTheme, type MindmapThemeId } from './core/mindmap-theme';
 import { applyTheme, THEMES, type ThemeId } from './core/themes';
 import { AppPreferences } from './data/app-preferences.service';
 import { electronBridge, isElectronApp } from './data/electron-bridge';
@@ -62,6 +63,7 @@ import {
   mindmapNodeAtPoint,
   type WorldRect,
 } from './core/mindmap';
+import { graphEdgesForMindmap } from './core/task-ready';
 import { linkKey, type MindmapLinkRef } from './core/link-relocation';
 import {
   clampMindmapZoom,
@@ -72,6 +74,7 @@ import {
 } from './core/project-ui-state';
 import { MarkdownComponent } from 'ngx-markdown';
 import { editorPanelDirty } from './core/editor-dirty';
+import { buildTaskEditorSavePatch } from './core/task-editor-save';
 import { taskDar, taskInitialPrompt } from './core/task-fields';
 import {
   buildDefaultTaskBrief,
@@ -116,6 +119,7 @@ export class AppComponent implements OnInit {
   readonly portability = inject(ProjectPortability);
   readonly desktop = isElectronApp();
   readonly themes = THEMES;
+  readonly mindmapThemes = MINDMAP_THEMES;
   private readonly zone = inject(NgZone);
   readonly statuses = TASK_STATUSES;
   readonly mindmapConnectTaskKinds = MINDMAP_CONNECT_TASK_KINDS;
@@ -148,17 +152,26 @@ export class AppComponent implements OnInit {
   private edgeHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private convertHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private connectionPointerCleanup: (() => void) | undefined;
+  private connectMenuContext: {
+    sourceId: string;
+    sourceKind: 'project' | 'task';
+    direction: CardinalDirection;
+  } | null = null;
   private edgeLongPressFired = false;
   private mapHoverFrame = 0;
   private readonly addTaskHoldMs = 450;
   private readonly connectClickMaxMs = 280;
   private readonly convertHoldMs = 280;
+  readonly mindmapLinkDropTargetId = signal<string | null>(null);
+  private mindmapLinkDragActive = false;
   private readonly onMapPointerMoveCapture = (event: PointerEvent): void => {
     this.onMapPointerMove(event);
   };
   private readonly onMapDismissCapture = (event: PointerEvent): void => {
     this.onMapDismissPointerDown(event);
   };
+  readonly activeMindmapTheme = computed(() => normalizeMindmapTheme(this.store.project()?.mindmap_theme));
+
   readonly map = computed(() => {
     const project = this.store.project();
     const pins = this.dragPins();
@@ -176,7 +189,7 @@ export class AppComponent implements OnInit {
       tasks,
       projectPin,
       project?.status,
-      project?.task_graph_edges,
+      graphEdgesForMindmap(project ?? null, tasks),
     );
   });
 
@@ -203,6 +216,7 @@ export class AppComponent implements OnInit {
   projectDar = '';
   defaultResearchAgentId = '';
   defaultCodeAgentId = '';
+  mindmapTheme: MindmapThemeId = 'dark';
   taskResearchAgentId = '';
   taskCodeAgentId = '';
   chatDraft = '';
@@ -339,7 +353,7 @@ export class AppComponent implements OnInit {
       const selection = this.store.selection();
       const project = selection.kind === 'subproject' ? this.store.editorProject() : this.store.project();
       const signature = project
-        ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}:${project.github_pat ?? ''}:${project.dar ?? ''}:${project.initial_prompt}:${project.cursor_agent_id ?? ''}:${selection.kind}`
+        ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}:${project.github_pat ?? ''}:${project.dar ?? ''}:${project.mindmap_theme ?? 'dark'}:${project.initial_prompt}:${project.cursor_agent_id ?? ''}:${selection.kind}`
         : '';
       if (signature === this.titleSignature) return;
       this.titleSignature = signature;
@@ -350,6 +364,9 @@ export class AppComponent implements OnInit {
       this.projectDar = project?.dar ?? '';
       this.defaultResearchAgentId = project?.default_research_agent_id ?? '';
       this.defaultCodeAgentId = project?.default_code_agent_id ?? '';
+      if (selection.kind === 'project') {
+        this.mindmapTheme = normalizeMindmapTheme(this.store.project()?.mindmap_theme);
+      }
       if (selection.kind === 'subproject') {
         this.subprojectInitialPrompt = project?.initial_prompt ?? '';
       }
@@ -701,6 +718,7 @@ export class AppComponent implements OnInit {
         starting_ref: this.projectBranch,
         github_pat: this.projectGithubPat,
         dar: this.projectDar,
+        mindmap_theme: this.mindmapTheme,
         initial_prompt: selection.kind === 'subproject' ? this.subprojectInitialPrompt : undefined,
       },
       {
@@ -708,8 +726,12 @@ export class AppComponent implements OnInit {
         brief: this.taskBriefForm,
         initial_prompt: this.taskInitialPrompt,
         output_type: this.outputType,
+        editor_kind: this.taskEditorKind,
         dependencies: this.dependencies,
         sibling_dependencies: this.siblingDependencies,
+        research_agent_id: this.taskResearchAgentId,
+        code_agent_id: this.taskCodeAgentId,
+        repo_path: this.taskRepoPath,
       },
       project,
       this.store.selectedTask(),
@@ -794,6 +816,7 @@ export class AppComponent implements OnInit {
         dar: this.projectDar,
         default_research_agent_id: this.defaultResearchAgentId,
         default_code_agent_id: this.defaultCodeAgentId,
+        mindmap_theme: this.mindmapTheme,
       });
     } else if (selection.kind === 'subproject') {
       await this.store.saveEditorProject({
@@ -805,21 +828,23 @@ export class AppComponent implements OnInit {
         initial_prompt: this.subprojectInitialPrompt,
       });
     } else if (selection.kind === 'task') {
-      const kindFields = this.taskKindPatch();
-      await this.store.saveTask({
+      const task = this.store.selectedTask();
+      if (!task) return false;
+      await this.store.saveTask(buildTaskEditorSavePatch(task, {
         title: this.taskTitle,
         initial_prompt: this.taskInitialPrompt,
-        output_type: kindFields.output_type,
-        node_kind: kindFields.node_kind,
-        lifecycle_phase: kindFields.lifecycle_phase,
-        repo_path: this.taskRepoPath.trim() || undefined,
-        execute_config: this.taskExecuteConfigPatch(),
+        editor_kind: this.taskEditorKind,
         dependencies: this.dependencies,
         sibling_dependencies: this.siblingDependencies,
         research_agent_id: this.taskResearchAgentId,
         code_agent_id: this.taskCodeAgentId,
+        repo_path: this.taskRepoPath,
         brief: this.taskBriefForm,
-      });
+        execute_config: this.taskExecuteConfigPatch(),
+      }));
+      if (!this.store.error()) {
+        this.outputType = fieldsFromTaskEditorKind(this.taskEditorKind).output_type;
+      }
     } else if (selection.kind === 'agent' || selection.kind === 'agent-create') {
       await this.store.saveAgentFromEditor(this.agentEditorForm());
       this.agentApiKeyEdited = false;
@@ -853,10 +878,10 @@ export class AppComponent implements OnInit {
 
   private async resolveUnsavedChoice(choice: 'no' | 'yes' | 'yes-always'): Promise<void> {
     const navigate = this.pendingNavigation;
-    this.pendingNavigation = null;
-    this.unsavedPromptOpen.set(false);
     if (!navigate) return;
     if (choice === 'no') {
+      this.pendingNavigation = null;
+      this.unsavedPromptOpen.set(false);
       await navigate();
       return;
     }
@@ -864,7 +889,13 @@ export class AppComponent implements OnInit {
       this.autoSaveEnabled.set(true);
       await this.preferences.saveAutoSave(true);
     }
-    if (await this.persistEditorChanges()) await navigate();
+    const saved = await this.persistEditorChanges();
+    if (!saved) {
+      return;
+    }
+    this.pendingNavigation = null;
+    this.unsavedPromptOpen.set(false);
+    await navigate();
   }
 
   checkForUpdates(): void {
@@ -1258,36 +1289,70 @@ export class AppComponent implements OnInit {
   onMindmapLinkHandlePointerDown(edge: MindmapEdge, end: 'from' | 'to', event: PointerEvent): void {
     event.stopPropagation();
     event.preventDefault();
+    if (event.button !== 0) return;
     const link: MindmapLinkRef = { kind: edge.kind, from: edge.from, to: edge.to };
     this.selectedMindmapLink.set(link);
     const start = this.mindmapLinkHandlePoint(edge, end);
     this.linkEndpointDrag.set({ link, end, x: start.x, y: start.y });
+    this.mindmapLinkDropTargetId.set(null);
+    this.mindmapLinkDragActive = true;
+    this.connectHover.set(null);
     const stage = this.mapStage()?.nativeElement;
     if (!stage) return;
+    const originalEndId = end === 'from' ? link.from : link.to;
     const move = (ev: PointerEvent): void => {
       const rect = stage.getBoundingClientRect();
       const world = pointerToWorld(ev.clientX, ev.clientY, rect, stage.scrollLeft, stage.scrollTop, this.zoom());
       this.linkEndpointDrag.set({ link, end, x: world.x, y: world.y });
+      const outsidePx = 10 / this.zoom();
+      let dropId: string | null = null;
+      for (const candidate of [...this.map().nodes].reverse()) {
+        if (candidate.id === originalEndId) continue;
+        if (pickConnectHoverSide(candidate, world.x, world.y, outsidePx)) {
+          dropId = candidate.id;
+          break;
+        }
+      }
+      if (!dropId) {
+        const hit = mindmapNodeAtPoint(this.map().nodes, world.x, world.y);
+        if (hit && hit.id !== originalEndId) dropId = hit.id;
+      }
+      this.mindmapLinkDropTargetId.set(dropId);
+      document.body.style.cursor = dropId ? 'copy' : 'grabbing';
     };
-    const up = (ev: PointerEvent): void => {
+    const finish = (ev: PointerEvent): void => {
       window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      document.body.style.cursor = '';
+      this.mindmapLinkDragActive = false;
+      this.mindmapLinkDropTargetId.set(null);
       this.linkEndpointDrag.set(null);
       const rect = stage.getBoundingClientRect();
       const world = pointerToWorld(ev.clientX, ev.clientY, rect, stage.scrollLeft, stage.scrollTop, this.zoom());
-      const target = mindmapNodeAtPoint(this.map().nodes, world.x, world.y);
-      const anchorId = end === 'from' ? link.to : link.from;
-      const originalEndId = end === 'from' ? link.from : link.to;
-      if (target && target.id !== originalEndId && (target.id !== anchorId || target.id === 'project')) {
-        if (link.kind === 'child' || link.kind === 'sibling' || link.kind === 'project-root') {
-          void this.store.relocateMindmapLink(link, end, target.id);
+      const outsidePx = 10 / this.zoom();
+      let dropNodeId: string | null = null;
+      for (const candidate of [...this.map().nodes].reverse()) {
+        if (candidate.id === originalEndId) continue;
+        if (pickConnectHoverSide(candidate, world.x, world.y, outsidePx)) {
+          dropNodeId = candidate.id;
+          break;
         }
+      }
+      if (!dropNodeId) {
+        const target = mindmapNodeAtPoint(this.map().nodes, world.x, world.y);
+        if (target && target.id !== originalEndId) dropNodeId = target.id;
+      }
+      if (!dropNodeId || dropNodeId === originalEndId) return;
+      const anchorId = end === 'from' ? link.to : link.from;
+      if (dropNodeId === anchorId && dropNodeId !== 'project') return;
+      if (link.kind === 'child' || link.kind === 'sibling' || link.kind === 'project-root') {
+        void this.store.relocateMindmapLink(link, end, dropNodeId);
       }
     };
     window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
   }
 
   isMapSelected(node: MindmapNode): boolean {
@@ -1394,6 +1459,10 @@ export class AppComponent implements OnInit {
     return artifact.content_type === 'text' && isMarkdownPath(artifact.path);
   }
 
+  onMindmapThemeChange(): void {
+    void this.store.saveMindmapTheme(this.mindmapTheme);
+  }
+
   saveProject(): void {
     void this.store.saveProject({
       title: this.title.trim(),
@@ -1401,6 +1470,7 @@ export class AppComponent implements OnInit {
       starting_ref: this.projectBranch.trim() || 'main',
       github_pat: this.projectGithubPat.trim(),
       dar: this.projectDar,
+      mindmap_theme: this.mindmapTheme,
       default_research_agent_id: this.defaultResearchAgentId,
       default_code_agent_id: this.defaultCodeAgentId,
     });
@@ -1618,7 +1688,7 @@ export class AppComponent implements OnInit {
 
   onStagePointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-node, .map-connect-btn, .map-connection-head, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit, .zoom-controls, .agent-toolbox')) return;
+    if (target.closest('.map-node, .map-connect-btn, .map-connection-head, .map-connect-panel, .map-panel-option, .map-convert-panel, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit, .zoom-controls, .agent-toolbox')) return;
     this.selectedMindmapLink.set(null);
     if (this.connectPanel()) {
       this.dismissConnectPanel();
@@ -2052,7 +2122,7 @@ export class AppComponent implements OnInit {
   }
 
   isConnectionDropTarget(nodeId: string): boolean {
-    return this.connectionDropTarget()?.nodeId === nodeId;
+    return this.connectionDropTarget()?.nodeId === nodeId || this.mindmapLinkDropTargetId() === nodeId;
   }
 
   connectionDropDirection(nodeId: string): CardinalDirection | null {
@@ -2061,9 +2131,9 @@ export class AppComponent implements OnInit {
   }
 
   onMapPointerMove(event: PointerEvent): void {
-    if (this.connectionSession() || this.connectPanel() || this.convertPanel() || this.editingNodeId() || this.mapDraggingNodeId()) return;
+    if (this.connectionSession() || this.mindmapLinkDragActive || this.connectPanel() || this.convertPanel() || this.editingNodeId() || this.mapDraggingNodeId()) return;
     const target = event.target as HTMLElement;
-    if (target.closest('.map-connect-panel, .map-connect-btn, .map-connection-head')) return;
+    if (target.closest('.map-connect-panel, .map-panel-option, .map-connect-btn, .map-connection-head')) return;
     cancelAnimationFrame(this.mapHoverFrame);
     this.mapHoverFrame = requestAnimationFrame(() => {
       const stage = this.mapStage()?.nativeElement;
@@ -2114,11 +2184,13 @@ export class AppComponent implements OnInit {
     let addTaskOpened = false;
     const holdTimer = setTimeout(() => {
       addTaskOpened = true;
-      this.connectPanel.set({
+      const context = {
         sourceId: node.id,
         sourceKind: node.kind,
         direction,
-      });
+      };
+      this.connectMenuContext = context;
+      this.connectPanel.set(context);
     }, this.addTaskHoldMs);
     const onUp = (upEvent: PointerEvent): void => {
       clearTimeout(holdTimer);
@@ -2265,7 +2337,7 @@ export class AppComponent implements OnInit {
 
   onMapDismissPointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-connect-panel, .map-convert-panel, .map-connect-btn, .map-connection-head, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit')) return;
+    if (target.closest('.map-connect-panel, .map-panel-option, .map-convert-panel, .map-connect-btn, .map-connection-head, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit')) return;
     this.dismissConnectPanel();
     this.cancelConnectionSession();
     this.convertPanel.set(null);
@@ -2274,22 +2346,28 @@ export class AppComponent implements OnInit {
   dismissConnectPanel(): void {
     this.clearEdgeHoldTimer();
     this.connectPanel.set(null);
+    this.connectMenuContext = null;
   }
 
-  async confirmAddConnectedTask(taskKind: MindmapConnectTaskKind, event: Event): Promise<void> {
+  onConnectMenuPick(taskKind: MindmapConnectTaskKind, event: PointerEvent): void {
     event.stopPropagation();
-    const panel = this.connectPanel();
+    event.preventDefault();
+    void this.confirmAddConnectedTask(taskKind);
+  }
+
+  async confirmAddConnectedTask(taskKind: MindmapConnectTaskKind): Promise<void> {
+    const panel = this.connectPanel() ?? this.connectMenuContext;
     if (!panel) return;
     this.dismissConnectPanel();
-    await this.guardUnsavedChanges(async () => {
-      const taskId = await this.store.addConnectedTask({
-        sourceId: panel.sourceId,
-        sourceKind: panel.sourceKind,
-        direction: panel.direction,
-        taskKind,
-      });
-      if (taskId) this.startInlineEdit(taskId, mindmapConnectDefaultTitle(taskKind));
+    const taskId = await this.store.addConnectedTask({
+      sourceId: panel.sourceId,
+      sourceKind: panel.sourceKind,
+      direction: panel.direction,
+      taskKind,
     });
+    if (taskId) {
+      this.startInlineEdit(taskId, mindmapConnectDefaultTitle(taskKind));
+    }
   }
 
   onNodeDblClick(node: MindmapNode, event: MouseEvent): void {
@@ -2403,21 +2481,23 @@ export class AppComponent implements OnInit {
   }
 
   async saveTask(): Promise<void> {
-    const kindFields = this.taskKindPatch();
-    await this.store.saveTask({
+    const task = this.store.selectedTask();
+    if (!task) return;
+    await this.store.saveTask(buildTaskEditorSavePatch(task, {
       title: this.taskTitle,
       initial_prompt: this.taskInitialPrompt,
-      output_type: kindFields.output_type,
-      node_kind: kindFields.node_kind,
-      lifecycle_phase: kindFields.lifecycle_phase,
-      repo_path: this.taskRepoPath.trim() || undefined,
-      execute_config: this.taskExecuteConfigPatch(),
+      editor_kind: this.taskEditorKind,
       dependencies: this.dependencies,
       sibling_dependencies: this.siblingDependencies,
       research_agent_id: this.taskResearchAgentId,
       code_agent_id: this.taskCodeAgentId,
+      repo_path: this.taskRepoPath,
       brief: this.taskBriefForm,
-    });
+      execute_config: this.taskExecuteConfigPatch(),
+    }));
+    if (!this.store.error()) {
+      this.outputType = fieldsFromTaskEditorKind(this.taskEditorKind).output_type;
+    }
   }
 
   regenerateTaskBrief(): void {

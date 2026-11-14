@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   agentBranchPolicyLines,
   branchNamesFromRun,
+  globalAgentSessionPolicyLines,
   mergeConflictRecoveryPrompt,
   pickTaskAgentBranch,
+  wrapAgentRunPrompt,
 } from './agent-branch';
 import type { CursorRun } from '../data/cursor-browser';
 
@@ -91,6 +93,23 @@ describe('agentBranchPolicyLines', () => {
     const lines = agentBranchPolicyLines({ baseBranch: 'develop', agentBranch: 'cursor/task-1' });
     expect(lines.join('\n')).toContain('Do not create, update, or merge pull requests');
     expect(lines.join('\n')).toContain('cursor/task-1');
+  });
+});
+
+describe('globalAgentSessionPolicyLines', () => {
+  it('requires visual inspection of images in chat replies', () => {
+    const text = globalAgentSessionPolicyLines().join('\n');
+    expect(text).toContain('visual inspection');
+    expect(text.toLowerCase()).toContain('image');
+  });
+});
+
+describe('wrapAgentRunPrompt', () => {
+  it('prepends git policy and global image policy', () => {
+    const wrapped = wrapAgentRunPrompt('Do the task.', { baseBranch: 'develop', agentBranch: 'cursor/x' });
+    expect(wrapped).toContain('Git workflow (required)');
+    expect(wrapped).toContain('Artifacts and images (required)');
+    expect(wrapped.endsWith('Do the task.')).toBe(true);
   });
 });
 
