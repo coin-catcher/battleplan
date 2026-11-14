@@ -5,8 +5,10 @@ import {
   mindmapCanvasWorldSpan,
   mindmapScrollFromView,
   mindmapViewCenteredOnCanvas,
+  mindmapViewCenteredOnWorldPoint,
   mindmapViewFromScroll,
   MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX,
+  MINDMAP_WORLD_CANVAS_SPAN_PX,
   normalizeProjectWorkspaceUiState,
   projectWorkspaceUiFromMindmap,
 } from './project-ui-state';
@@ -34,14 +36,22 @@ describe('project-ui-state', () => {
   });
 
   it('centers the viewport on the canvas midpoint', () => {
-    const view = mindmapViewCenteredOnCanvas(102_400, 102_400, 800, 600, 1);
-    expect(view.origin_x + 800 / 2).toBeCloseTo(51_200, 0);
-    expect(view.origin_y + 600 / 2).toBeCloseTo(51_200, 0);
+    const view = mindmapViewCenteredOnCanvas(12_800, 12_800, 800, 600, 1);
+    expect(view.origin_x + 800 / 2).toBeCloseTo(6_400, 0);
+    expect(view.origin_y + 600 / 2).toBeCloseTo(6_400, 0);
   });
 
-  it('sizes world canvas for edge-to-edge view at minimum zoom', () => {
-    expect(mindmapCanvasWorldSpan()).toBe(Math.ceil(MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX / MIN_MINDMAP_ZOOM));
-    expect(MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX / mindmapCanvasWorldSpan()).toBe(MIN_MINDMAP_ZOOM);
+  it('uses a fixed 12800px world canvas independent of viewport reference', () => {
+    expect(mindmapCanvasWorldSpan()).toBe(MINDMAP_WORLD_CANVAS_SPAN_PX);
+    expect(mindmapCanvasWorldSpan()).toBe(12_800);
+    const fullLegacySpan = MINDMAP_CANVAS_REFERENCE_VIEWPORT_PX / MIN_MINDMAP_ZOOM;
+    expect(mindmapCanvasWorldSpan()).toBeLessThan(fullLegacySpan);
+  });
+
+  it('centers the viewport on a world point', () => {
+    const view = mindmapViewCenteredOnWorldPoint(10_000, 20_000, 400, 300, 1);
+    expect(view.origin_x + 400 / 2).toBeCloseTo(10_000, 0);
+    expect(view.origin_y + 300 / 2).toBeCloseTo(20_000, 0);
   });
 
   it('builds persisted workspace rows from live mindmap state', () => {

@@ -47,6 +47,8 @@ export interface Project {
   map_y?: number;
   /** Mindmap canvas and task chrome: light or dark (per-project). */
   mindmap_theme?: import('./mindmap-theme').MindmapThemeId;
+  /** Map coordinate normalization generation (see {@link MINDMAP_PLACEMENT_VERSION}). */
+  mindmap_placement_version?: number;
   /** Mindmap status for the root project node (nested subprojects use their task node). */
   status?: TaskStatus;
   /** Version-bump branch created by the project agent after Release Changes. */
