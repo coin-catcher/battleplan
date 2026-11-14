@@ -1626,28 +1626,26 @@ export class BattleplanStore {
       : { output_type: input.output_type ?? 'research' as OutputType };
     this.stopWatch();
     let taskId = '';
-    await this.withEditorLoading(async () => {
-      await this.run(async () => {
-        const task = await this.api.createTask(projectId, {
-          depends_on,
-          map_x,
-          map_y,
-          output_type: taskFields.output_type,
-          node_kind: taskFields.node_kind,
-          lifecycle_phase: taskFields.lifecycle_phase,
-        });
-        taskId = task.task_id;
-        await this.reloadProjects();
-        await this.reloadTasks();
-        const kind = task.output_type === 'subproject' ? 'subproject' : 'task';
-        this.selection.set({ kind, taskId: task.task_id });
-        if (kind === 'subproject' && task.subproject_id) {
-          this.applyConversation(await this.api.listProjectMessages(task.subproject_id));
-        }
-        const result = await this.api.listTaskMessages(task.task_id);
-        this.applyTaskConversation(result);
-        this.notice.set('Task added. Fill in the details.');
+    await this.run(async () => {
+      const task = await this.api.createTask(projectId, {
+        depends_on,
+        map_x,
+        map_y,
+        output_type: taskFields.output_type,
+        node_kind: taskFields.node_kind,
+        lifecycle_phase: taskFields.lifecycle_phase,
       });
+      taskId = task.task_id;
+      await this.reloadProjects();
+      await this.reloadTasks();
+      const kind = task.output_type === 'subproject' ? 'subproject' : 'task';
+      this.selection.set({ kind, taskId: task.task_id });
+      if (kind === 'subproject' && task.subproject_id) {
+        this.applyConversation(await this.api.listProjectMessages(task.subproject_id));
+      }
+      const result = await this.api.listTaskMessages(task.task_id);
+      this.applyTaskConversation(result);
+      this.notice.set('Task added. Fill in the details.');
     });
     if (taskId) this.continueTaskWatch(taskId);
     return taskId || null;

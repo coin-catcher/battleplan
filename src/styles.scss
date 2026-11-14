@@ -514,9 +514,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   cursor: grabbing;
 }
 .map-link-draft {
-  stroke: var(--accent, #6fa8ff);
-  stroke-width: 2.5;
-  stroke-dasharray: 6 4;
+  stroke: #f4efe6;
+  stroke-width: 2;
 }
 .map-node.connect-drop-target {
   outline: 2px solid var(--accent, #6fa8ff);

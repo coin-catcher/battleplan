@@ -148,11 +148,18 @@ export class AppComponent implements OnInit {
   private edgeHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private convertHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private connectionPointerCleanup: (() => void) | undefined;
+  private connectMenuContext: {
+    sourceId: string;
+    sourceKind: 'project' | 'task';
+    direction: CardinalDirection;
+  } | null = null;
   private edgeLongPressFired = false;
   private mapHoverFrame = 0;
   private readonly addTaskHoldMs = 450;
   private readonly connectClickMaxMs = 280;
   private readonly convertHoldMs = 280;
+  readonly mindmapLinkDropTargetId = signal<string | null>(null);
+  private mindmapLinkDragActive = false;
   private readonly onMapPointerMoveCapture = (event: PointerEvent): void => {
     this.onMapPointerMove(event);
   };
@@ -1258,36 +1265,70 @@ export class AppComponent implements OnInit {
   onMindmapLinkHandlePointerDown(edge: MindmapEdge, end: 'from' | 'to', event: PointerEvent): void {
     event.stopPropagation();
     event.preventDefault();
+    if (event.button !== 0) return;
     const link: MindmapLinkRef = { kind: edge.kind, from: edge.from, to: edge.to };
     this.selectedMindmapLink.set(link);
     const start = this.mindmapLinkHandlePoint(edge, end);
     this.linkEndpointDrag.set({ link, end, x: start.x, y: start.y });
+    this.mindmapLinkDropTargetId.set(null);
+    this.mindmapLinkDragActive = true;
+    this.connectHover.set(null);
     const stage = this.mapStage()?.nativeElement;
     if (!stage) return;
+    const originalEndId = end === 'from' ? link.from : link.to;
     const move = (ev: PointerEvent): void => {
       const rect = stage.getBoundingClientRect();
       const world = pointerToWorld(ev.clientX, ev.clientY, rect, stage.scrollLeft, stage.scrollTop, this.zoom());
       this.linkEndpointDrag.set({ link, end, x: world.x, y: world.y });
+      const outsidePx = 10 / this.zoom();
+      let dropId: string | null = null;
+      for (const candidate of [...this.map().nodes].reverse()) {
+        if (candidate.id === originalEndId) continue;
+        if (pickConnectHoverSide(candidate, world.x, world.y, outsidePx)) {
+          dropId = candidate.id;
+          break;
+        }
+      }
+      if (!dropId) {
+        const hit = mindmapNodeAtPoint(this.map().nodes, world.x, world.y);
+        if (hit && hit.id !== originalEndId) dropId = hit.id;
+      }
+      this.mindmapLinkDropTargetId.set(dropId);
+      document.body.style.cursor = dropId ? 'copy' : 'grabbing';
     };
-    const up = (ev: PointerEvent): void => {
+    const finish = (ev: PointerEvent): void => {
       window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      document.body.style.cursor = '';
+      this.mindmapLinkDragActive = false;
+      this.mindmapLinkDropTargetId.set(null);
       this.linkEndpointDrag.set(null);
       const rect = stage.getBoundingClientRect();
       const world = pointerToWorld(ev.clientX, ev.clientY, rect, stage.scrollLeft, stage.scrollTop, this.zoom());
-      const target = mindmapNodeAtPoint(this.map().nodes, world.x, world.y);
-      const anchorId = end === 'from' ? link.to : link.from;
-      const originalEndId = end === 'from' ? link.from : link.to;
-      if (target && target.id !== originalEndId && (target.id !== anchorId || target.id === 'project')) {
-        if (link.kind === 'child' || link.kind === 'sibling' || link.kind === 'project-root') {
-          void this.store.relocateMindmapLink(link, end, target.id);
+      const outsidePx = 10 / this.zoom();
+      let dropNodeId: string | null = null;
+      for (const candidate of [...this.map().nodes].reverse()) {
+        if (candidate.id === originalEndId) continue;
+        if (pickConnectHoverSide(candidate, world.x, world.y, outsidePx)) {
+          dropNodeId = candidate.id;
+          break;
         }
+      }
+      if (!dropNodeId) {
+        const target = mindmapNodeAtPoint(this.map().nodes, world.x, world.y);
+        if (target && target.id !== originalEndId) dropNodeId = target.id;
+      }
+      if (!dropNodeId || dropNodeId === originalEndId) return;
+      const anchorId = end === 'from' ? link.to : link.from;
+      if (dropNodeId === anchorId && dropNodeId !== 'project') return;
+      if (link.kind === 'child' || link.kind === 'sibling' || link.kind === 'project-root') {
+        void this.store.relocateMindmapLink(link, end, dropNodeId);
       }
     };
     window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
   }
 
   isMapSelected(node: MindmapNode): boolean {
@@ -1618,7 +1659,7 @@ export class AppComponent implements OnInit {
 
   onStagePointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-node, .map-connect-btn, .map-connection-head, .map-connect-panel, .map-convert-panel, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit, .zoom-controls, .agent-toolbox')) return;
+    if (target.closest('.map-node, .map-connect-btn, .map-connection-head, .map-connect-panel, .map-panel-option, .map-convert-panel, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit, .zoom-controls, .agent-toolbox')) return;
     this.selectedMindmapLink.set(null);
     if (this.connectPanel()) {
       this.dismissConnectPanel();
@@ -2052,7 +2093,7 @@ export class AppComponent implements OnInit {
   }
 
   isConnectionDropTarget(nodeId: string): boolean {
-    return this.connectionDropTarget()?.nodeId === nodeId;
+    return this.connectionDropTarget()?.nodeId === nodeId || this.mindmapLinkDropTargetId() === nodeId;
   }
 
   connectionDropDirection(nodeId: string): CardinalDirection | null {
@@ -2061,9 +2102,9 @@ export class AppComponent implements OnInit {
   }
 
   onMapPointerMove(event: PointerEvent): void {
-    if (this.connectionSession() || this.connectPanel() || this.convertPanel() || this.editingNodeId() || this.mapDraggingNodeId()) return;
+    if (this.connectionSession() || this.mindmapLinkDragActive || this.connectPanel() || this.convertPanel() || this.editingNodeId() || this.mapDraggingNodeId()) return;
     const target = event.target as HTMLElement;
-    if (target.closest('.map-connect-panel, .map-connect-btn, .map-connection-head')) return;
+    if (target.closest('.map-connect-panel, .map-panel-option, .map-connect-btn, .map-connection-head')) return;
     cancelAnimationFrame(this.mapHoverFrame);
     this.mapHoverFrame = requestAnimationFrame(() => {
       const stage = this.mapStage()?.nativeElement;
@@ -2114,11 +2155,13 @@ export class AppComponent implements OnInit {
     let addTaskOpened = false;
     const holdTimer = setTimeout(() => {
       addTaskOpened = true;
-      this.connectPanel.set({
+      const context = {
         sourceId: node.id,
         sourceKind: node.kind,
         direction,
-      });
+      };
+      this.connectMenuContext = context;
+      this.connectPanel.set(context);
     }, this.addTaskHoldMs);
     const onUp = (upEvent: PointerEvent): void => {
       clearTimeout(holdTimer);
@@ -2265,7 +2308,7 @@ export class AppComponent implements OnInit {
 
   onMapDismissPointerDown(event: PointerEvent): void {
     const target = event.target as HTMLElement;
-    if (target.closest('.map-connect-panel, .map-convert-panel, .map-connect-btn, .map-connection-head, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit')) return;
+    if (target.closest('.map-connect-panel, .map-panel-option, .map-convert-panel, .map-connect-btn, .map-connection-head, .map-convert-handle, .map-orchestration-play, .map-orchestration-stop, .map-orchestration-pause, .map-link-handle, .map-link-hit')) return;
     this.dismissConnectPanel();
     this.cancelConnectionSession();
     this.convertPanel.set(null);
@@ -2274,22 +2317,28 @@ export class AppComponent implements OnInit {
   dismissConnectPanel(): void {
     this.clearEdgeHoldTimer();
     this.connectPanel.set(null);
+    this.connectMenuContext = null;
   }
 
-  async confirmAddConnectedTask(taskKind: MindmapConnectTaskKind, event: Event): Promise<void> {
+  onConnectMenuPick(taskKind: MindmapConnectTaskKind, event: PointerEvent): void {
     event.stopPropagation();
-    const panel = this.connectPanel();
+    event.preventDefault();
+    void this.confirmAddConnectedTask(taskKind);
+  }
+
+  async confirmAddConnectedTask(taskKind: MindmapConnectTaskKind): Promise<void> {
+    const panel = this.connectPanel() ?? this.connectMenuContext;
     if (!panel) return;
     this.dismissConnectPanel();
-    await this.guardUnsavedChanges(async () => {
-      const taskId = await this.store.addConnectedTask({
-        sourceId: panel.sourceId,
-        sourceKind: panel.sourceKind,
-        direction: panel.direction,
-        taskKind,
-      });
-      if (taskId) this.startInlineEdit(taskId, mindmapConnectDefaultTitle(taskKind));
+    const taskId = await this.store.addConnectedTask({
+      sourceId: panel.sourceId,
+      sourceKind: panel.sourceKind,
+      direction: panel.direction,
+      taskKind,
     });
+    if (taskId) {
+      this.startInlineEdit(taskId, mindmapConnectDefaultTitle(taskKind));
+    }
   }
 
   onNodeDblClick(node: MindmapNode, event: MouseEvent): void {
