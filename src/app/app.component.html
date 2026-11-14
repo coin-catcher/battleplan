@@ -208,7 +208,7 @@
                 [attr.y1]="preview.y1"
                 [attr.x2]="preview.x2"
                 [attr.y2]="preview.y2"
-                marker-end="url(#arrow-dashed)"
+                marker-end="url(#arrow-solid)"
                 pointer-events="none"
               />
             }
@@ -408,7 +408,7 @@
                   class="map-panel-option"
                   [class.primary]="kind === 'code'"
                   [class.ghost]="kind !== 'code'"
-                  (click)="confirmAddConnectedTask(kind, $event)"
+                  (pointerdown)="onConnectMenuPick(kind, $event)"
                 >{{ mindmapConnectTaskLabel(kind) }}</button>
               }
             </div>
