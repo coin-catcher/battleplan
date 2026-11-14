@@ -2,6 +2,7 @@ import { defaultOptionValues, getAgentTypeDefinition, mergeAgentOptions } from '
 import type { AgentKind, AgentOptionValue, AgentType, OutputType, Project, ProjectAgent, ProjectTask } from './models';
 import { TASK_BRIEF_FIELDS, type TaskBrief } from './task-brief';
 import { taskInitialPrompt } from './task-fields';
+import { taskEditorKindFromTask, type TaskEditorKind } from './task-editor-kind';
 
 export interface ProjectEditorForm {
   title: string;
@@ -16,9 +17,14 @@ export interface TaskEditorForm {
   title: string;
   brief: TaskBrief;
   initial_prompt: string;
+  /** @deprecated Prefer editor_kind; kept for legacy callers. */
   output_type: OutputType;
+  editor_kind: TaskEditorKind;
   dependencies: string[];
   sibling_dependencies: string[];
+  research_agent_id?: string;
+  code_agent_id?: string;
+  repo_path?: string;
 }
 
 function taskBriefDirty(form: TaskBrief, task: ProjectTask | null): boolean {
@@ -64,10 +70,15 @@ export function taskEditorDirty(form: TaskEditorForm, task: ProjectTask | null):
   const savedSiblings = [...(task.sibling_dependencies ?? [])].sort();
   const initialDirty = !task.cursor_agent_id
     && form.initial_prompt.trim() !== taskInitialPrompt(task);
+  const savedKind = taskEditorKindFromTask(task);
   return form.title !== task.title
     || taskBriefDirty(form.brief, task)
+    || form.editor_kind !== savedKind
     || form.output_type !== task.output_type
     || initialDirty
+    || (form.research_agent_id ?? '') !== (task.research_agent_id ?? '')
+    || (form.code_agent_id ?? '') !== (task.code_agent_id ?? '')
+    || (form.repo_path ?? '').trim() !== (task.repo_path ?? '').trim()
     || deps.length !== saved.length
     || deps.some((id, index) => id !== saved[index])
     || siblings.length !== savedSiblings.length
@@ -126,7 +137,7 @@ export function editorPanelDirty(
   if (kind === 'project' || kind === 'subproject') {
     return projectEditorDirty(projectForm, project);
   }
-  if (kind === 'task') {
+  if (kind === 'task' && task) {
     return taskEditorDirty(taskForm, task);
   }
   if (kind === 'agent-create' && agentForm && agentCreateRole) {
