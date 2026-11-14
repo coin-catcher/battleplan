@@ -298,8 +298,12 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   --map-link-stroke: #2a2118;
   --map-link-dashed: #6b5c48;
   --map-link-dotted: #5c6b7a;
-  --map-node-depth-inset: inset 0 2px 5px rgba(0, 0, 0, 0.14), inset 0 -1px 0 rgba(255, 255, 255, 0.88);
+  --map-node-depth-inset:
+    inset 3px 3px 7px rgba(0, 0, 0, 0.2),
+    inset -3px -3px 7px rgba(255, 255, 255, 0.75);
   --map-node-border-width: 1px;
+  --map-status-todo-fill: #faf8f5;
+  --map-status-todo-ink: #1c1915;
   --map-project-fill: #e8e2d8;
   --map-project-ink: #1c1915;
   --map-selection-ring: rgba(20, 18, 16, 0.55);
@@ -317,8 +321,12 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   --map-link-stroke: #f4efe6;
   --map-link-dashed: #d7c4a1;
   --map-link-dotted: #b8c4d4;
-  --map-node-depth-inset: inset 0 2px 6px rgba(0, 0, 0, 0.45), inset 0 -1px 0 rgba(255, 255, 255, 0.14);
+  --map-node-depth-inset:
+    inset 3px 3px 7px rgba(0, 0, 0, 0.5),
+    inset -3px -3px 7px rgba(255, 255, 255, 0.16);
   --map-node-border-width: 1px;
+  --map-status-todo-fill: #f4efe6;
+  --map-status-todo-ink: #1c1915;
   --map-project-fill: #2a2118;
   --map-project-ink: var(--sidebar-ink);
   --map-selection-ring: rgba(255, 255, 255, 0.72);
@@ -493,11 +501,12 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   text-align: center;
   padding: 8px 12px;
   color: #fff;
-  background: var(--status-todo);
+  background: var(--map-status-todo-fill, #f4efe6);
   border: var(--map-node-border-width) solid var(--map-contrast-border);
   border-radius: 8px;
   cursor: pointer;
   box-shadow: var(--map-node-depth-inset);
+  font-family: var(--sans);
 }
 .map-node.circle {
   border-radius: 50%;
@@ -506,7 +515,11 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   color: var(--map-project-ink);
   font-weight: 700;
 }
-.map-node[data-status="TODO"] { background: var(--status-todo); color: #fff; --node-stroke: var(--map-contrast-border); }
+.map-node[data-status="TODO"] {
+  background: var(--map-status-todo-fill, #f4efe6);
+  color: var(--map-status-todo-ink, #1c1915);
+  --node-stroke: var(--map-contrast-border);
+}
 .map-node[data-status="DOING"] { background: var(--status-doing); color: #1c1915; --node-stroke: var(--map-contrast-border); }
 .map-node[data-status="REVIEW"] { background: var(--status-review); color: #fff; --node-stroke: var(--map-contrast-border); }
 .map-node[data-status="DONE"] { background: var(--status-done); color: #fff; --node-stroke: var(--map-contrast-border); }
@@ -522,6 +535,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   z-index: 4;
 }
 .map-label {
+  font-family: var(--sans);
   font-size: 0.86rem;
   line-height: 1.2;
   display: -webkit-box;
@@ -907,7 +921,10 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   border: 0;
   background: transparent;
   color: inherit;
-  font: inherit;
+  font-family: var(--sans);
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
   text-align: center;
   outline: none;
   padding: 0;
