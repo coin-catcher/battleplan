@@ -189,6 +189,12 @@
             </button>
           </div>
         </nav>
+        @if (store.project()?.task_graph_validation_issue; as graphIssue) {
+          <p class="map-graph-recovery-notice" role="status">
+            {{ graphIssue }}
+            Tasks and links were recovered from local storage; fix the graph in the task editor when ready.
+          </p>
+        }
         <div #mapStage class="map-stage" aria-label="Project mindmap" (scroll)="onMapStageScroll()" (pointerdown)="onStagePointerDown($event)">
           <div class="map-scaler" [style.width.px]="map().width * zoom()" [style.height.px]="map().height * zoom()">
             <div class="map-canvas" [style.width.px]="map().width" [style.height.px]="map().height" [style.transform]="'scale(' + zoom() + ')'">

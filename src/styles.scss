@@ -454,6 +454,15 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
     radial-gradient(circle at 50% 50%, var(--map-canvas-spot), transparent 42%),
     var(--map-canvas-bg);
 }
+.map-graph-recovery-notice {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: #f0d8a8;
+  background: rgba(120, 72, 24, 0.35);
+  border-bottom: 1px solid rgba(215, 196, 161, 0.35);
+}
 .map-scaler { position: relative; }
 .map-canvas { position: relative; }
 .map-canvas svg { display: block; }

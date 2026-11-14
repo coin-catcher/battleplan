@@ -131,8 +131,10 @@ import {
   repairProjectTaskGraph,
   prerequisitesMet,
   seedProjectGraphDefaults,
+  taskGraphValidationIssues,
   validateTaskGraphEdges,
 } from '../core/task-graph';
+import { recoverProjectTaskGraphFromStorage } from '../core/task-graph-recovery';
 import { buildTaskHandoff } from '../core/task-handoff';
 import { normalParentIds } from '../core/dependencies';
 import type { LoopMode, TaskNodeKind } from '../core/task-node-kind';
@@ -510,10 +512,22 @@ export class LocalEngine {
       project.updated_at = this.now();
       await this.repo.saveProject(project);
     }
-    const repaired = repairProjectTaskGraph(project, workingTasks);
-    if (repaired.changed) {
-      project = repaired.project;
-      workingTasks = repaired.tasks;
+    let graphResult = repairProjectTaskGraph(project, workingTasks);
+    project = graphResult.project;
+    workingTasks = graphResult.tasks;
+    const taskIds = new Set(workingTasks.map((task) => task.task_id));
+    const validationIssues = taskGraphValidationIssues(project.task_graph_edges ?? [], taskIds);
+    if (validationIssues.length > 0) {
+      const recovered = recoverProjectTaskGraphFromStorage(project, workingTasks);
+      graphResult = {
+        project: recovered.project,
+        tasks: recovered.tasks,
+        changed: graphResult.changed || recovered.changed,
+      };
+      project = graphResult.project;
+      workingTasks = graphResult.tasks;
+    }
+    if (graphResult.changed) {
       project.updated_at = this.now();
       await this.repo.saveProject(project);
       for (const task of workingTasks) {
