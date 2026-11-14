@@ -9,6 +9,7 @@
 | 2 | UI/agent separation documented for orchestrator | **PASS** | AGENT_COMMUNICATIONS.md + GRAPH_ORCHESTRATION.md on develop |
 | 3 | Premature DOING→REVIEW bug root cause & fix documented | **PASS** | isWorkflowTerminalAgentReply + engine applyTaskRun gating |
 | 4 | Fast focus switch + background updates documented | **PASS** | cache, coalesceCachedTaskStatus, agent comms service |
+| 4b | Unfocused task keeps agent session until terminal reply | **PASS (code)** | `registerPendingReply`, `agent-session-watch`, broadcast persist via bridge; **human UX sign-off pending** |
 | 5 | Async Approve & Release semantics documented | **PASS** | prepare/execute split in engine + store |
 | 6 | Open provider matrix (Cursor / OpenAI / Hermes) | **PENDING** | sessionKind stub only |
 | 7 | Human acceptance: manual UX checklist passed on desktop | **PENDING** | Not recorded in repo |
@@ -25,3 +26,11 @@
 
 - Git workflow: single branch `cursor/responsiveness-1a9f`, merge `develop`, push only, no agent-opened PRs.
 - Branch synced to `develop` (includes graph orchestration, state transition fixes post-responsiveness merge).
+- **AgentService** observer/pending-reply design from human message; implementation on branch (`agent-session-watch`, extended `AgentCommunicationsService`, store `registerPendingReply` on send/execute/approve).
+
+## Open clarifying questions (human)
+
+1. Should **multiple tasks** in flight show distinct mindmap indicators (e.g. spinner per node) or is “correct status when polling completes” enough?
+2. When switching back to a task, is **cache-first panel open** acceptable if background sync is still running (`chatAgentSyncing`), or must transcript always match server before showing?
+3. Should **orchestration-dispatched** tasks auto-call `registerPendingReply`, or only user-initiated Send/Execute/Approve?
+4. Rename in product copy: **AgentCommunicationsService** vs **AgentService** — alias documented in code; prefer one name in UI/docs?

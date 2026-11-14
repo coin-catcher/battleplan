@@ -1,8 +1,12 @@
 import { inject, Injectable, signal } from '@angular/core';
-import type { Project, ProjectTask } from '../core/models';
+import type { ChatArtifact, ChatMessage, Project, ProjectTask } from '../core/models';
 import { BattleplanApi } from '../api/battleplan-api.service';
 import type { AgentCommunicationsBridge } from './agent-communications-bridge';
-import { doingBackgroundWatchTaskIds, taskNeedsDoingBackgroundPoll } from './doing-background-watch';
+import {
+  agentSessionWatchTaskIds,
+  runReceivedWorkflowTerminalReply,
+  taskNeedsAgentSessionWatch,
+} from './agent-session-watch';
 
 const POLL_INTERVAL_MS = 3000;
 const POLL_ATTEMPTS = 300;
@@ -13,14 +17,22 @@ export interface AgentSessionRef {
   taskId: string;
   kind: AgentSessionKind;
   latestRunId?: string;
+  pendingReply: boolean;
 }
 
+export type TaskConversationUpdate = {
+  messages: ChatMessage[];
+  task: ProjectTask;
+  artifacts: ChatArtifact[];
+};
+
+export type TaskConversationObserver = (update: TaskConversationUpdate) => void;
+
 /**
- * Polls external agent backends for every in-flight task (and root project release runs),
- * independent of which task panel is focused. The store supplies persistence via {@link attachBridge}.
+ * Async coordinator for external agent sessions (Cursor today; OpenAI / Hermes later).
+ * Polls and broadcasts conversation updates while the user works on other tasks.
  *
- * Future graph orchestration should call `ensureTaskWatch` when dispatching a task agent,
- * and `syncTaskWatches` after reloadTasks — not poll Cursor/OpenAI/Hermes from UI code.
+ * Alias: treat this as the Battleplan **AgentService** in product docs.
  */
 @Injectable({ providedIn: 'root' })
 export class AgentCommunicationsService {
@@ -32,6 +44,9 @@ export class AgentCommunicationsService {
   private readonly taskGeneration = new Map<string, number>();
   private readonly taskTimer = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly taskInflight = new Set<string>();
+  /** Tasks with an outbound message not yet workflow-complete (survives unfocus). */
+  private readonly pendingReply = new Set<string>();
+  private readonly taskObservers = new Map<string, Set<TaskConversationObserver>>();
 
   private projectGeneration = 0;
   private projectActive = false;
@@ -46,8 +61,49 @@ export class AgentCommunicationsService {
     return this.taskGeneration.has(taskId);
   }
 
-  syncTaskWatches(tasks: ProjectTask[], subprojectAgentId: (id: string) => string | undefined): void {
-    const wanted = new Set(doingBackgroundWatchTaskIds(tasks, subprojectAgentId));
+  hasPendingReply(taskId: string): boolean {
+    return this.pendingReply.has(taskId);
+  }
+
+  /** Call when the user sends / executes before the agent finishes (registers background watch). */
+  registerPendingReply(taskId: string): void {
+    this.pendingReply.add(taskId);
+    this.ensureTaskWatch(taskId);
+    const bridge = this.bridge;
+    if (bridge) this.refreshActiveSessionSignal(bridge.tasks());
+  }
+
+  clearPendingReply(taskId: string): void {
+    if (!this.pendingReply.delete(taskId)) return;
+    const bridge = this.bridge;
+    if (bridge) this.refreshActiveSessionSignal(bridge.tasks());
+  }
+
+  /** Per-task observers receive every broadcast while registered (e.g. open task panel). */
+  observeTask(taskId: string, observer: TaskConversationObserver): () => void {
+    let set = this.taskObservers.get(taskId);
+    if (!set) {
+      set = new Set();
+      this.taskObservers.set(taskId, set);
+    }
+    set.add(observer);
+    return () => {
+      set?.delete(observer);
+      if (set && set.size === 0) this.taskObservers.delete(taskId);
+    };
+  }
+
+  syncTaskWatches(
+    tasks: ProjectTask[],
+    subprojectAgentId: (id: string) => string | undefined,
+    messagesForTask?: (taskId: string) => ChatMessage[],
+  ): void {
+    const wanted = new Set(agentSessionWatchTaskIds(
+      tasks,
+      subprojectAgentId,
+      this.pendingReply,
+      messagesForTask,
+    ));
     for (const taskId of wanted) this.ensureTaskWatch(taskId);
     for (const taskId of [...this.taskGeneration.keys()]) {
       if (!wanted.has(taskId)) this.stopTaskWatch(taskId);
@@ -60,7 +116,9 @@ export class AgentCommunicationsService {
     const bridge = this.bridge;
     if (!bridge) return;
     const task = bridge.tasks().find((item) => item.task_id === taskId);
-    if (!task || !taskNeedsDoingBackgroundPoll(task, task.subproject_id ? bridge.subprojectCursorAgentId(task.subproject_id) : undefined)) {
+    const subprojectAgent = task?.subproject_id ? bridge.subprojectCursorAgentId(task.subproject_id) : undefined;
+    const forced = this.pendingReply.has(taskId);
+    if (!forced && (!task || !taskNeedsAgentSessionWatch(task, [], subprojectAgent))) {
       this.stopTaskWatch(taskId);
       return;
     }
@@ -80,6 +138,16 @@ export class AgentCommunicationsService {
     this.taskInflight.delete(taskId);
     const bridge = this.bridge;
     if (bridge) this.refreshActiveSessionSignal(bridge.tasks());
+  }
+
+  private broadcastTaskUpdate(update: TaskConversationUpdate): void {
+    const bridge = this.bridge;
+    bridge?.onTaskConversation(update);
+    bridge?.onTaskConversationBroadcast?.(update);
+    const observers = this.taskObservers.get(update.task.task_id);
+    if (observers) {
+      for (const observer of observers) observer(update);
+    }
   }
 
   private syncProjectWatch(): void {
@@ -130,11 +198,13 @@ export class AgentCommunicationsService {
     this.taskInflight.add(taskId);
     try {
       const task = bridge.tasks().find((item) => item.task_id === taskId);
-      if (!task || !taskNeedsDoingBackgroundPoll(task, task.subproject_id ? bridge.subprojectCursorAgentId(task.subproject_id) : undefined)) {
+      const subprojectAgent = task?.subproject_id ? bridge.subprojectCursorAgentId(task.subproject_id) : undefined;
+      const forced = this.pendingReply.has(taskId);
+      if (!forced && (!task || !taskNeedsAgentSessionWatch(task, [], subprojectAgent))) {
         this.stopTaskWatch(taskId);
         return;
       }
-      if (task.output_type === 'subproject' && task.subproject_id) {
+      if (task?.output_type === 'subproject' && task.subproject_id) {
         const page = await this.api.listProjectMessages(task.subproject_id);
         if (this.taskGeneration.get(taskId) !== generation || !this.bridge) return;
         await bridge.reloadProjects();
@@ -143,20 +213,16 @@ export class AgentCommunicationsService {
         if (bridge.isWatchingTaskChat(taskId)) bridge.onProjectConversation(page);
         const refreshed = await this.api.listTaskMessages(taskId);
         if (this.taskGeneration.get(taskId) !== generation) return;
-        bridge.onTaskConversation(refreshed);
-        if (refreshed.task.status !== 'DOING') {
-          this.stopTaskWatch(taskId);
-          return;
-        }
+        this.broadcastTaskUpdate(refreshed);
+        this.maybeStopTaskWatch(taskId, refreshed.task, refreshed.messages, generation);
       } else {
         const result = await this.api.listTaskMessages(taskId);
         if (this.taskGeneration.get(taskId) !== generation) return;
-        bridge.onTaskConversation(result);
-        if (result.task.status !== 'DOING') {
+        this.broadcastTaskUpdate(result);
+        if (!this.watchingNeedsContinue(result.task, result.messages, forced)) {
           if (bridge.isWatchingTaskChat(taskId)) await bridge.refreshOutput(result.task);
-          this.stopTaskWatch(taskId);
-          return;
         }
+        this.maybeStopTaskWatch(taskId, result.task, result.messages, generation);
       }
     } catch {
       // Keep polling through transient failures.
@@ -165,6 +231,37 @@ export class AgentCommunicationsService {
     }
     if (this.taskGeneration.get(taskId) === generation) {
       this.scheduleTaskTick(taskId, generation, attempt + 1);
+    }
+  }
+
+  private watchingNeedsContinue(
+    task: ProjectTask,
+    messages: ChatMessage[],
+    forced: boolean,
+  ): boolean {
+    const bridge = this.bridge;
+    if (!bridge) return false;
+    const subprojectAgent = task.subproject_id ? bridge.subprojectCursorAgentId(task.subproject_id) : undefined;
+    return taskNeedsAgentSessionWatch(task, messages, subprojectAgent, { forcePending: forced });
+  }
+
+  private maybeStopTaskWatch(
+    taskId: string,
+    task: ProjectTask,
+    messages: ChatMessage[],
+    generation: number,
+  ): void {
+    if (this.taskGeneration.get(taskId) !== generation) return;
+    const bridge = this.bridge;
+    const subprojectAgent = task.subproject_id && bridge
+      ? bridge.subprojectCursorAgentId(task.subproject_id)
+      : undefined;
+    const forced = this.pendingReply.has(taskId);
+    if (runReceivedWorkflowTerminalReply(messages, taskId, task.latest_run_id)) {
+      this.clearPendingReply(taskId);
+    }
+    if (!taskNeedsAgentSessionWatch(task, messages, subprojectAgent, { forcePending: forced })) {
+      this.stopTaskWatch(taskId);
     }
   }
 
@@ -212,6 +309,7 @@ export class AgentCommunicationsService {
         taskId,
         kind: sessionKindForTask(task),
         latestRunId: task.latest_run_id,
+        pendingReply: this.pendingReply.has(taskId),
       });
     }
     this.activeTaskSessions.set(refs);
@@ -223,3 +321,6 @@ export function sessionKindForTask(task: ProjectTask): AgentSessionKind {
   if (task.output_type === 'research' && task.research_agent_id) return 'research';
   return 'cursor';
 }
+
+/** Product name alias for AgentCommunicationsService. */
+export type AgentService = AgentCommunicationsService;

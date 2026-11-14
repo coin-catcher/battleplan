@@ -6,7 +6,7 @@ Battleplan separates **UI state** (`BattleplanStore`) from **external agent sess
 
 | Layer | Role |
 | --- | --- |
-| `AgentCommunicationsService` | Tracks in-flight DOING tasks (and root projects in DOING), polls `listTaskMessages` / `listProjectMessages`, and pushes updates through a store bridge. |
+| `AgentCommunicationsService` (**AgentService**) | Project-wide async coordinator: tracks pending agent replies, polls sessions in the background, and **broadcasts** conversation + task updates through the store bridge (and optional per-task observers) whether or not the task panel is focused. |
 | `BattleplanStore` | Owns selection, cached task panels, mindmap task rows, and chat transcript signals. Applies persistence results from the engine; does not embed polling loops. |
 | `LocalEngine` | Persists chat, applies workflow transitions only when `isWorkflowTerminalAgentReply` is true (not for interim acks). |
 
@@ -27,6 +27,13 @@ When a future task-graph orchestrator dispatches work:
 3. Do **not** poll agent backends from orchestration code; read task status and chat from the store after the bridge applies engine results.
 4. Treat workflow completion when task status leaves `DOING` or when `activeTaskSessions` no longer lists the task id.
 5. Foreground “Waiting for Cursor…” in the open panel still uses store foreground watch; background watches continue when the user changes mindmap focus.
+
+## Pending replies and observers
+
+- After **Send**, **Execute**, or **Approve merge start**, the store calls `registerPendingReply(taskId)` so polling continues if the user selects another node.
+- `syncTaskWatches` also keeps watches for tasks whose cached chat still awaits a **workflow-terminal** assistant reply (`taskNeedsAgentSessionWatch`).
+- Each poll calls `onTaskConversation`, which persists task JSON + chat cache and updates the mindmap (`replaceTask`) even when the panel is closed.
+- Open panels can subscribe with `observeTask(taskId, cb)` to refresh live transcript signals when background polls land.
 
 ## UI focus switching
 

@@ -21,6 +21,15 @@
 | Session polling | `AgentCommunicationsService` + store bridge; `docs/AGENT_COMMUNICATIONS.md`; orchestrator uses `ensureTaskWatch` / `syncTaskWatches` (see also `docs/GRAPH_ORCHESTRATION.md`). |
 | Workflow transitions | `isWorkflowTerminalAgentReply` gates `applyTaskRun` and “answered run” detection; interim messages still appear in chat. |
 | Focus switch | Task cache + `coalesceCachedTaskStatus` keeps DOING on mindmap while background poll active. |
+| **AgentService coordinator** (grill 2026-11-14) | `AgentCommunicationsService` acts as global async coordinator: `registerPendingReply`, `pendingReply` set, `taskNeedsAgentSessionWatch` + cached messages in `syncTaskWatches`, broadcast via bridge `onTaskConversation` (always persists task + cache / mindmap). Optional `observeTask` for focused live transcript. |
+
+### User-reported bug (grill 2026-11-14)
+
+Send on **Task A**, switch to **Task B** → Task A agent status and mindmap stall.
+
+**Root cause (confirmed in code review):** background watches were tied primarily to `DOING` + foreground `watchTask`; unfocused tasks could stop polling before a workflow-terminal reply, so `applyTaskConversation` never ran and mindmap/chat cache went stale.
+
+**Target behavior:** AgentService tracks all pending replies project-wide; observers (store bridge + optional per-task callbacks) receive broadcasts; task JSON + chat cache update in the background so reopening Task A shows full history and correct status.
 
 ### Out of scope for this research folder
 
