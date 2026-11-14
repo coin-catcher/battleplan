@@ -195,6 +195,16 @@ export function prerequisitesMet(
   return true;
 }
 
+export function taskGraphValidationIssues(edges: TaskGraphEdge[], taskIds: Set<string>): string[] {
+  try {
+    validateTaskGraphEdges(edges, taskIds);
+    return [];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return [message];
+  }
+}
+
 export function validateTaskGraphEdges(edges: TaskGraphEdge[], taskIds: Set<string>): void {
   for (const edge of edges) {
     if (!taskIds.has(edge.from_task_id) || !taskIds.has(edge.to_task_id)) {
@@ -325,7 +335,7 @@ export function stripOrphanTaskReferences(
 export function repairProjectTaskGraph(
   project: Project,
   tasks: ProjectTask[],
-  options?: { filterOnly?: boolean },
+  options?: { filterOnly?: boolean; validate?: boolean; inferCritiqueCycles?: boolean },
 ): { project: Project; tasks: ProjectTask[]; changed: boolean } {
   const taskIds = new Set(tasks.map((task) => task.task_id));
   let changed = false;
@@ -339,15 +349,26 @@ export function repairProjectTaskGraph(
 
   if (!options?.filterOnly) {
     let merged = mergeLegacyTreeOrderingIntoGraph(edges, stripped.tasks);
-    const withCritiqueCycles = ensureCritiqueBackEdges(stripped.tasks, merged);
-    if (JSON.stringify(withCritiqueCycles) !== JSON.stringify(merged)) changed = true;
-    merged = withCritiqueCycles;
+    const safeForCritique = taskGraphValidationIssues(merged, taskIds).length === 0;
+    if (options?.inferCritiqueCycles !== false && safeForCritique) {
+      const withCritiqueCycles = ensureCritiqueBackEdges(stripped.tasks, merged);
+      if (JSON.stringify(withCritiqueCycles) !== JSON.stringify(merged)) changed = true;
+      merged = withCritiqueCycles;
+    }
     if (JSON.stringify(merged) !== JSON.stringify(edges)) changed = true;
     edges = merged;
-    validateTaskGraphEdges(edges, taskIds);
+    if (options?.validate) validateTaskGraphEdges(edges, taskIds);
   }
 
   const synced = applyGraphEdgesToLegacyFields(stripped.tasks, edges);
-  const projectNext = { ...project, task_graph_edges: edges };
+  const issues = taskGraphValidationIssues(edges, taskIds);
+  const projectNext: Project = {
+    ...project,
+    task_graph_edges: edges,
+    ...(issues[0] ? { task_graph_validation_issue: issues[0] } : {}),
+  };
+  if (!issues[0] && project.task_graph_validation_issue) {
+    delete projectNext.task_graph_validation_issue;
+  }
   return { project: projectNext, tasks: synced, changed };
 }
