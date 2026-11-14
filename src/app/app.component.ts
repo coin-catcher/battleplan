@@ -40,6 +40,7 @@ import { isAgentDraftId } from './core/agent-id';
 import { AgentStatsComponent } from './components/agent-stats/agent-stats.component';
 import { AgentConnectionService } from './data/agent-connection.service';
 import { isMarkdownPath, prepareMarkdown } from './core/markdown';
+import { MINDMAP_THEMES, normalizeMindmapTheme, type MindmapThemeId } from './core/mindmap-theme';
 import { applyTheme, THEMES, type ThemeId } from './core/themes';
 import { AppPreferences } from './data/app-preferences.service';
 import { electronBridge, isElectronApp } from './data/electron-bridge';
@@ -117,6 +118,7 @@ export class AppComponent implements OnInit {
   readonly portability = inject(ProjectPortability);
   readonly desktop = isElectronApp();
   readonly themes = THEMES;
+  readonly mindmapThemes = MINDMAP_THEMES;
   private readonly zone = inject(NgZone);
   readonly statuses = TASK_STATUSES;
   readonly mindmapConnectTaskKinds = MINDMAP_CONNECT_TASK_KINDS;
@@ -167,6 +169,8 @@ export class AppComponent implements OnInit {
   private readonly onMapDismissCapture = (event: PointerEvent): void => {
     this.onMapDismissPointerDown(event);
   };
+  readonly activeMindmapTheme = computed(() => normalizeMindmapTheme(this.store.project()?.mindmap_theme));
+
   readonly map = computed(() => {
     const project = this.store.project();
     const pins = this.dragPins();
@@ -211,6 +215,7 @@ export class AppComponent implements OnInit {
   projectDar = '';
   defaultResearchAgentId = '';
   defaultCodeAgentId = '';
+  mindmapTheme: MindmapThemeId = 'dark';
   taskResearchAgentId = '';
   taskCodeAgentId = '';
   chatDraft = '';
@@ -347,7 +352,7 @@ export class AppComponent implements OnInit {
       const selection = this.store.selection();
       const project = selection.kind === 'subproject' ? this.store.editorProject() : this.store.project();
       const signature = project
-        ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}:${project.github_pat ?? ''}:${project.dar ?? ''}:${project.initial_prompt}:${project.cursor_agent_id ?? ''}:${selection.kind}`
+        ? `${project.project_id}:${project.title}:${project.repo_url ?? ''}:${project.starting_ref ?? ''}:${project.github_pat ?? ''}:${project.dar ?? ''}:${project.mindmap_theme ?? 'dark'}:${project.initial_prompt}:${project.cursor_agent_id ?? ''}:${selection.kind}`
         : '';
       if (signature === this.titleSignature) return;
       this.titleSignature = signature;
@@ -358,6 +363,9 @@ export class AppComponent implements OnInit {
       this.projectDar = project?.dar ?? '';
       this.defaultResearchAgentId = project?.default_research_agent_id ?? '';
       this.defaultCodeAgentId = project?.default_code_agent_id ?? '';
+      if (selection.kind === 'project') {
+        this.mindmapTheme = normalizeMindmapTheme(this.store.project()?.mindmap_theme);
+      }
       if (selection.kind === 'subproject') {
         this.subprojectInitialPrompt = project?.initial_prompt ?? '';
       }
@@ -709,6 +717,7 @@ export class AppComponent implements OnInit {
         starting_ref: this.projectBranch,
         github_pat: this.projectGithubPat,
         dar: this.projectDar,
+        mindmap_theme: this.mindmapTheme,
         initial_prompt: selection.kind === 'subproject' ? this.subprojectInitialPrompt : undefined,
       },
       {
@@ -802,6 +811,7 @@ export class AppComponent implements OnInit {
         dar: this.projectDar,
         default_research_agent_id: this.defaultResearchAgentId,
         default_code_agent_id: this.defaultCodeAgentId,
+        mindmap_theme: this.mindmapTheme,
       });
     } else if (selection.kind === 'subproject') {
       await this.store.saveEditorProject({
@@ -1436,6 +1446,10 @@ export class AppComponent implements OnInit {
     return artifact.content_type === 'text' && isMarkdownPath(artifact.path);
   }
 
+  onMindmapThemeChange(): void {
+    void this.store.saveMindmapTheme(this.mindmapTheme);
+  }
+
   saveProject(): void {
     void this.store.saveProject({
       title: this.title.trim(),
@@ -1443,6 +1457,7 @@ export class AppComponent implements OnInit {
       starting_ref: this.projectBranch.trim() || 'main',
       github_pat: this.projectGithubPat.trim(),
       dar: this.projectDar,
+      mindmap_theme: this.mindmapTheme,
       default_research_agent_id: this.defaultResearchAgentId,
       default_code_agent_id: this.defaultCodeAgentId,
     });

@@ -877,6 +877,17 @@ export class BattleplanStore {
     }
   }
 
+  async saveMindmapTheme(theme: import('../core/mindmap-theme').MindmapThemeId): Promise<void> {
+    const project = this.project();
+    if (!project) return;
+    await this.run(async () => {
+      const updated = await this.api.updateProject(project.project_id, { mindmap_theme: theme });
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === updated.project_id ? updated : item
+      )));
+    });
+  }
+
   async saveProject(patch: {
     title: string;
     repo_url: string;
@@ -886,6 +897,7 @@ export class BattleplanStore {
     initial_prompt?: string;
     default_research_agent_id?: string;
     default_code_agent_id?: string;
+    mindmap_theme?: import('../core/mindmap-theme').MindmapThemeId;
   }): Promise<void> {
     const project = this.project();
     if (!project) return;
