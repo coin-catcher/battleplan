@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectTask } from './models';
 import {
+  applyMindmapCanvasFrame,
   cardinalAnchor,
   layoutMindmap,
+  MINDMAP_CANVAS_MARGIN_PX,
   mindmapNodesInWorldRect,
+  mindmapNodesWorldExtent,
   normalizeWorldRect,
   pickCardinalEdge,
   pickConnectHoverSide,
@@ -31,15 +34,39 @@ function task(id: string, partial: Partial<ProjectTask> = {}, order = 0): Projec
 }
 
 describe('mindmap', () => {
-  it('uses a large world canvas for maximum zoom out', () => {
+  it('uses a fixed half-viewport world canvas with the project centered', () => {
     const layout = layoutMindmap('Plan', []);
     const span = mindmapCanvasWorldSpan();
-    expect(layout.width).toBeGreaterThanOrEqual(span);
-    expect(layout.height).toBeGreaterThanOrEqual(span);
+    expect(layout.width).toBe(span);
+    expect(layout.height).toBe(span);
     const project = layout.nodes.find((node) => node.id === 'project')!;
     const center = mindmapCanvasCenter();
     expect(project.x).toBeCloseTo(center.x, 0);
     expect(project.y).toBeCloseTo(center.y, 0);
+    const extent = mindmapNodesWorldExtent(layout.nodes);
+    expect(extent.minX).toBeGreaterThanOrEqual(MINDMAP_CANVAS_MARGIN_PX - 1);
+    expect(extent.maxX).toBeLessThanOrEqual(span - MINDMAP_CANVAS_MARGIN_PX + 1);
+  });
+
+  it('translates the graph as a rigid body onto the canvas', () => {
+    const tasks = [task('a'), task('b', {}, 1)];
+    const before = layoutMindmap('Plan', tasks);
+    const projectBefore = before.nodes.find((node) => node.id === 'project')!;
+    const aBefore = before.nodes.find((node) => node.id === 'a')!;
+    const offsetX = aBefore.x - projectBefore.x;
+    const offsetY = aBefore.y - projectBefore.y;
+    const nodes = before.nodes.map((node) => ({ ...node }));
+    nodes.forEach((node) => {
+      node.x += 12_000;
+      node.y -= 8_000;
+    });
+    const span = mindmapCanvasWorldSpan();
+    applyMindmapCanvasFrame(nodes, span);
+    const projectAfter = nodes.find((node) => node.id === 'project')!;
+    const aAfter = nodes.find((node) => node.id === 'a')!;
+    expect(projectAfter.x).toBeCloseTo(span / 2, 0);
+    expect(aAfter.x - projectAfter.x).toBeCloseTo(offsetX, 0);
+    expect(aAfter.y - projectAfter.y).toBeCloseTo(offsetY, 0);
   });
 
   it('points a solid arrow from the project to each root task', () => {
@@ -196,14 +223,18 @@ describe('mindmap', () => {
     expect(mindmapNodesInWorldRect(taskNodes, tiny)).toEqual(['alpha']);
   });
 
-  it('keeps a dragged task in place and rebalances the others', () => {
+  it('keeps a pinned offset from the project and rebalances unpinned tasks', () => {
     const pinned = task('survey');
     pinned.map_x = 400;
     pinned.map_y = 500;
     const before = layoutMindmap('Plan', [pinned, task('notes', {}, 1)]);
     const after = layoutMindmap('Plan', [pinned, task('notes', {}, 1), task('build', {}, 2)]);
+    const projectAfter = after.nodes.find((node) => node.id === 'project')!;
     const stayed = after.nodes.find((node) => node.id === 'survey');
-    expect(stayed).toMatchObject({ x: 400, y: 500 });
+    const projectBefore = before.nodes.find((node) => node.id === 'project')!;
+    const stayedBefore = before.nodes.find((node) => node.id === 'survey')!;
+    expect(stayed!.x - projectAfter.x).toBeCloseTo(stayedBefore!.x - projectBefore.x, 0);
+    expect(stayed!.y - projectAfter.y).toBeCloseTo(stayedBefore!.y - projectBefore.y, 0);
     const notesBefore = before.nodes.find((node) => node.id === 'notes');
     const notesAfter = after.nodes.find((node) => node.id === 'notes');
     expect(notesBefore && notesAfter).toBeTruthy();
