@@ -77,6 +77,8 @@ export interface Project {
   task_graph_validation_issue?: string;
   /** Step-by-step graph recovery; mindmap shows tasks first, then confirmed edges only. */
   graph_recovery_session?: import('./task-graph-interactive-recovery').GraphRecoverySession;
+  /** Tasks kept on disk but intentionally omitted from the validated task graph. */
+  task_graph_excluded_task_ids?: string[];
   /** Local/git storage layout version (see battleplan-storage.ts). */
   battleplan_storage_version?: number;
   /** Completed depth-first discovery graphs. */

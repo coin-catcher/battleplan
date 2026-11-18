@@ -152,8 +152,14 @@ import {
   finalizeGraphRecoveryProject,
   resolveGraphRecoverySession,
   stagedGraphRecoveryStep,
+  tasksForValidatedTaskGraph,
   type GraphRecoveryResolution,
 } from '../core/task-graph-interactive-recovery';
+
+function patchTasksById(all: ProjectTask[], updates: ProjectTask[]): ProjectTask[] {
+  const byId = new Map(updates.map((task) => [task.task_id, task]));
+  return all.map((task) => byId.get(task.task_id) ?? task);
+}
 import { buildTaskHandoff } from '../core/task-handoff';
 import { normalParentIds } from '../core/dependencies';
 import type { LoopMode, TaskNodeKind } from '../core/task-node-kind';
@@ -549,26 +555,27 @@ export class LocalEngine {
       project.updated_at = this.now();
       await this.repo.saveProject(project);
     }
-    let graphResult = repairProjectTaskGraph(project, workingTasks);
+    const graphTasks = tasksForValidatedTaskGraph(project, workingTasks);
+    let graphResult = repairProjectTaskGraph(project, graphTasks);
     project = graphResult.project;
-    workingTasks = graphResult.tasks;
-    const taskIds = new Set(workingTasks.map((task) => task.task_id));
+    const repairedGraphTasks = graphResult.tasks;
+    const taskIds = new Set(repairedGraphTasks.map((task) => task.task_id));
     const displayIssues = taskGraphValidationIssues(
-      graphEdgesForDisplay(project, workingTasks),
+      graphEdgesForDisplay(project, repairedGraphTasks),
       taskIds,
     );
     const validationIssues = displayIssues.length > 0
       ? displayIssues
       : taskGraphValidationIssues(project.task_graph_edges ?? [], taskIds);
     if (validationIssues.length > 0) {
-      const interactive = beginGraphRecoveryFromStorage(project, workingTasks, { mode: 'staged' });
+      const interactive = beginGraphRecoveryFromStorage(project, repairedGraphTasks, { mode: 'staged' });
       graphResult = {
         project: interactive.project,
         tasks: interactive.tasks,
         changed: true,
       };
       project = graphResult.project;
-      workingTasks = graphResult.tasks;
+      workingTasks = patchTasksById(workingTasks, graphResult.tasks);
     } else if (project.graph_recovery_session?.active) {
       const projectNext = { ...project };
       delete projectNext.graph_recovery_session;
@@ -577,6 +584,7 @@ export class LocalEngine {
       graphResult = { ...graphResult, project, changed: true };
     }
     if (graphResult.changed) {
+      workingTasks = patchTasksById(workingTasks, graphResult.tasks);
       project.updated_at = this.now();
       await this.repo.saveProject(project);
       for (const task of workingTasks) {
