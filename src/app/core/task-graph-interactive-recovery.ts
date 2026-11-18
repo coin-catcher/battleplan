@@ -505,13 +505,12 @@ function finalizeCompletedRecoveryGraph(
 ): { project: Project; tasks: ProjectTask[] } {
   const discarded = new Set(session.discarded_task_ids ?? []);
   const activeTasks = tasks.filter((task) => !discarded.has(task.task_id));
-  const revealed = new Set(session.revealed_task_ids ?? []);
   const taskIds = new Set(activeTasks.map((task) => task.task_id));
 
   let edges = dedupeTaskGraphEdges([...session.confirmed_edges]);
   const pool = session.source_edge_pool ?? [];
   for (const edge of pool) {
-    if (!revealed.has(edge.from_task_id) || !revealed.has(edge.to_task_id)) continue;
+    if (!taskIds.has(edge.from_task_id) || !taskIds.has(edge.to_task_id)) continue;
     if (discarded.has(edge.from_task_id) || discarded.has(edge.to_task_id)) continue;
     if (edges.some((item) => item.edge_id === edge.edge_id)) continue;
     const trial = [...edges, edge];
@@ -568,6 +567,7 @@ export function finalizeGraphRecoveryProject(
     }
     delete projectNext.graph_recovery_session;
     delete projectNext.task_graph_validation_issue;
+    projectNext.graph_recovery_completed_at = new Date().toISOString();
   }
 
   return { project: projectNext, tasks: synced, session };

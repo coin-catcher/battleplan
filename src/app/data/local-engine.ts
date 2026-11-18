@@ -568,14 +568,22 @@ export class LocalEngine {
       ? displayIssues
       : taskGraphValidationIssues(project.task_graph_edges ?? [], taskIds);
     if (validationIssues.length > 0) {
-      const interactive = beginGraphRecoveryFromStorage(project, repairedGraphTasks, { mode: 'staged' });
-      graphResult = {
-        project: interactive.project,
-        tasks: interactive.tasks,
-        changed: true,
-      };
-      project = graphResult.project;
-      workingTasks = patchTasksById(workingTasks, graphResult.tasks);
+      if (project.graph_recovery_completed_at) {
+        project = {
+          ...project,
+          task_graph_validation_issue: validationIssues[0],
+        };
+        graphResult = { project, tasks: workingTasks, changed: true };
+      } else {
+        const interactive = beginGraphRecoveryFromStorage(project, repairedGraphTasks, { mode: 'staged' });
+        graphResult = {
+          project: interactive.project,
+          tasks: interactive.tasks,
+          changed: true,
+        };
+        project = graphResult.project;
+        workingTasks = patchTasksById(workingTasks, graphResult.tasks);
+      }
     } else if (project.graph_recovery_session?.active) {
       const projectNext = { ...project };
       delete projectNext.graph_recovery_session;
@@ -600,6 +608,7 @@ export class LocalEngine {
     const tasks = await this.repo.listTasks(projectId);
     const interactive = beginGraphRecoveryFromStorage(project, tasks, { mode: 'staged', force: true });
     project = interactive.project;
+    delete project.graph_recovery_completed_at;
     project.updated_at = this.now();
     await this.repo.saveProject(project);
     for (const task of interactive.tasks) {
@@ -621,13 +630,20 @@ export class LocalEngine {
     project = finalized.project;
     project.updated_at = this.now();
     await this.repo.saveProject(project);
-    const priorById = new Map(tasks.map((task) => [task.task_id, task]));
-    for (const task of finalized.tasks) {
-      const prior = priorById.get(task.task_id);
-      if (!prior) continue;
-      if (prior.map_x === task.map_x && prior.map_y === task.map_y) continue;
-      task.updated_at = this.now();
-      await this.repo.saveTask(task);
+    const complete = !nextSession.active && !nextSession.pending;
+    if (complete) {
+      for (const task of finalized.tasks) {
+        task.updated_at = this.now();
+        await this.repo.saveTask(task);
+      }
+    } else {
+      const priorById = new Map(tasks.map((task) => [task.task_id, task]));
+      for (const task of finalized.tasks) {
+        const prior = priorById.get(task.task_id);
+        if (!prior || (prior.map_x === task.map_x && prior.map_y === task.map_y)) continue;
+        task.updated_at = this.now();
+        await this.repo.saveTask(task);
+      }
     }
     return project;
   }

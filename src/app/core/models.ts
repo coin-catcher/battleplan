@@ -79,6 +79,8 @@ export interface Project {
   graph_recovery_session?: import('./task-graph-interactive-recovery').GraphRecoverySession;
   /** Tasks kept on disk but intentionally omitted from the validated task graph. */
   task_graph_excluded_task_ids?: string[];
+  /** Set when the user finishes interactive graph recovery; blocks silent re-entry on listTasks. */
+  graph_recovery_completed_at?: string;
   /** Local/git storage layout version (see battleplan-storage.ts). */
   battleplan_storage_version?: number;
   /** Completed depth-first discovery graphs. */
