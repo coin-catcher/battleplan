@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { Project } from './models';
 import type { ProjectTask } from './models';
+import { graphEdgesForDisplay } from './task-graph-recovery';
+import { taskGraphValidationIssues } from './task-graph';
 import {
   executionOrderTaskIds,
+  finalizeGraphRecoveryProject,
   initStagedGraphRecoverySession,
   resolveGraphRecoverySession,
   stagedGraphRecoveryStep,
   startInteractiveGraphRecovery,
+  tasksForValidatedTaskGraph,
 } from './task-graph-interactive-recovery';
 
 function task(id: string, partial: Partial<ProjectTask> = {}): ProjectTask {
@@ -130,5 +134,53 @@ describe('task-graph-interactive-recovery', () => {
     expect(resolved.session.skipped).toHaveLength(1);
     expect(resolved.session.pending).toBeUndefined();
     expect(resolved.session.confirmed_edges.some((edge) => edge.kind === 'tree')).toBe(true);
+  });
+
+  it('finalizes a valid graph after orphans attach to the project root', () => {
+    const root = task('root', { dependencies: ['child'] });
+    const child = task('child');
+    const orphan = task('orphan', { dependencies: ['ghost'] });
+    const project: Project = {
+      project_id: 'p1',
+      title: 'P',
+      initial_prompt: '',
+      cursor_chat_link: '',
+      dar: '',
+      status: 'TODO',
+      created_at: '',
+      updated_at: '',
+      task_graph_edges: [
+        { edge_id: 'tree:root->child', from_task_id: 'root', to_task_id: 'child', kind: 'tree' },
+      ],
+    };
+    const pool = [
+      { edge_id: 'tree:root->child', from_task_id: 'root', to_task_id: 'child', kind: 'tree' as const },
+    ];
+    let session = initStagedGraphRecoverySession(project, [root, child, orphan]);
+    session = {
+      ...session,
+      phase: 'orphaned',
+      active: false,
+      pending: undefined,
+      revealed_task_ids: ['root', 'child', 'orphan'],
+      pending_task_ids: [],
+      connected_task_ids: ['root', 'child', 'orphan'],
+      orphaned_task_ids: [],
+      confirmed_edges: pool,
+      source_edge_pool: pool,
+    };
+    const attachedOrphan = { ...orphan, dependencies: [], sibling_dependencies: [] };
+    const finalized = finalizeGraphRecoveryProject(
+      project,
+      [root, child, attachedOrphan],
+      session,
+    );
+    expect(finalized.project.graph_recovery_session).toBeUndefined();
+    const graphTasks = tasksForValidatedTaskGraph(finalized.project, finalized.tasks);
+    const issues = taskGraphValidationIssues(
+      graphEdgesForDisplay(finalized.project, graphTasks),
+      new Set(graphTasks.map((item) => item.task_id)),
+    );
+    expect(issues).toHaveLength(0);
   });
 });

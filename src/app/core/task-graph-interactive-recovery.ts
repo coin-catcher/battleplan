@@ -7,6 +7,7 @@ import {
   stripOrphanTaskReferences,
   taskGraphValidationIssues,
   applyGraphEdgesToLegacyFields,
+  repairProjectTaskGraph,
 } from './task-graph';
 import { dedupeTaskGraphEdges, graphEdgesForDisplay } from './task-graph-recovery';
 import {
@@ -14,6 +15,7 @@ import {
   mergeGraphRecoveryDiskHints,
 } from './graph-recovery-disk';
 import { canRevealTaskOnMindmap, partitionTasksForRecovery } from './graph-recovery-reachability';
+import { applyRecoveryMapPositions } from './graph-recovery-placement';
 
 export type GraphRecoveryPending =
   | {
@@ -490,19 +492,54 @@ export function startInteractiveGraphRecovery(
   return beginGraphRecoveryFromStorage(project, tasks, { mode: 'staged' });
 }
 
+/** Tasks that participate in mindmap graph validation (excludes user “Do Not Add” orphans). */
+export function tasksForValidatedTaskGraph(project: Project, tasks: ProjectTask[]): ProjectTask[] {
+  const excluded = new Set(project.task_graph_excluded_task_ids ?? []);
+  return tasks.filter((task) => !excluded.has(task.task_id));
+}
+
+function finalizeCompletedRecoveryGraph(
+  project: Project,
+  tasks: ProjectTask[],
+  session: GraphRecoverySession,
+): { project: Project; tasks: ProjectTask[] } {
+  const discarded = new Set(session.discarded_task_ids ?? []);
+  const activeTasks = tasks.filter((task) => !discarded.has(task.task_id));
+  const revealed = new Set(session.revealed_task_ids ?? []);
+  const taskIds = new Set(activeTasks.map((task) => task.task_id));
+
+  let edges = dedupeTaskGraphEdges([...session.confirmed_edges]);
+  const pool = session.source_edge_pool ?? [];
+  for (const edge of pool) {
+    if (!revealed.has(edge.from_task_id) || !revealed.has(edge.to_task_id)) continue;
+    if (discarded.has(edge.from_task_id) || discarded.has(edge.to_task_id)) continue;
+    if (edges.some((item) => item.edge_id === edge.edge_id)) continue;
+    const trial = [...edges, edge];
+    if (taskGraphValidationIssues(trial, taskIds).length === 0) {
+      edges.push(edge);
+    }
+  }
+
+  const provisional: Project = { ...project, task_graph_edges: edges };
+  return repairProjectTaskGraph(provisional, activeTasks, {
+    validate: false,
+    inferCritiqueCycles: true,
+  });
+}
+
 export function finalizeGraphRecoveryProject(
   project: Project,
   tasks: ProjectTask[],
   session: GraphRecoverySession,
 ): { project: Project; tasks: ProjectTask[]; session: GraphRecoverySession } {
-  const stripped = tasks;
-
   const complete = !session.active && !session.pending;
-  const synced = complete
-    ? applyGraphEdgesToLegacyFields(stripped, session.confirmed_edges)
-    : stripped;
 
-  const projectNext: Project = {
+  let synced = tasks;
+  if (session.mode === 'staged' && session.active && !complete) {
+    const revealed = new Set(session.revealed_task_ids ?? []);
+    synced = applyRecoveryMapPositions(project, tasks, revealed);
+  }
+  let projectNext: Project = {
     ...project,
     task_graph_edges: session.confirmed_edges,
     ...(complete
@@ -517,9 +554,20 @@ export function finalizeGraphRecoveryProject(
   };
 
   if (complete) {
+    const repaired = finalizeCompletedRecoveryGraph(project, tasks, session);
+    synced = repaired.tasks;
+    projectNext = repaired.project;
+    const excluded = [
+      ...new Set([
+        ...(project.task_graph_excluded_task_ids ?? []),
+        ...(session.discarded_task_ids ?? []),
+      ]),
+    ];
+    if (excluded.length > 0) {
+      projectNext.task_graph_excluded_task_ids = excluded;
+    }
     delete projectNext.graph_recovery_session;
     delete projectNext.task_graph_validation_issue;
-    projectNext.task_graph_edges = session.confirmed_edges;
   }
 
   return { project: projectNext, tasks: synced, session };
@@ -569,7 +617,14 @@ export function resolveGraphRecoverySession(
     revealed.add(orphan.task_id);
     let pendingIds = [...(next.pending_task_ids ?? [])];
     pendingIds = pendingIds.filter((id) => id !== orphan.task_id);
-    if (resolution.parent_task_id !== 'project') {
+    let updatedTasks = tasks;
+    if (resolution.parent_task_id === 'project') {
+      updatedTasks = tasks.map((task) => (
+        task.task_id === orphan.task_id
+          ? { ...task, dependencies: [], sibling_dependencies: [] }
+          : task
+      ));
+    } else {
       const attachEdge: TaskGraphEdge = {
         edge_id: edgeKey(resolution.parent_task_id, orphan.task_id, 'tree'),
         from_task_id: resolution.parent_task_id,
@@ -578,10 +633,14 @@ export function resolveGraphRecoverySession(
       };
       next.confirmed_edges = [...next.confirmed_edges, attachEdge];
     }
+    const connected = [...new Set([...(next.connected_task_ids ?? []), orphan.task_id])];
+    const orphaned = (next.orphaned_task_ids ?? []).filter((id) => id !== orphan.task_id);
     next = {
       ...next,
       revealed_task_ids: [...revealed],
       pending_task_ids: pendingIds,
+      connected_task_ids: connected,
+      orphaned_task_ids: orphaned,
       remaining_candidates: dedupeTaskGraphEdges([
         ...edgesBetweenRevealedTasks(
           next.source_edge_pool ?? [],
@@ -593,9 +652,15 @@ export function resolveGraphRecoverySession(
       ]),
     };
     next.active = true;
-    next = advanceGraphRecoverySession(next, tasks, revealed);
+    next = advanceGraphRecoverySession(next, updatedTasks, revealed);
     if (next.pending) next.paused = true;
-    return { session: next, tasks };
+  if ((next.pending_task_ids ?? []).length === 0
+      && next.remaining_candidates.length === 0
+      && !next.pending
+      && next.phase === 'orphaned') {
+      next = { ...next, active: false, paused: false };
+    }
+    return { session: next, tasks: updatedTasks };
   }
 
   if (resolution.action === 'skip') {
