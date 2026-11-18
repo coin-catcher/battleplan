@@ -15,6 +15,7 @@ import {
   mergeGraphRecoveryDiskHints,
 } from './graph-recovery-disk';
 import { canRevealTaskOnMindmap, partitionTasksForRecovery } from './graph-recovery-reachability';
+import { applyRecoveryMapPositions } from './graph-recovery-placement';
 
 export type GraphRecoveryPending =
   | {
@@ -534,6 +535,10 @@ export function finalizeGraphRecoveryProject(
   const complete = !session.active && !session.pending;
 
   let synced = tasks;
+  if (session.mode === 'staged' && session.active && !complete) {
+    const revealed = new Set(session.revealed_task_ids ?? []);
+    synced = applyRecoveryMapPositions(project, tasks, revealed);
+  }
   let projectNext: Project = {
     ...project,
     task_graph_edges: session.confirmed_edges,

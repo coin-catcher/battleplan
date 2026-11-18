@@ -621,6 +621,14 @@ export class LocalEngine {
     project = finalized.project;
     project.updated_at = this.now();
     await this.repo.saveProject(project);
+    const priorById = new Map(tasks.map((task) => [task.task_id, task]));
+    for (const task of finalized.tasks) {
+      const prior = priorById.get(task.task_id);
+      if (!prior) continue;
+      if (prior.map_x === task.map_x && prior.map_y === task.map_y) continue;
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
+    }
     return project;
   }
 

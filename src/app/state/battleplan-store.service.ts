@@ -1792,6 +1792,9 @@ export class BattleplanStore {
     if (!projectId) return;
     const project = await this.api.tickGraphRecovery(projectId);
     this.applyProject(project);
+    if (project.graph_recovery_session?.active) {
+      await this.reloadTasks();
+    }
     this.syncGraphRecoveryAutoAdvance();
     if (project.graph_recovery_session?.pending) {
       this.stopGraphRecoveryAutoAdvance();
