@@ -133,7 +133,7 @@ export function workflowExecutionPreamble(
       return [
         ...common,
         'Implement on the agent branch; commit and push; summarize changes for critique/upstream handoff.',
-        'After any code is created or changed, run lint, build, unit tests, and confirm coverage > 80% before you finish.',
+        'After any code is created or changed, run lint, `npm run build:electron`, unit tests, and confirm coverage > 80% before you finish.',
         codeTaskDefinitionOfDoneMarkdown(),
         'Do not mark the task complete until every definition-of-done item passes.',
       ].join('\n\n');

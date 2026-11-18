@@ -174,10 +174,16 @@ export function mindmapNodeAtPoint(nodes: MindmapNode[], x: number, y: number): 
   return null;
 }
 
+/** Client rect of the map stage (`Element.getBoundingClientRect()` is compatible). */
+export interface MapStageClientRect {
+  left: number;
+  top: number;
+}
+
 export function pointerToWorld(
   clientX: number,
   clientY: number,
-  stageRect: DOMRect,
+  stageRect: MapStageClientRect,
   scrollLeft: number,
   scrollTop: number,
   zoom: number,

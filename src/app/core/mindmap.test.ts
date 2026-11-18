@@ -196,7 +196,7 @@ describe('mindmap', () => {
   });
 
   it('converts pointer coordinates to world space', () => {
-    const rect = { left: 10, top: 10, width: 800, height: 600 } as DOMRect;
+    const rect = { left: 10, top: 10 };
     const world = pointerToWorld(110, 210, rect, 100, 50, 2);
     expect(world).toEqual({ x: 100, y: 125 });
   });
