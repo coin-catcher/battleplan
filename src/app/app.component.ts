@@ -175,10 +175,16 @@ export class AppComponent implements OnInit {
   readonly map = computed(() => {
     const project = this.store.project();
     const pins = this.dragPins();
-    const tasks = this.store.tasks().map((task) => {
-      const pin = pins[task.task_id];
-      return pin ? { ...task, map_x: pin.x, map_y: pin.y } : task;
-    });
+    const session = project?.graph_recovery_session;
+    const revealed = session?.active && session.mode === 'staged'
+      ? new Set(session.revealed_task_ids ?? [])
+      : null;
+    const tasks = this.store.tasks()
+      .filter((task) => !revealed || revealed.has(task.task_id))
+      .map((task) => {
+        const pin = pins[task.task_id];
+        return pin ? { ...task, map_x: pin.x, map_y: pin.y } : task;
+      });
     const projectDrag = pins['project'];
     const projectPin = projectDrag
       ?? (project && Number.isFinite(project.map_x) && Number.isFinite(project.map_y)
@@ -2664,6 +2670,10 @@ export class AppComponent implements OnInit {
 
   skipGraphRecoveryEdge(): void {
     void this.store.resolveGraphRecovery({ action: 'skip' });
+  }
+
+  forceGraphRecovery(): void {
+    void this.store.forceStartGraphRecovery();
   }
 
   async removeTaskGraphEdge(edgeId: string): Promise<void> {

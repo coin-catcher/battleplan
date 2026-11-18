@@ -493,6 +493,13 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   color: #f0d8a8;
   background: rgba(120, 72, 24, 0.35);
   border-bottom: 1px solid rgba(215, 196, 161, 0.35);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+.map-graph-recovery-action {
+  margin-left: auto;
 }
 .map-scaler { position: relative; }
 .map-canvas { position: relative; }

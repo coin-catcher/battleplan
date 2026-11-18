@@ -1755,6 +1755,54 @@ export class BattleplanStore {
     });
   }
 
+  private graphRecoveryTimer: ReturnType<typeof setInterval> | undefined;
+
+  private stopGraphRecoveryAutoAdvance(): void {
+    if (this.graphRecoveryTimer !== undefined) {
+      clearInterval(this.graphRecoveryTimer);
+      this.graphRecoveryTimer = undefined;
+    }
+  }
+
+  syncGraphRecoveryAutoAdvance(): void {
+    const project = this.project();
+    const session = project?.graph_recovery_session;
+    this.stopGraphRecoveryAutoAdvance();
+    if (!session?.active || session.mode !== 'staged' || session.pending || session.paused) return;
+    const ms = session.auto_advance_ms ?? 5000;
+    this.graphRecoveryTimer = setInterval(() => {
+      void this.tickGraphRecovery();
+    }, ms);
+  }
+
+  async forceStartGraphRecovery(): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    await this.run(async () => {
+      const project = await this.api.forceStartGraphRecovery(projectId);
+      this.applyProject(project);
+      await this.reloadTasks();
+      this.notice.set('Graph recovery started from local storage.');
+      this.syncGraphRecoveryAutoAdvance();
+    });
+  }
+
+  async tickGraphRecovery(): Promise<void> {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    const project = await this.api.tickGraphRecovery(projectId);
+    this.applyProject(project);
+    this.syncGraphRecoveryAutoAdvance();
+    if (project.graph_recovery_session?.pending) {
+      this.stopGraphRecoveryAutoAdvance();
+    }
+    if (!project.graph_recovery_session?.active) {
+      this.stopGraphRecoveryAutoAdvance();
+      await this.reloadTasks();
+      this.notice.set('Task graph recovery complete.');
+    }
+  }
+
   async resolveGraphRecovery(
     resolution: import('../core/task-graph-interactive-recovery').GraphRecoveryResolution,
   ): Promise<void> {
@@ -1766,8 +1814,12 @@ export class BattleplanStore {
       await this.reloadTasks();
       if (project.graph_recovery_session?.pending) {
         this.notice.set('Choose how to connect the highlighted task graph link.');
+        this.stopGraphRecoveryAutoAdvance();
       } else if (!project.graph_recovery_session?.active) {
+        this.stopGraphRecoveryAutoAdvance();
         this.notice.set('Task graph recovery complete.');
+      } else {
+        this.syncGraphRecoveryAutoAdvance();
       }
     });
   }
@@ -2563,6 +2615,7 @@ export class BattleplanStore {
       if (isOrchestrationRunActive(fresh.graph_orchestration)) this.ensureOrchestrationWatches(fresh);
     }
     this.syncDoingBackgroundWatches();
+    this.syncGraphRecoveryAutoAdvance();
   }
 
   /** Reload tasks and orchestration run state after background agent sync (mindmap + watches). */

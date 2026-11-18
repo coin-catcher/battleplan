@@ -189,18 +189,30 @@
             </button>
           </div>
         </nav>
-        @if (graphRecoverySession()?.active) {
-          <p class="map-graph-recovery-notice" role="status">
-            Recovering task graph from local storage:
-            {{ graphRecoverySession()!.confirmed_edges.length }} connection(s) confirmed,
-            {{ graphRecoverySession()!.remaining_candidates.length }} waiting.
-            Tasks are shown at their saved positions; links appear as each step is confirmed.
-          </p>
-        } @else {
-          @if (store.project()?.task_graph_validation_issue; as graphIssue) {
-            <p class="map-graph-recovery-notice" role="status">{{ graphIssue }}</p>
+        <p class="map-graph-recovery-notice" role="status">
+          @if (graphRecoverySession()?.active) {
+            Graph recovery:
+            {{ graphRecoverySession()!.revealed_task_ids?.length ?? 0 }}
+            /
+            {{ ((graphRecoverySession()!.revealed_task_ids?.length ?? 0) + (graphRecoverySession()!.pending_task_ids?.length ?? 0)) }}
+            tasks visible,
+            {{ graphRecoverySession()!.confirmed_edges.length }} link(s) confirmed.
+            @if (graphRecoverySession()?.paused) {
+              Paused for your input (see dialog).
+            } @else {
+              Adding a task every 5 seconds in execution order.
+            }
+          } @else {
+            @if (store.project()?.task_graph_validation_issue; as graphIssue) {
+              {{ graphIssue }}
+            } @else {
+              Rebuild the mindmap from on-disk tasks and links if positions or connections look wrong.
+            }
           }
-        }
+          <button type="button" class="ghost map-graph-recovery-action" (click)="forceGraphRecovery()">
+            {{ graphRecoverySession()?.active ? 'Restart graph recovery' : 'Start graph recovery' }}
+          </button>
+        </p>
         <div #mapStage class="map-stage" aria-label="Project mindmap" (scroll)="onMapStageScroll()" (pointerdown)="onStagePointerDown($event)">
           <div class="map-scaler" [style.width.px]="map().width * zoom()" [style.height.px]="map().height * zoom()">
             <div class="map-canvas" [style.width.px]="map().width" [style.height.px]="map().height" [style.transform]="'scale(' + zoom() + ')'">

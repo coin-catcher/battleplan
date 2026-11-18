@@ -142,12 +142,16 @@ import {
   repairProjectTaskGraph,
   prerequisitesMet,
   seedProjectGraphDefaults,
+  stripOrphanTaskReferences,
   taskGraphValidationIssues,
   validateTaskGraphEdges,
 } from '../core/task-graph';
+import { graphEdgesForDisplay } from '../core/task-graph-recovery';
 import {
+  beginGraphRecoveryFromStorage,
+  finalizeGraphRecoveryProject,
   resolveGraphRecoverySession,
-  startInteractiveGraphRecovery,
+  stagedGraphRecoveryStep,
   type GraphRecoveryResolution,
 } from '../core/task-graph-interactive-recovery';
 import { buildTaskHandoff } from '../core/task-handoff';
@@ -527,11 +531,17 @@ export class LocalEngine {
     }
     await this.repo.ensureLocalWorkspaceLayout();
     if (project.graph_recovery_session?.active) {
-      const interactive = startInteractiveGraphRecovery(project, workingTasks);
-      project = interactive.project;
-      workingTasks = interactive.tasks;
-      project.updated_at = this.now();
-      await this.repo.saveProject(project);
+      const strippedActive = stripOrphanTaskReferences(
+        workingTasks,
+        new Set(workingTasks.map((task) => task.task_id)),
+      );
+      workingTasks = strippedActive.tasks;
+      if (strippedActive.changed) {
+        for (const task of workingTasks) {
+          task.updated_at = this.now();
+          await this.repo.saveTask(task);
+        }
+      }
       return workingTasks;
     }
     if (!project.task_graph_edges?.length) {
@@ -543,9 +553,15 @@ export class LocalEngine {
     project = graphResult.project;
     workingTasks = graphResult.tasks;
     const taskIds = new Set(workingTasks.map((task) => task.task_id));
-    const validationIssues = taskGraphValidationIssues(project.task_graph_edges ?? [], taskIds);
+    const displayIssues = taskGraphValidationIssues(
+      graphEdgesForDisplay(project, workingTasks),
+      taskIds,
+    );
+    const validationIssues = displayIssues.length > 0
+      ? displayIssues
+      : taskGraphValidationIssues(project.task_graph_edges ?? [], taskIds);
     if (validationIssues.length > 0) {
-      const interactive = startInteractiveGraphRecovery(project, workingTasks);
+      const interactive = beginGraphRecoveryFromStorage(project, workingTasks, { mode: 'staged' });
       graphResult = {
         project: interactive.project,
         tasks: interactive.tasks,
@@ -571,6 +587,35 @@ export class LocalEngine {
     return workingTasks;
   }
 
+  async forceStartGraphRecovery(projectId: string): Promise<Project> {
+    let project = await this.requireProject(projectId);
+    const tasks = await this.repo.listTasks(projectId);
+    const interactive = beginGraphRecoveryFromStorage(project, tasks, { mode: 'staged', force: true });
+    project = interactive.project;
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    for (const task of interactive.tasks) {
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
+    }
+    return project;
+  }
+
+  async tickGraphRecovery(projectId: string): Promise<Project> {
+    let project = await this.requireProject(projectId);
+    const session = project.graph_recovery_session;
+    if (!session?.active || session.mode !== 'staged' || session.pending || session.paused) {
+      return project;
+    }
+    const tasks = await this.repo.listTasks(projectId);
+    const nextSession = stagedGraphRecoveryStep(session, tasks);
+    const finalized = finalizeGraphRecoveryProject(project, tasks, nextSession);
+    project = finalized.project;
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    return project;
+  }
+
   async resolveGraphRecovery(projectId: string, resolution: GraphRecoveryResolution): Promise<Project> {
     let project = await this.requireProject(projectId);
     const session = project.graph_recovery_session;
@@ -578,24 +623,11 @@ export class LocalEngine {
     const rawTasks = await this.repo.listTasks(projectId);
     const taskIds = new Set(rawTasks.map((task) => task.task_id));
     const resolved = resolveGraphRecoverySession(session, rawTasks, resolution);
-    const nextSession = resolved.session;
-    project = {
-      ...project,
-      task_graph_edges: nextSession.confirmed_edges,
-    };
-    if (nextSession.active) {
-      project.graph_recovery_session = nextSession;
-      project.task_graph_validation_issue = nextSession.pending?.issue
-        ?? 'Resolving task graph connections step by step…';
-    } else {
-      delete project.graph_recovery_session;
-      const issues = taskGraphValidationIssues(nextSession.confirmed_edges, taskIds);
-      if (issues[0]) project.task_graph_validation_issue = issues[0];
-      else delete project.task_graph_validation_issue;
-    }
+    const finalized = finalizeGraphRecoveryProject(project, resolved.tasks, resolved.session);
+    project = finalized.project;
     project.updated_at = this.now();
     await this.repo.saveProject(project);
-    for (const task of resolved.tasks) {
+    for (const task of finalized.tasks) {
       task.updated_at = this.now();
       await this.repo.saveTask(task);
     }

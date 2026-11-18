@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { Project } from './models';
 import type { ProjectTask } from './models';
 import {
+  executionOrderTaskIds,
+  initStagedGraphRecoverySession,
   resolveGraphRecoverySession,
+  stagedGraphRecoveryStep,
   startInteractiveGraphRecovery,
 } from './task-graph-interactive-recovery';
 
@@ -46,9 +49,36 @@ describe('task-graph-interactive-recovery', () => {
     };
 
     const started = startInteractiveGraphRecovery(project, [a, b, c]);
-    expect(started.session.confirmed_edges.length).toBeGreaterThan(0);
-    expect(started.session.pending?.issue).toMatch(/Accidental/i);
+    expect(started.session.mode).toBe('staged');
+    expect(started.session.revealed_task_ids?.length).toBeGreaterThan(0);
     expect(started.tasks.find((item) => item.task_id === 'c')).toMatchObject({ map_x: 400, map_y: 240 });
+  });
+
+  it('reveals tasks in execution order for staged recovery', () => {
+    const root = task('root', { dependencies: ['child'] });
+    const child = task('child', { map_x: 440, map_y: 320 });
+    const edges = [
+      { edge_id: 'tree:root->child', from_task_id: 'root', to_task_id: 'child', kind: 'tree' as const },
+    ];
+    const project: Project = {
+      project_id: 'p1',
+      title: 'P',
+      initial_prompt: '',
+      cursor_chat_link: '',
+      dar: '',
+      status: 'TODO',
+      created_at: '',
+      updated_at: '',
+      task_graph_edges: edges,
+    };
+    const order = executionOrderTaskIds([root, child], edges);
+    expect(order.indexOf('root')).toBeLessThan(order.indexOf('child'));
+    let session = initStagedGraphRecoverySession(project, [root, child]);
+    session = stagedGraphRecoveryStep(session, [root, child]);
+    expect(session.revealed_task_ids).toEqual(['root']);
+    session = stagedGraphRecoveryStep(session, [root, child]);
+    expect(session.revealed_task_ids).toEqual(['root', 'child']);
+    expect(session.confirmed_edges.some((edge) => edge.kind === 'tree')).toBe(true);
   });
 
   it('resumes after the user skips a blocked edge', () => {
