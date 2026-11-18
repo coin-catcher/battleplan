@@ -161,6 +161,14 @@ export class BattleplanApi {
     return this.engine.resolveGraphRecovery(projectId, resolution);
   }
 
+  forceStartGraphRecovery(projectId: string): Promise<Project> {
+    return this.engine.forceStartGraphRecovery(projectId);
+  }
+
+  tickGraphRecovery(projectId: string): Promise<Project> {
+    return this.engine.tickGraphRecovery(projectId);
+  }
+
   reorderTasks(projectId: string, taskIds: string[]): Promise<ProjectTask[]> {
     return this.engine.reorderTasks(projectId, taskIds);
   }
