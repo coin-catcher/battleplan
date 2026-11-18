@@ -16,12 +16,23 @@ export interface GraphRecoveryPending {
   alternatives: TaskGraphEdge[];
 }
 
+export type GraphRecoveryMode = 'staged' | 'edge';
+
 export interface GraphRecoverySession {
   active: boolean;
+  mode: GraphRecoveryMode;
   confirmed_edges: TaskGraphEdge[];
   remaining_candidates: TaskGraphEdge[];
   skipped: TaskGraphEdge[];
   pending?: GraphRecoveryPending;
+  /** Staged recovery: tasks shown on the mindmap in execution order. */
+  revealed_task_ids?: string[];
+  /** Task ids still waiting to appear (execution order). */
+  pending_task_ids?: string[];
+  /** Full edge set read from local project + task fields. */
+  source_edge_pool?: TaskGraphEdge[];
+  auto_advance_ms?: number;
+  paused?: boolean;
 }
 
 const KIND_PRIORITY: Record<TaskEdgeKind, number> = {
@@ -47,6 +58,144 @@ function sortCandidates(edges: TaskGraphEdge[]): TaskGraphEdge[] {
 export function collectRecoveryCandidateEdges(project: Project, tasks: ProjectTask[]): TaskGraphEdge[] {
   const display = graphEdgesForDisplay(project, tasks);
   return sortCandidates(display);
+}
+
+const SCHEDULING_EDGE_KINDS = new Set<TaskEdgeKind>(['tree', 'ordering', 'fork', 'join']);
+
+/** Task execution order for staged mindmap reveal (cycle edges do not schedule). */
+export function executionOrderTaskIds(tasks: ProjectTask[], edges: TaskGraphEdge[]): string[] {
+  const byId = new Map(tasks.map((task) => [task.task_id, task]));
+  const ids = [...byId.keys()];
+  const indegree = new Map<string, number>();
+  const adj = new Map<string, string[]>();
+  for (const id of ids) {
+    indegree.set(id, 0);
+    adj.set(id, []);
+  }
+  for (const edge of edges) {
+    if (!SCHEDULING_EDGE_KINDS.has(edge.kind)) continue;
+    if (!byId.has(edge.from_task_id) || !byId.has(edge.to_task_id)) continue;
+    if (edge.from_task_id === edge.to_task_id) continue;
+    indegree.set(edge.to_task_id, (indegree.get(edge.to_task_id) ?? 0) + 1);
+    adj.get(edge.from_task_id)!.push(edge.to_task_id);
+  }
+  const queue = ids
+    .filter((id) => (indegree.get(id) ?? 0) === 0)
+    .sort((left, right) => {
+      const lo = byId.get(left)!;
+      const ro = byId.get(right)!;
+      return lo.order - ro.order || lo.title.localeCompare(ro.title);
+    });
+  const order: string[] = [];
+  const seen = new Set<string>();
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    order.push(id);
+    const children = [...(adj.get(id) ?? [])].sort((left, right) => {
+      const lo = byId.get(left)!;
+      const ro = byId.get(right)!;
+      return lo.order - ro.order || lo.title.localeCompare(ro.title);
+    });
+    for (const child of children) {
+      const nextDeg = (indegree.get(child) ?? 0) - 1;
+      indegree.set(child, nextDeg);
+      if (nextDeg === 0) queue.push(child);
+    }
+    queue.sort((left, right) => {
+      const lo = byId.get(left)!;
+      const ro = byId.get(right)!;
+      return lo.order - ro.order || lo.title.localeCompare(ro.title);
+    });
+  }
+  for (const id of ids.sort((left, right) => {
+    const lo = byId.get(left)!;
+    const ro = byId.get(right)!;
+    return lo.order - ro.order || lo.title.localeCompare(ro.title);
+  })) {
+    if (!seen.has(id)) order.push(id);
+  }
+  return order;
+}
+
+function edgesBetweenRevealedTasks(
+  pool: TaskGraphEdge[],
+  revealed: Set<string>,
+  confirmed: TaskGraphEdge[],
+  skipped: TaskGraphEdge[],
+): TaskGraphEdge[] {
+  const skipIds = new Set([...confirmed, ...skipped].map((edge) => edge.edge_id));
+  return sortCandidates(pool.filter((edge) => {
+    if (skipIds.has(edge.edge_id)) return false;
+    return revealed.has(edge.from_task_id) && revealed.has(edge.to_task_id);
+  }));
+}
+
+export function initStagedGraphRecoverySession(
+  project: Project,
+  tasks: ProjectTask[],
+): GraphRecoverySession {
+  const pool = collectRecoveryCandidateEdges(project, tasks);
+  const order = executionOrderTaskIds(tasks, pool);
+  return {
+    active: true,
+    mode: 'staged',
+    confirmed_edges: [],
+    remaining_candidates: [],
+    skipped: [],
+    revealed_task_ids: [],
+    pending_task_ids: order,
+    source_edge_pool: pool,
+    auto_advance_ms: 5000,
+    paused: false,
+  };
+}
+
+/** Reveal the next task and try to confirm its mindmap links from storage. */
+export function stagedGraphRecoveryStep(
+  session: GraphRecoverySession,
+  tasks: ProjectTask[],
+): GraphRecoverySession {
+  if (session.mode !== 'staged' || !session.active || session.pending || session.paused) return session;
+  const revealed = new Set(session.revealed_task_ids ?? []);
+  const pendingIds = [...(session.pending_task_ids ?? [])];
+  if (pendingIds.length === 0) {
+    let finished = advanceGraphRecoverySession({ ...session, pending: undefined }, tasks);
+    if (!finished.pending && finished.remaining_candidates.length === 0) {
+      finished = { ...finished, active: false };
+    }
+    return finished;
+  }
+
+  const nextTaskId = pendingIds.shift()!;
+  revealed.add(nextTaskId);
+  const pool = session.source_edge_pool ?? [];
+  const newEdges = edgesBetweenRevealedTasks(
+    pool,
+    revealed,
+    session.confirmed_edges,
+    session.skipped,
+  );
+
+  let next: GraphRecoverySession = {
+    ...session,
+    revealed_task_ids: [...revealed],
+    pending_task_ids: pendingIds,
+    remaining_candidates: dedupeTaskGraphEdges([...newEdges, ...session.remaining_candidates]),
+    paused: false,
+    pending: undefined,
+  };
+
+  next = advanceGraphRecoverySession(next, tasks);
+  if (next.pending) {
+    next.paused = true;
+    return next;
+  }
+  if ((next.pending_task_ids ?? []).length === 0 && next.remaining_candidates.length === 0) {
+    next.active = false;
+  }
+  return next;
 }
 
 function isRedundantCandidate(candidate: TaskGraphEdge, confirmed: TaskGraphEdge[]): boolean {
@@ -191,36 +340,63 @@ export function advanceGraphRecoverySession(
   }
 
   if (!next.pending && next.remaining_candidates.length === 0) {
-    next.active = false;
+    if (next.mode === 'staged') {
+      next.active = (next.pending_task_ids ?? []).length > 0;
+    } else {
+      next.active = false;
+    }
   }
 
   return next;
+}
+
+export function beginGraphRecoveryFromStorage(
+  project: Project,
+  tasks: ProjectTask[],
+  options?: { mode?: GraphRecoveryMode; force?: boolean },
+): { project: Project; tasks: ProjectTask[]; session: GraphRecoverySession } {
+  const stripped = stripOrphanTaskReferences(tasks, new Set(tasks.map((task) => task.task_id)));
+  const mode = options?.mode ?? 'staged';
+
+  let session: GraphRecoverySession = options?.force || !project.graph_recovery_session?.active
+    ? (mode === 'staged'
+      ? initStagedGraphRecoverySession(project, stripped.tasks)
+      : {
+          active: true,
+          mode: 'edge',
+          confirmed_edges: [],
+          remaining_candidates: collectRecoveryCandidateEdges(project, stripped.tasks),
+          skipped: [],
+        })
+    : { ...project.graph_recovery_session };
+
+  if (session.mode === 'staged' && !session.pending && !session.paused) {
+    session = stagedGraphRecoveryStep(session, stripped.tasks);
+  } else if (session.mode === 'edge' && !session.pending) {
+    session = advanceGraphRecoverySession(session, stripped.tasks);
+  }
+
+  return finalizeGraphRecoveryProject(project, stripped.tasks, session);
 }
 
 export function startInteractiveGraphRecovery(
   project: Project,
   tasks: ProjectTask[],
 ): { project: Project; tasks: ProjectTask[]; session: GraphRecoverySession } {
-  const stripped = stripOrphanTaskReferences(tasks, new Set(tasks.map((task) => task.task_id)));
-  const candidates = collectRecoveryCandidateEdges(project, stripped.tasks);
+  return beginGraphRecoveryFromStorage(project, tasks, { mode: 'staged' });
+}
 
-  let session: GraphRecoverySession = project.graph_recovery_session?.active
-    ? { ...project.graph_recovery_session }
-    : {
-        active: true,
-        confirmed_edges: [],
-        remaining_candidates: candidates,
-        skipped: [],
-      };
-
-  if (!session.pending) {
-    session = advanceGraphRecoverySession(session, stripped.tasks);
-  }
+export function finalizeGraphRecoveryProject(
+  project: Project,
+  tasks: ProjectTask[],
+  session: GraphRecoverySession,
+): { project: Project; tasks: ProjectTask[]; session: GraphRecoverySession } {
+  const stripped = tasks;
 
   const complete = !session.active && !session.pending;
   const synced = complete
-    ? applyGraphEdgesToLegacyFields(stripped.tasks, session.confirmed_edges)
-    : stripped.tasks;
+    ? applyGraphEdgesToLegacyFields(stripped, session.confirmed_edges)
+    : stripped;
 
   const projectNext: Project = {
     ...project,
@@ -229,7 +405,9 @@ export function startInteractiveGraphRecovery(
       ? {}
       : {
           task_graph_validation_issue: session.pending?.issue
-            ?? 'Resolving task graph connections step by step…',
+            ?? (session.mode === 'staged'
+              ? 'Graph recovery in progress — tasks appear in execution order.'
+              : 'Resolving task graph connections step by step…'),
           graph_recovery_session: session,
         }),
   };
@@ -280,7 +458,9 @@ export function resolveGraphRecoverySession(
   }
 
   next.active = true;
+  next.paused = false;
   next = advanceGraphRecoverySession(next, tasks);
+  if (next.pending) next.paused = true;
 
   const complete = !next.active && !next.pending;
   const synced = complete
