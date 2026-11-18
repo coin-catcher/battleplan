@@ -64,6 +64,7 @@ import {
   type WorldRect,
 } from './core/mindmap';
 import { graphEdgesForMindmap } from './core/task-ready';
+import { withRecoveryMapPositions } from './core/graph-recovery-placement';
 import { linkKey, type MindmapLinkRef } from './core/link-relocation';
 import {
   clampMindmapZoom,
@@ -179,12 +180,15 @@ export class AppComponent implements OnInit {
     const revealed = session?.active && session.mode === 'staged'
       ? new Set(session.revealed_task_ids ?? [])
       : null;
-    const tasks = this.store.tasks()
+    let tasks = this.store.tasks()
       .filter((task) => !revealed || revealed.has(task.task_id))
       .map((task) => {
         const pin = pins[task.task_id];
         return pin ? { ...task, map_x: pin.x, map_y: pin.y } : task;
       });
+    if (project && revealed) {
+      tasks = withRecoveryMapPositions(project, tasks, revealed);
+    }
     const projectDrag = pins['project'];
     const projectPin = projectDrag
       ?? (project && Number.isFinite(project.map_x) && Number.isFinite(project.map_y)
@@ -241,6 +245,7 @@ export class AppComponent implements OnInit {
   graphFlowBreakCondition = '';
   graphRecoveryDraftKind: TaskEdgeKind = 'ordering';
   graphRecoveryBreakCondition = 'human:REVIEW';
+  graphRecoveryParentDraft = 'project';
   readonly taskEdgeKinds = TASK_EDGE_KINDS;
   readonly graphRecoverySession = computed(() => this.store.project()?.graph_recovery_session);
   readonly graphRecoveryModalOpen = computed(() => Boolean(this.graphRecoverySession()?.pending));
@@ -563,7 +568,7 @@ export class AppComponent implements OnInit {
     });
     effect(() => {
       const pending = this.graphRecoverySession()?.pending;
-      if (!pending) return;
+      if (!pending || pending.kind !== 'edge') return;
       this.graphRecoveryDraftKind = pending.edge.kind;
       this.graphRecoveryBreakCondition = pending.edge.break_condition ?? 'human:REVIEW';
     });
@@ -2654,7 +2659,7 @@ export class AppComponent implements OnInit {
 
   async confirmGraphRecoveryEdge(): Promise<void> {
     const pending = this.graphRecoverySession()?.pending;
-    if (!pending) return;
+    if (!pending || pending.kind !== 'edge') return;
     const kind = this.graphRecoveryDraftKind;
     const edge: TaskGraphEdge = {
       edge_id: edgeKey(pending.edge.from_task_id, pending.edge.to_task_id, kind),
@@ -2666,6 +2671,25 @@ export class AppComponent implements OnInit {
         : {}),
     };
     await this.store.resolveGraphRecovery({ action: 'apply', edge });
+  }
+
+  async attachGraphRecoveryOrphan(): Promise<void> {
+    const pending = this.graphRecoverySession()?.pending;
+    if (!pending || (pending.kind !== 'orphan' && pending.kind !== 'orphan_review')) return;
+    await this.store.resolveGraphRecovery({
+      action: 'attach',
+      task_id: pending.task_id,
+      parent_task_id: this.graphRecoveryParentDraft,
+    });
+  }
+
+  discardGraphRecoveryOrphan(): void {
+    const pending = this.graphRecoverySession()?.pending;
+    if (!pending || pending.kind !== 'orphan_review') return;
+    void this.store.resolveGraphRecovery({
+      action: 'discard',
+      task_id: pending.task_id,
+    });
   }
 
   skipGraphRecoveryEdge(): void {

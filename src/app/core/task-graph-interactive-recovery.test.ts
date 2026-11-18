@@ -28,6 +28,29 @@ function task(id: string, partial: Partial<ProjectTask> = {}): ProjectTask {
 }
 
 describe('task-graph-interactive-recovery', () => {
+  it('starts in connected phase with orphaned ids stored separately', () => {
+    const root = task('root', { dependencies: ['child'] });
+    const child = task('child');
+    const stray = task('stray', {}, 2);
+    const project: Project = {
+      project_id: 'p1',
+      title: 'P',
+      initial_prompt: '',
+      cursor_chat_link: '',
+      dar: '',
+      status: 'TODO',
+      created_at: '',
+      updated_at: '',
+      task_graph_edges: [
+        { edge_id: 'tree:root->child', from_task_id: 'root', to_task_id: 'child', kind: 'tree' },
+      ],
+    };
+    const session = initStagedGraphRecoverySession(project, [root, child, stray]);
+    expect(session.phase).toBe('connected');
+    expect(session.orphaned_task_ids).toEqual(['stray']);
+    expect(session.connected_task_ids).toContain('root');
+  });
+
   it('confirms safe edges automatically and pauses on an accidental cycle', () => {
     const a = task('a', { sibling_dependencies: ['b'] });
     const b = task('b');
@@ -74,9 +97,9 @@ describe('task-graph-interactive-recovery', () => {
     const order = executionOrderTaskIds([root, child], edges);
     expect(order.indexOf('root')).toBeLessThan(order.indexOf('child'));
     let session = initStagedGraphRecoverySession(project, [root, child]);
-    session = stagedGraphRecoveryStep(session, [root, child]);
+    session = stagedGraphRecoveryStep(project, session, [root, child]);
     expect(session.revealed_task_ids).toEqual(['root']);
-    session = stagedGraphRecoveryStep(session, [root, child]);
+    session = stagedGraphRecoveryStep(project, session, [root, child]);
     expect(session.revealed_task_ids).toEqual(['root', 'child']);
     expect(session.confirmed_edges.some((edge) => edge.kind === 'tree')).toBe(true);
   });
@@ -90,6 +113,7 @@ describe('task-graph-interactive-recovery', () => {
       remaining_candidates: [blocked, tree],
       skipped: [],
       pending: {
+        kind: 'edge',
         edge: blocked,
         issue: 'blocked',
         alternatives: [],
