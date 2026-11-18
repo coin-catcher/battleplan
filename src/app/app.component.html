@@ -196,8 +196,10 @@
             {{ graphRecoverySession()!.remaining_candidates.length }} waiting.
             Tasks are shown at their saved positions; links appear as each step is confirmed.
           </p>
-        } @else if (store.project()?.task_graph_validation_issue; as graphIssue) {
-          <p class="map-graph-recovery-notice" role="status">{{ graphIssue }}</p>
+        } @else {
+          @if (store.project()?.task_graph_validation_issue; as graphIssue) {
+            <p class="map-graph-recovery-notice" role="status">{{ graphIssue }}</p>
+          }
         }
         <div #mapStage class="map-stage" aria-label="Project mindmap" (scroll)="onMapStageScroll()" (pointerdown)="onStagePointerDown($event)">
           <div class="map-scaler" [style.width.px]="map().width * zoom()" [style.height.px]="map().height * zoom()">

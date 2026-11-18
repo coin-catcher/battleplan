@@ -1,4 +1,5 @@
 import { Injectable, inject } from '@angular/core';
+import type { AgentRunTextSource } from '../core/agent-run-response';
 import type {
   AgentOptionValue,
   AgentType,
@@ -254,7 +255,12 @@ export class BattleplanApi {
   listTaskMessages(
     taskId: string,
     options?: { syncAgent?: boolean; reconcileStatus?: boolean },
-  ): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ConversationPage['artifacts'] }> {
+  ): Promise<{
+    messages: ChatMessage[];
+    task: ProjectTask;
+    artifacts: ConversationPage['artifacts'];
+    latestAgentRun?: AgentRunTextSource;
+  }> {
     return this.engine.listTaskMessages(taskId, options);
   }
 
