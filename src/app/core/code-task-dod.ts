@@ -1,10 +1,12 @@
 import type { TaskBrief } from './task-brief';
 
 /** Mandatory definition-of-done checklist for every code task (output_type: code). */
+export const CODE_TASK_BUILD_COMMAND = 'npm run build:electron';
+
 export const CODE_TASK_DEFINITION_OF_DONE = [
   'Unit tests created or updated for all code created or changed by this task',
   'Code linting verification succeeds',
-  'Code builds successfully',
+  `Code builds successfully (\`${CODE_TASK_BUILD_COMMAND}\`)`,
   'Unit tests are executed and succeed, with code coverage greater than 80%',
 ] as const;
 
@@ -32,13 +34,13 @@ export function applyCodeTaskDefinitionOfDone(brief: TaskBrief): TaskBrief {
   if (!fieldReferencesCodeTaskDod(next.verify)) {
     next.verify = [
       next.verify.trim(),
-      'After any code change, run lint, build, and unit tests with coverage; every definition-of-done item must pass before completion.',
+      `After any code change, run lint, \`${CODE_TASK_BUILD_COMMAND}\`, and unit tests with coverage; every definition-of-done item must pass before completion.`,
     ].filter(Boolean).join(' ');
   }
   if (!next.report.toLowerCase().includes('definition of done')) {
     next.report = [
       next.report.trim(),
-      'Report definition-of-done checklist pass/fail with command output or CI links (lint, build, tests, coverage > 80%).',
+      `Report definition-of-done checklist pass/fail with command output or CI links (lint, \`${CODE_TASK_BUILD_COMMAND}\`, tests, coverage > 80%).`,
     ].filter(Boolean).join(' ');
   }
   return next;
@@ -57,7 +59,7 @@ export function codeTaskAgentCompletionPolicy(): string {
 export function codeTaskFeedbackFollowUpPolicy(): string {
   return [
     'Incorporate the user feedback on the existing agent branch, commit, and push.',
-    'Then re-run lint, build, unit tests, and confirm coverage > 80% for all code touched.',
+    `Then re-run lint, \`${CODE_TASK_BUILD_COMMAND}\`, unit tests, and confirm coverage > 80% for all code touched.`,
     'Report definition-of-done pass/fail before claiming completion.',
   ].join(' ');
 }
