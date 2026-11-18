@@ -228,6 +228,19 @@ describe('mindmap', () => {
     expect(mindmapNodesInWorldRect(taskNodes, tiny)).toEqual(['alpha']);
   });
 
+  it('treats (0,0) as unpinned so legacy tasks spread around the project', () => {
+    const legacy = task('legacy');
+    legacy.map_x = 0;
+    legacy.map_y = 0;
+    const layout = layoutMindmap('Plan', [legacy, task('other', {}, 1)]);
+    const project = layout.nodes.find((node) => node.id === 'project')!;
+    const a = layout.nodes.find((node) => node.id === 'legacy')!;
+    const b = layout.nodes.find((node) => node.id === 'other')!;
+    expect(Math.hypot(a.x - project.x, a.y - project.y)).toBeGreaterThan(80);
+    expect(Math.hypot(b.x - project.x, b.y - project.y)).toBeGreaterThan(80);
+    expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThan(20);
+  });
+
   it('keeps a pinned offset from the project and rebalances unpinned tasks', () => {
     const pinned = task('survey');
     pinned.map_x = 400;
