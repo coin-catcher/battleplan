@@ -208,9 +208,12 @@ describe('LocalEngine', () => {
       created_at: '2026-10-02T00:00:00.000Z',
       updated_at: '2026-10-02T00:00:00.000Z',
     });
-    const task = await engine.createTask('p1', { map_x: 120, map_y: 340 });
-    expect(task.map_x).toBe(120);
-    expect(task.map_y).toBe(340);
+    const task = await engine.createTask('p1', { map_x: 800, map_y: 900 });
+    expect(task.map_x).toBe(800);
+    expect(task.map_y).toBe(900);
+    const clamped = await engine.createTask('p1', { map_x: 50_000, map_y: -20_000, title: 'Far' });
+    expect(clamped.map_x).toBeLessThan(13_000);
+    expect(clamped.map_y).toBeGreaterThan(0);
   });
 
   it('marks a task BLOCKED without calling Cursor', async () => {
