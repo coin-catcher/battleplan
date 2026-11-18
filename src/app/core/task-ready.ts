@@ -1,6 +1,7 @@
 import type { ProjectTask } from './models';
 import type { TaskGraphEdge } from './task-graph';
-import { ensureCritiqueBackEdges, prerequisitesMet } from './task-graph';
+import { ensureCritiqueBackEdges, prerequisitesMet, rebuildGraphEdgesFromLegacy } from './task-graph';
+import { dedupeTaskGraphEdges } from './task-graph-recovery';
 import { graphEdgesForDisplay, taskGraphValidationIssues } from './task-graph-recovery';
 import type { Project } from './models';
 import { isDispatchableNodeKind } from './task-node-kind';
@@ -13,8 +14,18 @@ export function graphEdgesForRun(project: Project | null, tasks: ProjectTask[]):
 
 /** Graph edges for mindmap rendering (includes inferred critique rework back-edges when valid). */
 export function graphEdgesForMindmap(project: Project | null, tasks: ProjectTask[]): TaskGraphEdge[] {
-  if (project?.graph_recovery_session?.active) {
-    return project.graph_recovery_session.confirmed_edges;
+  const session = project?.graph_recovery_session;
+  if (session?.active && session.mode === 'staged') {
+    const revealed = new Set(session.revealed_task_ids ?? []);
+    const visible = tasks.filter((task) => revealed.has(task.task_id));
+    const legacy = rebuildGraphEdgesFromLegacy(visible);
+    const pool = (session.source_edge_pool ?? []).filter(
+      (edge) => revealed.has(edge.from_task_id) && revealed.has(edge.to_task_id),
+    );
+    return dedupeTaskGraphEdges([...session.confirmed_edges, ...legacy, ...pool]);
+  }
+  if (session?.active) {
+    return session.confirmed_edges;
   }
   const base = graphEdgesForDisplay(project, tasks);
   const taskIds = new Set(tasks.map((task) => task.task_id));

@@ -478,6 +478,12 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .graph-recovery-edge dd {
   margin: 0;
 }
+.graph-recovery-snapshot {
+  width: 100%;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
 .graph-recovery-alternatives {
   display: flex;
   flex-direction: column;
