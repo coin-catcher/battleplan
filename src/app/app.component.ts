@@ -49,6 +49,7 @@ import { ProjectPortability } from './data/project-portability.service';
 import {
   cardinalAnchor,
   CONNECT_ARROW_LENGTH_PX,
+  hasPersistedMindmapPin,
   layoutMindmap,
   mindmapNodesInWorldRect,
   normalizeWorldRect,
@@ -186,12 +187,13 @@ export class AppComponent implements OnInit {
         const pin = pins[task.task_id];
         return pin ? { ...task, map_x: pin.x, map_y: pin.y } : task;
       });
-    if (project && revealed) {
+    const draggingMindmap = Boolean(this.mapDraggingNodeId()) || Object.keys(pins).length > 0;
+    if (project && revealed && !draggingMindmap) {
       tasks = withRecoveryMapPositions(project, tasks, revealed);
     }
     const projectDrag = pins['project'];
     const projectPin = projectDrag
-      ?? (project && Number.isFinite(project.map_x) && Number.isFinite(project.map_y)
+      ?? (project && hasPersistedMindmapPin(project.map_x, project.map_y)
         ? { x: project.map_x as number, y: project.map_y as number }
         : undefined);
     return layoutMindmap(

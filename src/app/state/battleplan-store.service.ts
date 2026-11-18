@@ -25,6 +25,8 @@ import { fieldsFromTaskEditorKind } from '../core/task-editor-kind';
 import {
   layoutMindmap,
   MINDMAP_PLACEMENT_VERSION,
+  hasPersistedMindmapPin,
+  projectOrTasksNeedMindmapRelayout,
   placeTaskOnMindmapForTask,
   positionConnectedNode,
   type CardinalDirection,
@@ -590,12 +592,14 @@ export class BattleplanStore {
   private async ensureMindmapPlacementMigrated(projectId: string): Promise<boolean> {
     const project = this.project();
     if (!project || project.project_id !== projectId) return false;
-    if ((project.mindmap_placement_version ?? 0) >= MINDMAP_PLACEMENT_VERSION) return false;
     const tasks = this.tasks().filter((task) => task.project_id === projectId);
+    const needsRelayout = (project.mindmap_placement_version ?? 0) < MINDMAP_PLACEMENT_VERSION
+      || projectOrTasksNeedMindmapRelayout(project, tasks);
+    if (!needsRelayout) return false;
     const layout = layoutMindmap(
       project.title,
       tasks,
-      Number.isFinite(project.map_x) && Number.isFinite(project.map_y)
+      hasPersistedMindmapPin(project.map_x, project.map_y)
         ? { x: project.map_x as number, y: project.map_y as number }
         : undefined,
       project.status,
