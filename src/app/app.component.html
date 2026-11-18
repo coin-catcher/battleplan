@@ -1681,42 +1681,68 @@
   <div class="modal-backdrop graph-recovery-backdrop" role="presentation">
     <section class="modal graph-recovery-modal" role="dialog" aria-labelledby="graph-recovery-title">
       <header class="panel-head">
-        <h2 id="graph-recovery-title">Confirm task graph connection</h2>
-        <p>Recovery paused. The mindmap behind this dialog shows all tasks plus links confirmed so far.</p>
+        @if (pending.kind === 'orphan') {
+          <h2 id="graph-recovery-title">Attach task to project graph</h2>
+          <p>{{ resolveTaskTitle(pending.task_id) }} is not linked back to the project. Pick a parent from what is on disk.</p>
+        } @else {
+          <h2 id="graph-recovery-title">Confirm task graph connection</h2>
+          <p>Recovery paused. The mindmap behind this dialog shows tasks plus links restored so far.</p>
+        }
       </header>
       <p class="banner warn" role="alert">{{ pending.issue }}</p>
-      <dl class="graph-recovery-edge">
-        <div><dt>From</dt><dd>{{ resolveTaskTitle(pending.edge.from_task_id) }}</dd></div>
-        <div><dt>To</dt><dd>{{ resolveTaskTitle(pending.edge.to_task_id) }}</dd></div>
-        <div><dt>Stored as</dt><dd>{{ taskEdgeKindLabel(pending.edge.kind) }}</dd></div>
-      </dl>
-      <label class="field">
-        <span>Connection kind</span>
-        <select [(ngModel)]="graphRecoveryDraftKind" name="graphRecoveryDraftKind">
-          @for (kind of taskEdgeKinds; track kind) {
-            <option [value]="kind">{{ taskEdgeKindLabel(kind) }}</option>
-          }
-        </select>
-      </label>
-      @if (graphRecoveryDraftKind === 'cycle') {
+      @if (pending.kind === 'orphan') {
         <label class="field">
-          <span>Break condition</span>
-          <input [(ngModel)]="graphRecoveryBreakCondition" name="graphRecoveryBreakCondition" placeholder="human:REVIEW" />
+          <span>Parent task</span>
+          <select [(ngModel)]="graphRecoveryParentDraft" name="graphRecoveryParentDraft">
+            <option value="project">Project root</option>
+            @for (task of store.tasks(); track task.task_id) {
+              @if (graphRecoverySession()?.revealed_task_ids?.includes(task.task_id)) {
+                <option [value]="task.task_id">{{ task.title }}</option>
+              }
+            }
+          </select>
         </label>
-      }
-      <p class="eyebrow">Suggestions from storage</p>
-      <div class="graph-recovery-alternatives">
-        @for (alt of pending.alternatives; track alt.edge_id) {
-          <button type="button" class="ghost" (click)="applyGraphRecoveryAlternative(alt)">
-            {{ resolveTaskTitle(alt.from_task_id) }} → {{ resolveTaskTitle(alt.to_task_id) }}
-            ({{ taskEdgeKindLabel(alt.kind) }})
-          </button>
+        <label class="field">
+          <span>On-disk task / project config (UUIDs shown as titles)</span>
+          <textarea class="graph-recovery-snapshot" readonly rows="14">{{ pending.disk_snapshot }}</textarea>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="primary" (click)="attachGraphRecoveryOrphan()">Attach and continue</button>
+        </div>
+      } @else {
+        <dl class="graph-recovery-edge">
+          <div><dt>From</dt><dd>{{ resolveTaskTitle(pending.edge.from_task_id) }}</dd></div>
+          <div><dt>To</dt><dd>{{ resolveTaskTitle(pending.edge.to_task_id) }}</dd></div>
+          <div><dt>Stored as</dt><dd>{{ taskEdgeKindLabel(pending.edge.kind) }}</dd></div>
+        </dl>
+        <label class="field">
+          <span>Connection kind</span>
+          <select [(ngModel)]="graphRecoveryDraftKind" name="graphRecoveryDraftKind">
+            @for (kind of taskEdgeKinds; track kind) {
+              <option [value]="kind">{{ taskEdgeKindLabel(kind) }}</option>
+            }
+          </select>
+        </label>
+        @if (graphRecoveryDraftKind === 'cycle') {
+          <label class="field">
+            <span>Break condition</span>
+            <input [(ngModel)]="graphRecoveryBreakCondition" name="graphRecoveryBreakCondition" placeholder="human:REVIEW" />
+          </label>
         }
-      </div>
-      <div class="modal-actions">
-        <button type="button" class="ghost" (click)="skipGraphRecoveryEdge()">Skip this link</button>
-        <button type="button" class="primary" (click)="confirmGraphRecoveryEdge()">Add connection</button>
-      </div>
+        <p class="eyebrow">Suggestions from storage</p>
+        <div class="graph-recovery-alternatives">
+          @for (alt of pending.alternatives; track alt.edge_id) {
+            <button type="button" class="ghost" (click)="applyGraphRecoveryAlternative(alt)">
+              {{ resolveTaskTitle(alt.from_task_id) }} → {{ resolveTaskTitle(alt.to_task_id) }}
+              ({{ taskEdgeKindLabel(alt.kind) }})
+            </button>
+          }
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="ghost" (click)="skipGraphRecoveryEdge()">Skip this link</button>
+          <button type="button" class="primary" (click)="confirmGraphRecoveryEdge()">Add connection</button>
+        </div>
+      }
     </section>
   </div>
   }

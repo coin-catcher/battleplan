@@ -74,9 +74,9 @@ describe('task-graph-interactive-recovery', () => {
     const order = executionOrderTaskIds([root, child], edges);
     expect(order.indexOf('root')).toBeLessThan(order.indexOf('child'));
     let session = initStagedGraphRecoverySession(project, [root, child]);
-    session = stagedGraphRecoveryStep(session, [root, child]);
+    session = stagedGraphRecoveryStep(project, session, [root, child]);
     expect(session.revealed_task_ids).toEqual(['root']);
-    session = stagedGraphRecoveryStep(session, [root, child]);
+    session = stagedGraphRecoveryStep(project, session, [root, child]);
     expect(session.revealed_task_ids).toEqual(['root', 'child']);
     expect(session.confirmed_edges.some((edge) => edge.kind === 'tree')).toBe(true);
   });
@@ -90,6 +90,7 @@ describe('task-graph-interactive-recovery', () => {
       remaining_candidates: [blocked, tree],
       skipped: [],
       pending: {
+        kind: 'edge',
         edge: blocked,
         issue: 'blocked',
         alternatives: [],

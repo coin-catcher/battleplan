@@ -608,7 +608,7 @@ export class LocalEngine {
       return project;
     }
     const tasks = await this.repo.listTasks(projectId);
-    const nextSession = stagedGraphRecoveryStep(session, tasks);
+    const nextSession = stagedGraphRecoveryStep(project, session, tasks);
     const finalized = finalizeGraphRecoveryProject(project, tasks, nextSession);
     project = finalized.project;
     project.updated_at = this.now();
