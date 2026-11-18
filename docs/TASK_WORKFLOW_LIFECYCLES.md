@@ -33,7 +33,7 @@ Typical flow:
 
 ## Code & architect
 
-- **Code**: standard agent-branch implementation preamble.
+- **Code**: standard agent-branch implementation preamble plus a **mandatory definition of done** (unit tests updated, lint passes, build succeeds, tests pass with coverage > 80%). Enforced in task briefs and execute/feedback prompts (`core/code-task-dod.ts`).
 - **Architect**: cross-task commit review and consolidation preamble.
 
 ## UI

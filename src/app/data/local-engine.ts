@@ -110,6 +110,11 @@ import {
 } from '../core/agent-run-response';
 import { isDispatchableNodeKind } from '../core/task-node-kind';
 import { defaultConnectorForTask } from '../core/connector-defaults';
+import {
+  applyCodeTaskDefinitionOfDone,
+  codeTaskAgentCompletionPolicy,
+  codeTaskFeedbackFollowUpPolicy,
+} from '../core/code-task-dod';
 import { applyTaskBriefDefaults } from '../core/task-lifecycle';
 import {
   defaultLoopModeForNodeKind,
@@ -234,7 +239,11 @@ function completeBriefForTask(task: ProjectTask, project: Project, existing?: Ta
     lifecyclePhase: task.lifecycle_phase,
     nodeKind: task.node_kind,
   });
-  return mergeTaskBriefWithDefaults(existing, defaults);
+  let brief = mergeTaskBriefWithDefaults(existing, defaults);
+  if (task.output_type === 'code') {
+    brief = applyCodeTaskDefinitionOfDone(brief);
+  }
+  return brief;
 }
 
 export class LocalEngine {
@@ -1598,12 +1607,15 @@ export class LocalEngine {
     const tasks = projectTasks;
     const inputDocs = buildInputDocumentsSection(task, tasks, graphEdges);
     const upstream = this.upstreamHandoffMarkdown(task, tasks);
-    const body = buildOrchestrationReExecuteMessage({
+    let body = buildOrchestrationReExecuteMessage({
       inputDocuments: inputDocs,
       upstreamHandoff: upstream,
       crossGraphRationale: task.cross_graph_edit_rationale,
       objectivesReminder: taskInitialPrompt(task) || undefined,
     });
+    if (task.output_type === 'code') {
+      body = joinDarSections([body, codeTaskAgentCompletionPolicy()]);
+    }
     this.markTaskDoingOnAgentChat(task);
     await this.repo.saveTask(task);
     const run = await this.cursor.createRun(task.cursor_agent_id, {
@@ -2508,6 +2520,9 @@ export class LocalEngine {
         'When finished, summarize the code changes you committed and name the branch you pushed.',
       );
     }
+    if (task.output_type === 'code') {
+      lines.push(codeTaskAgentCompletionPolicy());
+    }
     lines.push(`Task title: ${task.title}`);
     if (task.brief) {
       lines.push('Task brief:', formatTaskBriefMarkdown(task.brief));
@@ -3022,11 +3037,20 @@ function outputTypesOf(value: string, index: number): OutputType[] {
 }
 
 function feedbackPrompt(task: ProjectTask, feedback: string): string {
+  const workflowKind = inferWorkflowKindFromTask(task);
   const workflowNote = workflowFeedbackPreamble(task);
   if (workflowNote) {
     return [
-      `The user sent a message on the "${task.title}" ${inferWorkflowKindFromTask(task) ?? 'workflow'} task.`,
+      `The user sent a message on the "${task.title}" ${workflowKind ?? 'workflow'} task.`,
       workflowNote,
+      '',
+      feedback,
+    ].join('\n');
+  }
+  if (task.output_type === 'code') {
+    return [
+      `The user reviewed the work for "${task.title}" and sent feedback.`,
+      codeTaskFeedbackFollowUpPolicy(),
       '',
       feedback,
     ].join('\n');

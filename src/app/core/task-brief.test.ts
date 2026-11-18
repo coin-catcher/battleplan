@@ -40,6 +40,8 @@ describe('task-brief', () => {
     });
     expect(validateTaskBrief(brief)).toEqual([]);
     expect(brief.goal).toContain('Hermes');
+    expect(brief.acceptance).toMatch(/Definition of done/i);
+    expect(brief.verify).toMatch(/coverage/i);
   });
 
   it('normalizes partial brief objects', () => {

@@ -1,4 +1,5 @@
 import type { OutputType, ProjectTask } from './models';
+import { applyCodeTaskDefinitionOfDone } from './code-task-dod';
 import type { TaskNodeKind } from './task-node-kind';
 
 /** pstack-style task brief fields (Graph of Agents canonical task schema). */
@@ -150,7 +151,7 @@ export function buildDefaultTaskBrief(input: TaskBriefBuildInput): TaskBrief {
     verify = 'Subproject mindmap reflects agreed scope.';
   }
 
-  return {
+  const brief: TaskBrief = {
     goal,
     scope,
     context,
@@ -161,6 +162,10 @@ export function buildDefaultTaskBrief(input: TaskBriefBuildInput): TaskBrief {
     report,
     standing: projectDar ? `${DEFAULT_STANDING}\n\n${projectDar.slice(0, 800)}` : DEFAULT_STANDING,
   };
+  if (output === 'code') {
+    return applyCodeTaskDefinitionOfDone(brief);
+  }
+  return brief;
 }
 
 /** Fills missing brief fields from defaults; preserves user-edited non-empty values. */
