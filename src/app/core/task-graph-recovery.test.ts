@@ -43,9 +43,9 @@ function project(edges: Project['task_graph_edges']): Project {
 
 describe('task-graph-recovery', () => {
   it('recovers mindmap layout from storage when ordering forms an accidental cycle', () => {
-    const a = task('a', { map_x: 100, map_y: 200, sibling_dependencies: ['c'] });
-    const b = task('b', { map_x: 300, map_y: 200 });
-    const c = task('c', { map_x: 200, map_y: 400, sibling_dependencies: ['a'] });
+    const a = task('a', { map_x: 800, map_y: 900, sibling_dependencies: ['c'] });
+    const b = task('b', { map_x: 1100, map_y: 900 });
+    const c = task('c', { map_x: 950, map_y: 1200, sibling_dependencies: ['a'] });
     const edges = [
       { edge_id: 'ordering:b->a', from_task_id: 'b', to_task_id: 'a', kind: 'ordering' as const },
       { edge_id: 'ordering:c->b', from_task_id: 'c', to_task_id: 'b', kind: 'ordering' as const },
@@ -59,7 +59,7 @@ describe('task-graph-recovery', () => {
     const displayEdges = graphEdgesForDisplay(recovered.project, recovered.tasks);
     const layout = layoutMindmap('P', recovered.tasks, undefined, undefined, displayEdges);
     expect(layout.nodes.filter((node) => node.kind === 'task')).toHaveLength(3);
-    expect(layout.nodes.find((node) => node.id === 'a')).toMatchObject({ x: 100, y: 200 });
+    expect(layout.nodes.find((node) => node.id === 'a')).toMatchObject({ x: 800, y: 900 });
     expect(layout.edges.length).toBeGreaterThan(0);
   });
 

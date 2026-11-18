@@ -176,6 +176,7 @@ describe('task-graph-interactive-recovery', () => {
       session,
     );
     expect(finalized.project.graph_recovery_session).toBeUndefined();
+    expect(finalized.project.graph_recovery_completed_at).toBeTruthy();
     const graphTasks = tasksForValidatedTaskGraph(finalized.project, finalized.tasks);
     const issues = taskGraphValidationIssues(
       graphEdgesForDisplay(finalized.project, graphTasks),

@@ -5,13 +5,18 @@ import {
   cardinalAnchor,
   layoutMindmap,
   MINDMAP_CANVAS_MARGIN_PX,
+  mindmapCanvasWorldSpan,
+  mindmapNodeCenterFitsCanvas,
   mindmapNodesInWorldRect,
   mindmapNodesWorldExtent,
   normalizeWorldRect,
   pickCardinalEdge,
   pickConnectHoverSide,
+  placeTaskOnMindmap,
   pointerToWorld,
   positionConnectedNode,
+  TASK_HEIGHT,
+  TASK_WIDTH,
 } from './mindmap';
 import type { MindmapNode } from './mindmap';
 import { mindmapCanvasCenter, mindmapCanvasWorldSpan } from './project-ui-state';
@@ -239,6 +244,28 @@ describe('mindmap', () => {
     const notesAfter = after.nodes.find((node) => node.id === 'notes');
     expect(notesBefore && notesAfter).toBeTruthy();
     expect(notesAfter!.x === notesBefore!.x && notesAfter!.y === notesBefore!.y).toBe(false);
+  });
+
+  it('placeTaskOnMindmap clamps centers so the full shape stays inside the canvas', () => {
+    const span = mindmapCanvasWorldSpan();
+    const size = { width: TASK_WIDTH, height: TASK_HEIGHT };
+    const far = placeTaskOnMindmap(99_999, -50_000, size, span);
+    expect(mindmapNodeCenterFitsCanvas(far.x, far.y, size.width, size.height, span)).toBe(true);
+    const corner = placeTaskOnMindmap(-10_000, span + 10_000, size, span);
+    expect(mindmapNodeCenterFitsCanvas(corner.x, corner.y, size.width, size.height, span)).toBe(true);
+  });
+
+  it('keeps every layout task node fully inside the canvas', () => {
+    const span = mindmapCanvasWorldSpan();
+    const layout = layoutMindmap('Plan', [
+      task('root'),
+      task('child', { dependencies: ['root'] }, 1),
+      task('sibling', {}, 2),
+    ]);
+    for (const node of layout.nodes) {
+      if (node.kind !== 'task') continue;
+      expect(mindmapNodeCenterFitsCanvas(node.x, node.y, node.width, node.height, span)).toBe(true);
+    }
   });
 
   it('detects connect hover band on task sides', () => {

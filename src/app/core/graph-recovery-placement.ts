@@ -1,4 +1,4 @@
-import { PROJECT_RADIUS, TASK_HEIGHT, TASK_WIDTH } from './mindmap';
+import { placeTaskOnMindmapForTask, PROJECT_RADIUS, TASK_HEIGHT, TASK_WIDTH } from './mindmap';
 import { mindmapCanvasCenter } from './project-ui-state';
 import type { Project, ProjectTask } from './models';
 
@@ -103,10 +103,11 @@ function placeRevealedTask(
     ? scaled
     : undefined;
   const spot = spiralPlacementNearProject(projectX, projectY, placed, preferred);
+  const centered = placeTaskOnMindmapForTask(spot.x, spot.y, task);
   const next = {
     ...task,
-    map_x: Math.round(spot.x),
-    map_y: Math.round(spot.y),
+    map_x: centered.x,
+    map_y: centered.y,
   };
   const rect = taskRect(next);
   return { task: next, rect };
@@ -139,10 +140,16 @@ export function withRecoveryMapPositions(
       || farStored;
 
     if (!needsPlacement) {
-      const rect = taskRect(task);
+      const centered = placeTaskOnMindmapForTask(task.map_x!, task.map_y!, task);
+      const pinned = centered.x === task.map_x && centered.y === task.map_y ? task : {
+        ...task,
+        map_x: centered.x,
+        map_y: centered.y,
+      };
+      const rect = taskRect(pinned);
       if (!placed.some((other) => overlaps(rect, other))) {
         placed.push(rect);
-        return task;
+        return pinned;
       }
     }
 
