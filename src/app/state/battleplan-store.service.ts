@@ -25,8 +25,8 @@ import { fieldsFromTaskEditorKind } from '../core/task-editor-kind';
 import {
   layoutMindmap,
   MINDMAP_PLACEMENT_VERSION,
-  hasPersistedMindmapPin,
   projectOrTasksNeedMindmapRelayout,
+  resolvePersistedMindmapPin,
   placeTaskOnMindmapForTask,
   positionConnectedNode,
   type CardinalDirection,
@@ -599,9 +599,7 @@ export class BattleplanStore {
     const layout = layoutMindmap(
       project.title,
       tasks,
-      hasPersistedMindmapPin(project.map_x, project.map_y)
-        ? { x: project.map_x as number, y: project.map_y as number }
-        : undefined,
+      resolvePersistedMindmapPin(project.map_x, project.map_y),
       project.status,
       project.task_graph_edges,
     );
@@ -1008,6 +1006,10 @@ export class BattleplanStore {
   }
 
   async placeNode(id: string, x: number, y: number): Promise<void> {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      this.error.set('Could not save the node position (invalid coordinates).');
+      return;
+    }
     const map_x = Math.round(x);
     const map_y = Math.round(y);
     try {
