@@ -39,4 +39,12 @@ describe('task-workflow-lifecycle', () => {
     const text = workflowFeedbackPreamble(task({ node_kind: 'critique' }));
     expect(text).toMatch(/rubric/i);
   });
+
+  it('includes mandatory DoD in code workflow preamble and feedback', () => {
+    const codeTask = task({ output_type: 'code' });
+    const preamble = workflowExecutionPreamble('code', codeTask, project);
+    expect(preamble).toMatch(/coverage/i);
+    expect(preamble).toMatch(/lint/i);
+    expect(workflowFeedbackPreamble(codeTask)).toMatch(/definition of done/i);
+  });
 });
