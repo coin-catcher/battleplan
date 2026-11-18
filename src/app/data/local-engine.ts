@@ -95,12 +95,18 @@ import {
   type TaskBriefBuildInput,
 } from '../core/task-brief';
 import {
+  agentTurnMayCompleteWorkflow,
+  normalizeAgentRunStatus,
+} from '../core/agent-run-completion';
+import {
   AGENT_RESPONSE_PLACEHOLDER,
   isSubstantiveAgentResponse,
   agentDeclaresNoHumanReviewNeeded,
   buildOrchestrationReExecuteMessage,
+  isTerminalAgentRunStatus,
   isWorkflowTerminalAgentReply,
   NO_HUMAN_REVIEW_GRILLING_INSTRUCTION,
+  type AgentRunTextSource,
 } from '../core/agent-run-response';
 import { isDispatchableNodeKind } from '../core/task-node-kind';
 import { defaultConnectorForTask } from '../core/connector-defaults';
@@ -131,8 +137,14 @@ import {
   repairProjectTaskGraph,
   prerequisitesMet,
   seedProjectGraphDefaults,
+  taskGraphValidationIssues,
   validateTaskGraphEdges,
 } from '../core/task-graph';
+import {
+  resolveGraphRecoverySession,
+  startInteractiveGraphRecovery,
+  type GraphRecoveryResolution,
+} from '../core/task-graph-interactive-recovery';
 import { buildTaskHandoff } from '../core/task-handoff';
 import { normalParentIds } from '../core/dependencies';
 import type { LoopMode, TaskNodeKind } from '../core/task-node-kind';
@@ -505,15 +517,41 @@ export class LocalEngine {
       workingTasks = graphTypeMigrate.tasks;
     }
     await this.repo.ensureLocalWorkspaceLayout();
+    if (project.graph_recovery_session?.active) {
+      const interactive = startInteractiveGraphRecovery(project, workingTasks);
+      project = interactive.project;
+      workingTasks = interactive.tasks;
+      project.updated_at = this.now();
+      await this.repo.saveProject(project);
+      return workingTasks;
+    }
     if (!project.task_graph_edges?.length) {
       project.task_graph_edges = rebuildGraphEdgesFromLegacy(workingTasks);
       project.updated_at = this.now();
       await this.repo.saveProject(project);
     }
-    const repaired = repairProjectTaskGraph(project, workingTasks);
-    if (repaired.changed) {
-      project = repaired.project;
-      workingTasks = repaired.tasks;
+    let graphResult = repairProjectTaskGraph(project, workingTasks);
+    project = graphResult.project;
+    workingTasks = graphResult.tasks;
+    const taskIds = new Set(workingTasks.map((task) => task.task_id));
+    const validationIssues = taskGraphValidationIssues(project.task_graph_edges ?? [], taskIds);
+    if (validationIssues.length > 0) {
+      const interactive = startInteractiveGraphRecovery(project, workingTasks);
+      graphResult = {
+        project: interactive.project,
+        tasks: interactive.tasks,
+        changed: true,
+      };
+      project = graphResult.project;
+      workingTasks = graphResult.tasks;
+    } else if (project.graph_recovery_session?.active) {
+      const projectNext = { ...project };
+      delete projectNext.graph_recovery_session;
+      delete projectNext.task_graph_validation_issue;
+      project = projectNext;
+      graphResult = { ...graphResult, project, changed: true };
+    }
+    if (graphResult.changed) {
       project.updated_at = this.now();
       await this.repo.saveProject(project);
       for (const task of workingTasks) {
@@ -522,6 +560,37 @@ export class LocalEngine {
       }
     }
     return workingTasks;
+  }
+
+  async resolveGraphRecovery(projectId: string, resolution: GraphRecoveryResolution): Promise<Project> {
+    let project = await this.requireProject(projectId);
+    const session = project.graph_recovery_session;
+    if (!session?.active) throw new Error('No active graph recovery session for this project.');
+    const rawTasks = await this.repo.listTasks(projectId);
+    const taskIds = new Set(rawTasks.map((task) => task.task_id));
+    const resolved = resolveGraphRecoverySession(session, rawTasks, resolution);
+    const nextSession = resolved.session;
+    project = {
+      ...project,
+      task_graph_edges: nextSession.confirmed_edges,
+    };
+    if (nextSession.active) {
+      project.graph_recovery_session = nextSession;
+      project.task_graph_validation_issue = nextSession.pending?.issue
+        ?? 'Resolving task graph connections step by step…';
+    } else {
+      delete project.graph_recovery_session;
+      const issues = taskGraphValidationIssues(nextSession.confirmed_edges, taskIds);
+      if (issues[0]) project.task_graph_validation_issue = issues[0];
+      else delete project.task_graph_validation_issue;
+    }
+    project.updated_at = this.now();
+    await this.repo.saveProject(project);
+    for (const task of resolved.tasks) {
+      task.updated_at = this.now();
+      await this.repo.saveTask(task);
+    }
+    return project;
   }
 
   async updateProjectTaskGraph(projectId: string, edges: import('../core/task-graph').TaskGraphEdge[]): Promise<ProjectTask[]> {
@@ -1243,7 +1312,12 @@ export class LocalEngine {
   async listTaskMessages(
     taskId: string,
     options?: { syncAgent?: boolean; reconcileStatus?: boolean },
-  ): Promise<{ messages: ChatMessage[]; task: ProjectTask; artifacts: ChatArtifact[] }> {
+  ): Promise<{
+    messages: ChatMessage[];
+    task: ProjectTask;
+    artifacts: ChatArtifact[];
+    latestAgentRun?: AgentRunTextSource;
+  }> {
     const task = await this.requireTaskById(taskId);
     if (options?.syncAgent !== false) {
       if (task.cursor_agent_id) {
@@ -1252,16 +1326,31 @@ export class LocalEngine {
       }
       await this.importReferencedRuns({ scope: 'task', projectId: task.project_id, taskId });
     }
-    const messages = await this.repo.listTaskMessages(taskId);
+    let messages = await this.repo.listTaskMessages(taskId);
     let updated = await this.repo.getTask(taskId);
     if (!updated) updated = task;
     if (options?.reconcileStatus !== false) {
       updated = await this.reconcileTaskStatusWithLatestAgentRun(updated, messages);
+      messages = await this.repo.listTaskMessages(taskId);
+    }
+    let latestAgentRun: AgentRunTextSource | undefined;
+    if (updated.cursor_agent_id && updated.latest_run_id) {
+      try {
+        const live = await this.cursor.getRun(updated.cursor_agent_id, updated.latest_run_id);
+        latestAgentRun = {
+          status: normalizeAgentRunStatus(live.status),
+          result: live.result,
+          git: live.git,
+        };
+      } catch {
+        // Cursor temporarily unavailable; UI falls back to transcript-only heuristics.
+      }
     }
     return {
       messages,
       task: updated,
       artifacts: await this.repo.listArtifacts('task', taskId),
+      latestAgentRun,
     };
   }
 
@@ -1908,7 +1997,7 @@ export class LocalEngine {
       }
       const assistantAfter = existing.find((message) => message.run_id === run.id && message.role === 'assistant');
       const replyText = assistantAfter?.content ?? content;
-      if (!isWorkflowTerminalAgentReply(replyText, run)) continue;
+      if (!agentTurnMayCompleteWorkflow(replyText, { ...run, status: normalizeAgentRunStatus(run.status) })) continue;
       if (target.scope === 'task') {
         await this.applyTaskRun(target.taskId, run);
       }
@@ -2048,12 +2137,27 @@ export class LocalEngine {
   }
 
   private async applyTaskRun(taskId: string, run: CursorRun): Promise<void> {
+    const runStatus = normalizeAgentRunStatus(run.status);
     const task = await this.repo.getTask(taskId);
-    if (!task || task.latest_run_id !== run.id || run.status !== 'FINISHED') return;
+    if (!task || task.latest_run_id !== run.id || runStatus !== 'FINISHED') return;
     if (task.output_type === 'subproject') return;
+    const runSource: AgentRunTextSource = { ...run, status: runStatus };
     const transcript = await this.repo.listTaskMessages(taskId);
-    const assistant = transcript.find((message) => message.role === 'assistant' && message.run_id === run.id);
-    if (!assistant || !isWorkflowTerminalAgentReply(assistant.content, run)) return;
+    let assistant = transcript.find((message) => message.role === 'assistant' && message.run_id === run.id);
+    const replyText = assistant?.content ?? await this.assistantText(task.cursor_agent_id!, run);
+    if (!assistant && isSubstantiveAgentResponse(replyText, runSource)) {
+      const user = transcript.find((message) => message.role === 'user' && message.run_id === run.id);
+      assistant = await this.record({
+        scope: 'task',
+        project_id: task.project_id,
+        task_id: taskId,
+        role: 'assistant',
+        content: replyText,
+        run_id: run.id,
+        intent: user?.intent ?? 'chat',
+      });
+    }
+    if (!assistant || !agentTurnMayCompleteWorkflow(assistant.content, runSource)) return;
     const project = await this.requireProject(task.project_id);
     const base = project.starting_ref?.trim() || DEFAULT_DEVELOP_BRANCH;
     const existingOutput = task.output_type === 'code'
@@ -2254,9 +2358,11 @@ export class LocalEngine {
         && message.scope === 'task'
         && message.task_id === task.task_id,
     );
+    const runStatus = normalizeAgentRunStatus(run.status);
+    const runSource: AgentRunTextSource = { ...run, status: runStatus };
     const assistantText = assistant?.content ?? await this.assistantText(task.cursor_agent_id, run);
-    const terminalReply = isWorkflowTerminalAgentReply(assistantText, run);
-    if (!TERMINAL_RUN.has(run.status)) {
+    const terminalReply = agentTurnMayCompleteWorkflow(assistantText, runSource);
+    if (!isTerminalAgentRunStatus(runStatus)) {
       if (task.status !== 'DOING') {
         try {
           applyTaskStatusTransition(task, 'DOING', 'execute_or_send');
@@ -2276,8 +2382,8 @@ export class LocalEngine {
       }
       return task;
     }
-    if (run.status === 'FINISHED' && task.status === 'DOING') {
-      await this.applyTaskRun(task.task_id, run);
+    if (runStatus === 'FINISHED' && task.status === 'DOING') {
+      await this.applyTaskRun(task.task_id, { ...run, status: runStatus });
       const updated = await this.repo.getTask(task.task_id);
       return updated ?? task;
     }

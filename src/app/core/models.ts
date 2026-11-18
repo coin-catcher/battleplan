@@ -73,6 +73,10 @@ export interface Project {
   mnemosyne_base_path?: string;
   /** Unified task graph edges (tree, ordering, fork, join, cycle). */
   task_graph_edges?: import('./task-graph').TaskGraphEdge[];
+  /** Set when stored edges fail validation; project still loads for mindmap recovery. */
+  task_graph_validation_issue?: string;
+  /** Step-by-step graph recovery; mindmap shows tasks first, then confirmed edges only. */
+  graph_recovery_session?: import('./task-graph-interactive-recovery').GraphRecoverySession;
   /** Local/git storage layout version (see battleplan-storage.ts). */
   battleplan_storage_version?: number;
   /** Completed depth-first discovery graphs. */

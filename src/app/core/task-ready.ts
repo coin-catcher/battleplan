@@ -1,18 +1,25 @@
 import type { ProjectTask } from './models';
 import type { TaskGraphEdge } from './task-graph';
-import { ensureCritiqueBackEdges, prerequisitesMet, rebuildGraphEdgesFromLegacy } from './task-graph';
+import { ensureCritiqueBackEdges, prerequisitesMet } from './task-graph';
+import { graphEdgesForDisplay, taskGraphValidationIssues } from './task-graph-recovery';
 import type { Project } from './models';
 import { isDispatchableNodeKind } from './task-node-kind';
 import { independentBatch } from './execute-children';
 
 export function graphEdgesForRun(project: Project | null, tasks: ProjectTask[]): TaskGraphEdge[] {
   if (project?.task_graph_edges?.length) return project.task_graph_edges;
-  return rebuildGraphEdgesFromLegacy(tasks);
+  return graphEdgesForDisplay(project, tasks);
 }
 
-/** Graph edges for mindmap rendering (includes inferred critique rework back-edges). */
+/** Graph edges for mindmap rendering (includes inferred critique rework back-edges when valid). */
 export function graphEdgesForMindmap(project: Project | null, tasks: ProjectTask[]): TaskGraphEdge[] {
-  return ensureCritiqueBackEdges(tasks, graphEdgesForRun(project, tasks));
+  if (project?.graph_recovery_session?.active) {
+    return project.graph_recovery_session.confirmed_edges;
+  }
+  const base = graphEdgesForDisplay(project, tasks);
+  const taskIds = new Set(tasks.map((task) => task.task_id));
+  if (taskGraphValidationIssues(base, taskIds).length > 0) return base;
+  return ensureCritiqueBackEdges(tasks, base);
 }
 
 export function isAutoDispatchCandidate(
