@@ -28,5 +28,6 @@ describe('code-task-dod', () => {
     const policy = codeTaskAgentCompletionPolicy();
     expect(policy).toMatch(/lint/i);
     expect(policy).toMatch(/80%/);
+    expect(policy).toMatch(/build:electron/);
   });
 });
