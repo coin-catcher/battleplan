@@ -1,3 +1,4 @@
+import { codeTaskDefinitionOfDoneMarkdown } from './code-task-dod';
 import type { Project, ProjectTask } from './models';
 import type { TaskBrief } from './task-brief';
 import type { TaskNodeKind } from './task-node-kind';
@@ -62,6 +63,16 @@ export function applyWorkflowKindBriefDefaults(brief: TaskBrief, kind: WorkflowT
       next.scope = `Review commits and patterns across related tasks; consolidate design for "${title}".`;
       break;
     case 'code':
+      next.scope = [
+        `Implement "${title}" on the agent branch with tests and quality gates.`,
+        'After any code is created or changed, satisfy the mandatory definition of done before claiming completion.',
+      ].join(' ');
+      next.acceptance = [
+        'Code on the agent branch, committed, and pushed.',
+        codeTaskDefinitionOfDoneMarkdown(),
+      ].join('\n\n');
+      next.verify = 'Run lint, build, and unit tests with coverage; all definition-of-done items must pass.';
+      next.report = 'Summarize changes, branch name, and definition-of-done checklist with evidence.';
       break;
     default:
       break;
@@ -122,6 +133,9 @@ export function workflowExecutionPreamble(
       return [
         ...common,
         'Implement on the agent branch; commit and push; summarize changes for critique/upstream handoff.',
+        'After any code is created or changed, run lint, build, unit tests, and confirm coverage > 80% before you finish.',
+        codeTaskDefinitionOfDoneMarkdown(),
+        'Do not mark the task complete until every definition-of-done item passes.',
       ].join('\n\n');
     default:
       return common.join('\n\n');
@@ -130,7 +144,13 @@ export function workflowExecutionPreamble(
 
 export function workflowFeedbackPreamble(task: ProjectTask): string | undefined {
   const kind = inferWorkflowKindFromTask(task);
-  if (!kind || kind === 'code') return undefined;
+  if (!kind) return undefined;
+  if (kind === 'code') {
+    return [
+      'Incorporate the user feedback on the existing agent branch, commit, and push. Do not create or update pull requests.',
+      'Re-check the mandatory definition of done after your changes (lint, build, tests, coverage > 80%); report pass/fail.',
+    ].join(' ');
+  }
   return [
     `Continue the ${kind} workflow (grilling round).`,
     'Incorporate the user message, update distilled understanding, and ask any new clarifying questions.',
@@ -157,7 +177,7 @@ export function workflowHintForTask(
     case 'architect':
       return 'Architect: review cross-task commits and align design before more code tasks run.';
     case 'code':
-      return undefined;
+      return 'Code: after changes, lint/build/tests must pass and coverage must exceed 80% before completion.';
     default:
       return undefined;
   }
