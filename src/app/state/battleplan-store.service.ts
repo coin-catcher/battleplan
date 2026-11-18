@@ -25,9 +25,11 @@ import { fieldsFromTaskEditorKind } from '../core/task-editor-kind';
 import {
   layoutMindmap,
   MINDMAP_PLACEMENT_VERSION,
+  placeTaskOnMindmapForTask,
   positionConnectedNode,
   type CardinalDirection,
 } from '../core/mindmap';
+import { mindmapShapeForTask } from '../core/mindmap-shape';
 import {
   findLastAssistantTaskGraph,
   generateTasksSourceTaskId,
@@ -1015,8 +1017,12 @@ export class BattleplanStore {
       }
       const task = this.tasks().find((item) => item.task_id === id);
       if (!task) return;
-      this.replaceTask({ ...task, map_x, map_y });
-      const updated = await this.api.updateTask(task.project_id, task.task_id, { map_x, map_y });
+      const placed = placeTaskOnMindmapForTask(x, y, task);
+      this.replaceTask({ ...task, map_x: placed.x, map_y: placed.y });
+      const updated = await this.api.updateTask(task.project_id, task.task_id, {
+        map_x: placed.x,
+        map_y: placed.y,
+      });
       this.replaceTask(updated);
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : 'Could not save the node position.');
@@ -1677,13 +1683,17 @@ export class BattleplanStore {
     );
     const source = layout.nodes.find((node) => node.id === input.sourceId);
     if (!source) return null;
-    const placement = positionConnectedNode(source, input.direction);
-    const map_x = Math.round(placement.x);
-    const map_y = Math.round(placement.y);
     const depends_on = input.sourceKind === 'task' ? input.sourceId : undefined;
     const taskFields = input.taskKind
       ? fieldsFromTaskEditorKind(input.taskKind)
       : { output_type: input.output_type ?? 'research' as OutputType };
+    const newShape = mindmapShapeForTask({
+      output_type: taskFields.output_type,
+      node_kind: taskFields.node_kind,
+    });
+    const placement = positionConnectedNode(source, input.direction, 120, newShape);
+    const map_x = placement.x;
+    const map_y = placement.y;
     this.stopWatch();
     let taskId = '';
     await this.run(async () => {

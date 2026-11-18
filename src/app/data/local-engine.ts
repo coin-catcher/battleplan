@@ -32,6 +32,7 @@ import {
   pickTaskAgentBranch,
   wrapAgentRunPrompt,
 } from '../core/agent-branch';
+import { placeTaskOnMindmapForTask } from '../core/mindmap';
 import {
   compareBranches,
   createAndMergePullRequest,
@@ -707,8 +708,17 @@ export class LocalEngine {
       created_at: timestamp,
       updated_at: timestamp,
     };
-    if (input.map_x !== undefined) task.map_x = input.map_x;
-    if (input.map_y !== undefined) task.map_y = input.map_y;
+    if (input.map_x !== undefined && input.map_y !== undefined) {
+      const placed = placeTaskOnMindmapForTask(input.map_x, input.map_y, {
+        output_type: outputType,
+        node_kind: input.node_kind,
+      });
+      task.map_x = placed.x;
+      task.map_y = placed.y;
+    } else {
+      if (input.map_x !== undefined) task.map_x = input.map_x;
+      if (input.map_y !== undefined) task.map_y = input.map_y;
+    }
     if (input.node_kind !== undefined) task.node_kind = input.node_kind;
     if (input.lifecycle_phase !== undefined) task.lifecycle_phase = input.lifecycle_phase;
     const project = await this.requireProject(projectId);
@@ -1055,8 +1065,18 @@ export class LocalEngine {
         void this.autoDispatchReadyTasks(projectId);
       }
     }
-    if (patch.map_x !== undefined) task.map_x = patch.map_x;
-    if (patch.map_y !== undefined) task.map_y = patch.map_y;
+    if (patch.map_x !== undefined || patch.map_y !== undefined) {
+      const x = patch.map_x ?? task.map_x;
+      const y = patch.map_y ?? task.map_y;
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        const placed = placeTaskOnMindmapForTask(x as number, y as number, task);
+        task.map_x = placed.x;
+        task.map_y = placed.y;
+      } else {
+        if (patch.map_x !== undefined) task.map_x = patch.map_x;
+        if (patch.map_y !== undefined) task.map_y = patch.map_y;
+      }
+    }
     if (patch.research_agent_id !== undefined) {
       const next = patch.research_agent_id.trim();
       if (next !== (task.research_agent_id ?? '')) changes.push('Research agent updated.');

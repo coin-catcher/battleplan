@@ -149,10 +149,97 @@ export function pickCardinalEdge(
   return best;
 }
 
+/** Inset bounds where task node *centers* may sit (entire shape stays inside canvas). */
+export function mindmapCanvasPlacementBounds(canvasSpan = mindmapCanvasWorldSpan()): WorldRect {
+  const margin = MINDMAP_CANVAS_MARGIN_PX;
+  return {
+    left: margin,
+    top: margin,
+    right: canvasSpan - margin,
+    bottom: canvasSpan - margin,
+  };
+}
+
+export function mindmapNodeCenterFitsCanvas(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  canvasSpan = mindmapCanvasWorldSpan(),
+): boolean {
+  const bounds = mindmapNodeBounds({
+    id: '',
+    kind: 'task',
+    shape: 'code',
+    label: '',
+    x,
+    y,
+    width,
+    height,
+  });
+  const inner = mindmapCanvasPlacementBounds(canvasSpan);
+  return bounds.left >= inner.left
+    && bounds.right <= inner.right
+    && bounds.top >= inner.top
+    && bounds.bottom <= inner.bottom;
+}
+
+/**
+ * Single entry point for persisting or computing a task center on the mindmap.
+ * Clamps so the full task shape stays inside the world canvas.
+ */
+export function placeTaskOnMindmap(
+  x: number,
+  y: number,
+  size: { width: number; height: number },
+  canvasSpan = mindmapCanvasWorldSpan(),
+): { x: number; y: number } {
+  const inner = mindmapCanvasPlacementBounds(canvasSpan);
+  const halfW = size.width / 2;
+  const halfH = size.height / 2;
+  const minCx = inner.left + halfW;
+  const maxCx = inner.right - halfW;
+  const minCy = inner.top + halfH;
+  const maxCy = inner.bottom - halfH;
+  const cx = minCx > maxCx
+    ? canvasSpan / 2
+    : Math.min(maxCx, Math.max(minCx, x));
+  const cy = minCy > maxCy
+    ? canvasSpan / 2
+    : Math.min(maxCy, Math.max(minCy, y));
+  return { x: Math.round(cx), y: Math.round(cy) };
+}
+
+export function placeTaskOnMindmapForTask(
+  x: number,
+  y: number,
+  task: Pick<ProjectTask, 'output_type' | 'node_kind'>,
+  canvasSpan = mindmapCanvasWorldSpan(),
+): { x: number; y: number } {
+  const shape = mindmapShapeForTask(task);
+  const size = mindmapNodeSize(shape);
+  return placeTaskOnMindmap(x, y, size, canvasSpan);
+}
+
+function clampMindmapTaskNodesInPlace(nodes: MindmapNode[], canvasSpan: number): void {
+  for (const node of nodes) {
+    if (node.kind !== 'task') continue;
+    const placed = placeTaskOnMindmap(
+      node.x,
+      node.y,
+      { width: node.width, height: node.height },
+      canvasSpan,
+    );
+    node.x = placed.x;
+    node.y = placed.y;
+  }
+}
+
 export function positionConnectedNode(
   source: MindmapNode,
   direction: CardinalDirection,
   gapPx = 120,
+  newTaskShape: MindmapShape = 'code',
 ): { x: number; y: number } {
   const anchor = cardinalAnchor(source, direction);
   const { ux, uy } = CARDINAL_UNIT[direction];
@@ -160,7 +247,8 @@ export function positionConnectedNode(
   const halfW = circular ? source.width / 2 : TASK_WIDTH / 2;
   const halfH = circular ? source.height / 2 : TASK_HEIGHT / 2;
   const outward = Math.max(halfW, halfH) + gapPx + (direction === 'north' || direction === 'south' ? TASK_HEIGHT / 2 : TASK_WIDTH / 2);
-  return { x: anchor.x + ux * outward, y: anchor.y + uy * outward };
+  const size = mindmapNodeSize(newTaskShape);
+  return placeTaskOnMindmap(anchor.x + ux * outward, anchor.y + uy * outward, size);
 }
 
 /** Convert a pointer position inside map-stage to layout world coordinates. */
@@ -359,20 +447,25 @@ export function layoutMindmap(
     const pinned = Number.isFinite(task.map_x) && Number.isFinite(task.map_y);
     const shape: MindmapShape = mindmapShapeForTask(task);
     const size = mindmapNodeSize(shape);
+    const rawX = pinned ? task.map_x! : projectX + Math.cos(angle) * radius;
+    const rawY = pinned ? task.map_y! : projectY + Math.sin(angle) * radius;
+    const placed = placeTaskOnMindmap(rawX, rawY, size, minCanvasSpan);
     nodes.push({
       id: task.task_id,
       kind: 'task',
       shape,
       label: task.title,
       status: task.status,
-      x: pinned ? task.map_x! : projectX + Math.cos(angle) * radius,
-      y: pinned ? task.map_y! : projectY + Math.sin(angle) * radius,
+      x: placed.x,
+      y: placed.y,
       width: size.width,
       height: size.height,
     });
   }
   separateUnpinned(nodes, tasks);
+  clampMindmapTaskNodesInPlace(nodes, minCanvasSpan);
   applyMindmapCanvasFrame(nodes, minCanvasSpan);
+  clampMindmapTaskNodesInPlace(nodes, minCanvasSpan);
 
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const project = nodeById.get('project');
