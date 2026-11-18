@@ -70,8 +70,29 @@ export function hasPersistedMindmapPin(mapX: number | undefined, mapY: number | 
   return Number.isFinite(mapX) && Number.isFinite(mapY) && !isMindmapPinSentinel(mapX, mapY);
 }
 
+/** Coerce persisted / API map coords to finite numbers (reject NaN, strings, sentinel). */
+export function normalizeMindmapCoordinate(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+export function resolvePersistedMindmapPin(
+  mapX: unknown,
+  mapY: unknown,
+): { x: number; y: number } | undefined {
+  const x = normalizeMindmapCoordinate(mapX);
+  const y = normalizeMindmapCoordinate(mapY);
+  if (x === undefined || y === undefined) return undefined;
+  if (isMindmapPinSentinel(x, y)) return undefined;
+  return { x, y };
+}
+
 export function taskHasPersistedMindmapPin(task: Pick<ProjectTask, 'map_x' | 'map_y'>): boolean {
-  return hasPersistedMindmapPin(task.map_x, task.map_y);
+  return resolvePersistedMindmapPin(task.map_x, task.map_y) !== undefined;
 }
 
 export function projectOrTasksNeedMindmapRelayout(
@@ -449,9 +470,10 @@ export function layoutMindmap(
   });
 
   const defaultCenter = mindmapCanvasCenter();
-  const projectX = projectPin?.x ?? defaultCenter.x;
-  const projectY = projectPin?.y ?? defaultCenter.y;
+  const projectX = normalizeMindmapCoordinate(projectPin?.x) ?? defaultCenter.x;
+  const projectY = normalizeMindmapCoordinate(projectPin?.y) ?? defaultCenter.y;
   const minCanvasSpan = mindmapCanvasWorldSpan();
+  const usedPinKeys = new Set<string>();
   const nodes: MindmapNode[] = [{
     id: 'project',
     kind: 'project',
@@ -466,11 +488,21 @@ export function layoutMindmap(
   for (const task of tasks) {
     const radius = 200 + depthOf(task.task_id) * 150;
     const angle = angleOf.get(task.task_id) ?? 0;
-    const pinned = taskHasPersistedMindmapPin(task);
+    const pin = resolvePersistedMindmapPin(task.map_x, task.map_y);
+    let pinned = pin !== undefined;
+    if (pinned && pin) {
+      const pinKey = `${pin.x},${pin.y}`;
+      if (usedPinKeys.has(pinKey)) {
+        pinned = false;
+      } else {
+        usedPinKeys.add(pinKey);
+      }
+    }
     const shape: MindmapShape = mindmapShapeForTask(task);
     const size = mindmapNodeSize(shape);
-    const rawX = pinned ? task.map_x! : projectX + Math.cos(angle) * radius;
-    const rawY = pinned ? task.map_y! : projectY + Math.sin(angle) * radius;
+    const pinCoords = pinned && pin ? pin : null;
+    const rawX = pinCoords ? pinCoords.x : projectX + Math.cos(angle) * radius;
+    const rawY = pinCoords ? pinCoords.y : projectY + Math.sin(angle) * radius;
     const placed = placeTaskOnMindmap(rawX, rawY, size, minCanvasSpan);
     nodes.push({
       id: task.task_id,
@@ -522,11 +554,52 @@ export function layoutMindmap(
       }
     }
   }
+  sanitizeMindmapLayout(nodes, edges);
+
   return {
     width: minCanvasSpan,
     height: minCanvasSpan,
     nodes,
     edges,
+  };
+}
+
+/** Ensure SVG line attrs and node positions are finite (avoids setAttribute NaN errors). */
+export function sanitizeMindmapLayout(nodes: MindmapNode[], edges: MindmapEdge[]): void {
+  const center = mindmapCanvasCenter();
+  for (const node of nodes) {
+    if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) {
+      node.x = center.x;
+      node.y = center.y;
+    }
+    if (!Number.isFinite(node.width) || node.width <= 0) {
+      node.width = TASK_WIDTH;
+    }
+    if (!Number.isFinite(node.height) || node.height <= 0) {
+      node.height = TASK_HEIGHT;
+    }
+  }
+  for (const edge of edges) {
+    if (!Number.isFinite(edge.x1)) edge.x1 = center.x;
+    if (!Number.isFinite(edge.y1)) edge.y1 = center.y;
+    if (!Number.isFinite(edge.x2)) edge.x2 = center.x;
+    if (!Number.isFinite(edge.y2)) edge.y2 = center.y;
+  }
+}
+
+/** Attribute strings safe for SVG `<line [attr.x1]>` bindings. */
+export function mindmapEdgeSvgAttributes(edge: MindmapEdge): {
+  x1: string;
+  y1: string;
+  x2: string;
+  y2: string;
+} {
+  const round = (value: number) => (Number.isFinite(value) ? String(Math.round(value)) : '0');
+  return {
+    x1: round(edge.x1),
+    y1: round(edge.y1),
+    x2: round(edge.x2),
+    y2: round(edge.y2),
   };
 }
 
@@ -584,9 +657,14 @@ function drawEdge(
 ): MindmapEdge {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
-  const length = Math.hypot(dx, dy) || 1;
-  const ux = dx / length;
-  const uy = dy / length;
+  let length = Math.hypot(dx, dy);
+  let ux = length > 1e-6 ? dx / length : 1;
+  let uy = length > 1e-6 ? dy / length : 0;
+  if (!Number.isFinite(ux) || !Number.isFinite(uy)) {
+    ux = 1;
+    uy = 0;
+    length = 1;
+  }
   const start = borderPoint(from, ux, uy);
   const end = borderPoint(to, -ux, -uy);
   return {
@@ -602,25 +680,33 @@ function drawEdge(
 }
 
 function borderPoint(node: MindmapNode, ux: number, uy: number): { x: number; y: number } {
+  let dirX = ux;
+  let dirY = uy;
+  if (!Number.isFinite(dirX) || !Number.isFinite(dirY) || (dirX === 0 && dirY === 0)) {
+    dirX = 1;
+    dirY = 0;
+  }
+  const baseX = Number.isFinite(node.x) ? node.x : mindmapCanvasCenter().x;
+  const baseY = Number.isFinite(node.y) ? node.y : mindmapCanvasCenter().y;
   if (node.shape === 'project' || node.shape === 'subproject') {
     const radius = node.width / 2;
-    return { x: node.x + ux * radius, y: node.y + uy * radius };
+    return { x: baseX + dirX * radius, y: baseY + dirY * radius };
   }
   const halfWidth = node.width / 2;
   const halfHeight = node.height / 2;
   if (node.shape === 'decision') {
-    const denom = Math.abs(ux) / halfWidth + Math.abs(uy) / halfHeight;
-    const scale = denom > 0 ? 1 / denom : 0;
-    return { x: node.x + ux * scale, y: node.y + uy * scale };
+    const denom = Math.abs(dirX) / halfWidth + Math.abs(dirY) / halfHeight;
+    const scale = denom > 0 ? 1 / denom : halfWidth;
+    return { x: baseX + dirX * scale, y: baseY + dirY * scale };
   }
   if (node.shape === 'architect') {
-    const scaleX = ux === 0 ? Number.POSITIVE_INFINITY : halfWidth / Math.abs(ux);
-    const scaleY = uy === 0 ? Number.POSITIVE_INFINITY : (halfHeight * 0.92) / Math.abs(uy);
+    const scaleX = dirX === 0 ? halfWidth : halfWidth / Math.abs(dirX);
+    const scaleY = dirY === 0 ? halfHeight * 0.92 : (halfHeight * 0.92) / Math.abs(dirY);
     const scale = Math.min(scaleX, scaleY);
-    return { x: node.x + ux * scale, y: node.y + uy * scale };
+    return { x: baseX + dirX * scale, y: baseY + dirY * scale };
   }
-  const scaleX = ux === 0 ? Number.POSITIVE_INFINITY : halfWidth / Math.abs(ux);
-  const scaleY = uy === 0 ? Number.POSITIVE_INFINITY : halfHeight / Math.abs(uy);
+  const scaleX = dirX === 0 ? halfWidth : halfWidth / Math.abs(dirX);
+  const scaleY = dirY === 0 ? halfHeight : halfHeight / Math.abs(dirY);
   const scale = Math.min(scaleX, scaleY);
-  return { x: node.x + ux * scale, y: node.y + uy * scale };
+  return { x: baseX + dirX * scale, y: baseY + dirY * scale };
 }
