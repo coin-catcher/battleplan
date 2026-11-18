@@ -191,16 +191,17 @@
         </nav>
         <p class="map-graph-recovery-notice" role="status">
           @if (graphRecoverySession()?.active) {
-            Graph recovery:
-            {{ graphRecoverySession()!.revealed_task_ids?.length ?? 0 }}
-            /
-            {{ ((graphRecoverySession()!.revealed_task_ids?.length ?? 0) + (graphRecoverySession()!.pending_task_ids?.length ?? 0)) }}
-            tasks visible,
-            {{ graphRecoverySession()!.confirmed_edges.length }} link(s) confirmed.
+            @if (graphRecoverySession()?.phase === 'connected') {
+              Phase 1 — connected graph:
+            } @else {
+              Phase 2 — orphaned tasks ({{ graphRecoverySession()!.orphaned_task_ids?.length ?? 0 }} on disk):
+            }
+            {{ graphRecoverySession()!.revealed_task_ids?.length ?? 0 }} on map,
+            {{ graphRecoverySession()!.confirmed_edges.length }} link(s).
             @if (graphRecoverySession()?.paused) {
               Paused for your input (see dialog).
             } @else {
-              Adding a task every 5 seconds in execution order.
+              Next node in 5 seconds.
             }
           } @else {
             @if (store.project()?.task_graph_validation_issue; as graphIssue) {
@@ -1681,22 +1682,24 @@
   <div class="modal-backdrop graph-recovery-backdrop" role="presentation">
     <section class="modal graph-recovery-modal" role="dialog" aria-labelledby="graph-recovery-title">
       <header class="panel-head">
-        @if (pending.kind === 'orphan') {
-          <h2 id="graph-recovery-title">Attach task to project graph</h2>
-          <p>{{ resolveTaskTitle(pending.task_id) }} is not linked back to the project. Pick a parent from what is on disk.</p>
+        @if (pending.kind === 'orphan' || pending.kind === 'orphan_review') {
+          <h2 id="graph-recovery-title">
+            {{ pending.kind === 'orphan_review' ? 'Orphaned task review' : 'Attach task to project graph' }}
+          </h2>
+          <p>{{ resolveTaskTitle(pending.task_id) }} — connect it to the recovered graph using on-disk details below.</p>
         } @else {
           <h2 id="graph-recovery-title">Confirm task graph connection</h2>
           <p>Recovery paused. The mindmap behind this dialog shows tasks plus links restored so far.</p>
         }
       </header>
       <p class="banner warn" role="alert">{{ pending.issue }}</p>
-      @if (pending.kind === 'orphan') {
+      @if (pending.kind === 'orphan' || pending.kind === 'orphan_review') {
         <label class="field">
-          <span>Parent task</span>
+          <span>Connect to task</span>
           <select [(ngModel)]="graphRecoveryParentDraft" name="graphRecoveryParentDraft">
             <option value="project">Project root</option>
             @for (task of store.tasks(); track task.task_id) {
-              @if (graphRecoverySession()?.revealed_task_ids?.includes(task.task_id)) {
+              @if (graphRecoverySession()?.revealed_task_ids?.includes(task.task_id) && task.task_id !== pending.task_id) {
                 <option [value]="task.task_id">{{ task.title }}</option>
               }
             }
@@ -1707,7 +1710,10 @@
           <textarea class="graph-recovery-snapshot" readonly rows="14">{{ pending.disk_snapshot }}</textarea>
         </label>
         <div class="modal-actions">
-          <button type="button" class="primary" (click)="attachGraphRecoveryOrphan()">Attach and continue</button>
+          @if (pending.kind === 'orphan_review') {
+            <button type="button" class="ghost" (click)="discardGraphRecoveryOrphan()">Do Not Add</button>
+          }
+          <button type="button" class="primary" (click)="attachGraphRecoveryOrphan()">Connect and continue</button>
         </div>
       } @else {
         <dl class="graph-recovery-edge">

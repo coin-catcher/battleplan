@@ -2675,11 +2675,20 @@ export class AppComponent implements OnInit {
 
   async attachGraphRecoveryOrphan(): Promise<void> {
     const pending = this.graphRecoverySession()?.pending;
-    if (!pending || pending.kind !== 'orphan') return;
+    if (!pending || (pending.kind !== 'orphan' && pending.kind !== 'orphan_review')) return;
     await this.store.resolveGraphRecovery({
       action: 'attach',
       task_id: pending.task_id,
       parent_task_id: this.graphRecoveryParentDraft,
+    });
+  }
+
+  discardGraphRecoveryOrphan(): void {
+    const pending = this.graphRecoverySession()?.pending;
+    if (!pending || pending.kind !== 'orphan_review') return;
+    void this.store.resolveGraphRecovery({
+      action: 'discard',
+      task_id: pending.task_id,
     });
   }
 

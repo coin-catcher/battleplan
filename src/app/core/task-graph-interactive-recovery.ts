@@ -13,7 +13,7 @@ import {
   buildTaskRecoveryDiskSnapshot,
   mergeGraphRecoveryDiskHints,
 } from './graph-recovery-disk';
-import { canRevealTaskOnMindmap } from './graph-recovery-reachability';
+import { canRevealTaskOnMindmap, partitionTasksForRecovery } from './graph-recovery-reachability';
 
 export type GraphRecoveryPending =
   | {
@@ -27,21 +27,35 @@ export type GraphRecoveryPending =
       task_id: string;
       issue: string;
       disk_snapshot: string;
+    }
+  | {
+      kind: 'orphan_review';
+      task_id: string;
+      issue: string;
+      disk_snapshot: string;
     };
 
 export type GraphRecoveryMode = 'staged' | 'edge';
+export type GraphRecoveryPhase = 'connected' | 'orphaned';
 
 export interface GraphRecoverySession {
   active: boolean;
   mode: GraphRecoveryMode;
+  phase?: GraphRecoveryPhase;
   confirmed_edges: TaskGraphEdge[];
   remaining_candidates: TaskGraphEdge[];
   skipped: TaskGraphEdge[];
   pending?: GraphRecoveryPending;
   /** Staged recovery: tasks shown on the mindmap in execution order. */
   revealed_task_ids?: string[];
-  /** Task ids still waiting to appear (execution order). */
+  /** Task ids still waiting to appear in the current phase. */
   pending_task_ids?: string[];
+  /** Tasks linked to the project/subproject graph on disk. */
+  connected_task_ids?: string[];
+  /** On-disk tasks not in the connected component. */
+  orphaned_task_ids?: string[];
+  /** Orphans the user chose not to add. */
+  discarded_task_ids?: string[];
   /** Full edge set read from local project + task fields. */
   source_edge_pool?: TaskGraphEdge[];
   auto_advance_ms?: number;
@@ -154,18 +168,68 @@ export function initStagedGraphRecoverySession(
     ...collectRecoveryCandidateEdges(project, hints.tasks),
     ...hints.edges,
   ]);
-  const order = executionOrderTaskIds(hints.tasks, pool);
+  const partition = partitionTasksForRecovery(hints.tasks, pool);
+  const connectedTasks = hints.tasks.filter((task) => partition.connected.includes(task.task_id));
+  const order = executionOrderTaskIds(connectedTasks, pool);
   return {
     active: true,
     mode: 'staged',
+    phase: 'connected',
     confirmed_edges: [],
     remaining_candidates: [],
     skipped: [],
     revealed_task_ids: [],
     pending_task_ids: order,
+    connected_task_ids: partition.connected,
+    orphaned_task_ids: partition.orphaned,
+    discarded_task_ids: [],
     source_edge_pool: pool,
     auto_advance_ms: 5000,
     paused: false,
+  };
+}
+
+function transitionToOrphanPhase(session: GraphRecoverySession): GraphRecoverySession {
+  const orphans = session.orphaned_task_ids ?? [];
+  if (orphans.length === 0) {
+    return { ...session, active: false, phase: 'orphaned', pending: undefined, paused: false };
+  }
+  return {
+    ...session,
+    active: true,
+    phase: 'orphaned',
+    pending_task_ids: [...orphans],
+    pending: undefined,
+    paused: false,
+  };
+}
+
+function stagedOrphanReviewStep(
+  project: Project,
+  session: GraphRecoverySession,
+  tasks: ProjectTask[],
+): GraphRecoverySession {
+  const pendingIds = [...(session.pending_task_ids ?? [])];
+  if (pendingIds.length === 0) {
+    return { ...session, active: false, paused: false, pending: undefined };
+  }
+  const nextTaskId = pendingIds.shift()!;
+  const revealed = new Set(session.revealed_task_ids ?? []);
+  revealed.add(nextTaskId);
+  const task = tasks.find((item) => item.task_id === nextTaskId);
+  return {
+    ...session,
+    revealed_task_ids: [...revealed],
+    pending_task_ids: pendingIds,
+    paused: true,
+    pending: {
+      kind: 'orphan_review',
+      task_id: nextTaskId,
+      issue: 'This task was not part of the connected project graph on disk. Connect it to an existing task or choose Do Not Add.',
+      disk_snapshot: task
+        ? buildTaskRecoveryDiskSnapshot(project, task, tasks)
+        : '{}',
+    },
   };
 }
 
@@ -176,41 +240,32 @@ export function stagedGraphRecoveryStep(
   tasks: ProjectTask[],
 ): GraphRecoverySession {
   if (session.mode !== 'staged' || !session.active || session.pending || session.paused) return session;
+
+  if (session.phase === 'orphaned') {
+    return stagedOrphanReviewStep(project, session, tasks);
+  }
+
   const revealed = new Set(session.revealed_task_ids ?? []);
   const pendingIds = [...(session.pending_task_ids ?? [])];
+  const pool = session.source_edge_pool ?? [];
+
   if (pendingIds.length === 0) {
     let finished = advanceGraphRecoverySession(
       { ...session, pending: undefined },
       tasks,
       revealed,
     );
-    if (!finished.pending && finished.remaining_candidates.length === 0) {
-      finished = { ...finished, active: false };
+    if (finished.pending) {
+      finished.paused = true;
+      return finished;
     }
-    return finished;
+  return transitionToOrphanPhase(finished);
   }
 
   const nextTaskId = pendingIds[0]!;
-  const pool = session.source_edge_pool ?? [];
   if (!canRevealTaskOnMindmap(nextTaskId, tasks, pool, revealed, session.confirmed_edges)) {
-    const task = tasks.find((item) => item.task_id === nextTaskId);
-    if (!task) {
-      pendingIds.shift();
-      return stagedGraphRecoveryStep(project, {
-        ...session,
-        pending_task_ids: pendingIds,
-      }, tasks);
-    }
-    return {
-      ...session,
-      paused: true,
-      pending: {
-        kind: 'orphan',
-        task_id: nextTaskId,
-        issue: 'This task is not linked back to the project or subproject. Choose a parent or attach it as a project root.',
-        disk_snapshot: buildTaskRecoveryDiskSnapshot(project, task, tasks),
-      },
-    };
+    pendingIds.shift();
+    return stagedGraphRecoveryStep(project, { ...session, pending_task_ids: pendingIds }, tasks);
   }
 
   pendingIds.shift();
@@ -236,8 +291,8 @@ export function stagedGraphRecoveryStep(
     next.paused = true;
     return next;
   }
-  if ((next.pending_task_ids ?? []).length === 0 && next.remaining_candidates.length === 0) {
-    next.active = false;
+  if ((next.pending_task_ids ?? []).length === 0 && next.remaining_candidates.length === 0 && !next.pending) {
+    return transitionToOrphanPhase(next);
   }
   return next;
 }
@@ -472,22 +527,41 @@ export function finalizeGraphRecoveryProject(
 
 export type GraphRecoveryResolution =
   | { action: 'apply' | 'skip'; edge?: TaskGraphEdge }
-  | { action: 'attach'; task_id: string; parent_task_id: string };
+  | { action: 'attach'; task_id: string; parent_task_id: string }
+  | { action: 'discard'; task_id: string };
 
 export function resolveGraphRecoverySession(
   session: GraphRecoverySession,
   tasks: ProjectTask[],
   resolution: GraphRecoveryResolution,
 ): { session: GraphRecoverySession; tasks: ProjectTask[] } {
-  if (!session.pending && (resolution.action === 'skip' || resolution.action === 'attach')) {
+  if (!session.pending && (resolution.action === 'skip' || resolution.action === 'attach' || resolution.action === 'discard')) {
     return { session, tasks };
   }
 
   let next: GraphRecoverySession = { ...session, pending: undefined, paused: false };
   const pendingEdge = session.pending?.kind === 'edge' ? session.pending.edge : undefined;
 
+  if (resolution.action === 'discard') {
+    const review = session.pending?.kind === 'orphan_review' ? session.pending : null;
+    if (!review || review.task_id !== resolution.task_id) {
+      return { session, tasks };
+    }
+    const revealed = (next.revealed_task_ids ?? []).filter((id) => id !== review.task_id);
+    const discarded = [...(next.discarded_task_ids ?? []), review.task_id];
+    next = {
+      ...next,
+      revealed_task_ids: revealed,
+      discarded_task_ids: discarded,
+      paused: false,
+    };
+    return { session: next, tasks };
+  }
+
   if (resolution.action === 'attach') {
-    const orphan = session.pending?.kind === 'orphan' ? session.pending : null;
+    const orphan = session.pending?.kind === 'orphan' || session.pending?.kind === 'orphan_review'
+      ? session.pending
+      : null;
   if (!orphan || orphan.task_id !== resolution.task_id) {
       return { session, tasks };
     }

@@ -28,6 +28,29 @@ function task(id: string, partial: Partial<ProjectTask> = {}): ProjectTask {
 }
 
 describe('task-graph-interactive-recovery', () => {
+  it('starts in connected phase with orphaned ids stored separately', () => {
+    const root = task('root', { dependencies: ['child'] });
+    const child = task('child');
+    const stray = task('stray', {}, 2);
+    const project: Project = {
+      project_id: 'p1',
+      title: 'P',
+      initial_prompt: '',
+      cursor_chat_link: '',
+      dar: '',
+      status: 'TODO',
+      created_at: '',
+      updated_at: '',
+      task_graph_edges: [
+        { edge_id: 'tree:root->child', from_task_id: 'root', to_task_id: 'child', kind: 'tree' },
+      ],
+    };
+    const session = initStagedGraphRecoverySession(project, [root, child, stray]);
+    expect(session.phase).toBe('connected');
+    expect(session.orphaned_task_ids).toEqual(['stray']);
+    expect(session.connected_task_ids).toContain('root');
+  });
+
   it('confirms safe edges automatically and pauses on an accidental cycle', () => {
     const a = task('a', { sibling_dependencies: ['b'] });
     const b = task('b');

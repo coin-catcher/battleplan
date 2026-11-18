@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectTask } from './models';
-import { canRevealTaskOnMindmap } from './graph-recovery-reachability';
+import { canRevealTaskOnMindmap, partitionTasksForRecovery } from './graph-recovery-reachability';
 
 function task(id: string, extra: Partial<ProjectTask> = {}): ProjectTask {
   return {
@@ -23,6 +23,18 @@ describe('graph-recovery-reachability', () => {
     const root = task('root');
     const pool = [{ edge_id: 't', from_task_id: 'root', to_task_id: 'child', kind: 'tree' as const }];
     expect(canRevealTaskOnMindmap('root', [root], pool, new Set(), [])).toBe(true);
+  });
+
+  it('partitions connected vs orphaned tasks from disk', () => {
+    const root = task('root', { dependencies: ['child'] });
+    const child = task('child');
+    const stray = task('stray');
+    const pool = [
+      { edge_id: 't', from_task_id: 'root', to_task_id: 'child', kind: 'tree' as const },
+    ];
+    const part = partitionTasksForRecovery([root, child, stray], pool);
+    expect(part.connected.sort()).toEqual(['child', 'root']);
+    expect(part.orphaned).toEqual(['stray']);
   });
 
   it('blocks orphans until a parent is revealed', () => {
