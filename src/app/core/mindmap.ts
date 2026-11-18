@@ -57,8 +57,30 @@ export const PROJECT_RADIUS = 68;
 export const TASK_WIDTH = 156;
 export const TASK_HEIGHT = 64;
 /** Bumped when persisted map coordinates are re-centered on the world canvas. */
-export const MINDMAP_PLACEMENT_VERSION = 2;
+export const MINDMAP_PLACEMENT_VERSION = 3;
 export const MINDMAP_CANVAS_MARGIN_PX = 80;
+
+/** Legacy rows used (0,0) before placement migration — not a real user pin. */
+export function isMindmapPinSentinel(mapX: number | undefined, mapY: number | undefined): boolean {
+  return mapX === 0 && mapY === 0;
+}
+
+/** True when stored coordinates should drive layout (not auto-spiral). */
+export function hasPersistedMindmapPin(mapX: number | undefined, mapY: number | undefined): boolean {
+  return Number.isFinite(mapX) && Number.isFinite(mapY) && !isMindmapPinSentinel(mapX, mapY);
+}
+
+export function taskHasPersistedMindmapPin(task: Pick<ProjectTask, 'map_x' | 'map_y'>): boolean {
+  return hasPersistedMindmapPin(task.map_x, task.map_y);
+}
+
+export function projectOrTasksNeedMindmapRelayout(
+  project: Pick<import('./models').Project, 'map_x' | 'map_y'>,
+  tasks: Pick<ProjectTask, 'map_x' | 'map_y'>[],
+): boolean {
+  if (isMindmapPinSentinel(project.map_x, project.map_y)) return true;
+  return tasks.some((task) => isMindmapPinSentinel(task.map_x, task.map_y));
+}
 
 export type CardinalDirection = 'north' | 'south' | 'east' | 'west';
 
@@ -444,7 +466,7 @@ export function layoutMindmap(
   for (const task of tasks) {
     const radius = 200 + depthOf(task.task_id) * 150;
     const angle = angleOf.get(task.task_id) ?? 0;
-    const pinned = Number.isFinite(task.map_x) && Number.isFinite(task.map_y);
+    const pinned = taskHasPersistedMindmapPin(task);
     const shape: MindmapShape = mindmapShapeForTask(task);
     const size = mindmapNodeSize(shape);
     const rawX = pinned ? task.map_x! : projectX + Math.cos(angle) * radius;
@@ -509,7 +531,7 @@ export function layoutMindmap(
 }
 
 function separateUnpinned(nodes: MindmapNode[], tasks: ProjectTask[]): void {
-  const pinned = new Set(tasks.filter((task) => Number.isFinite(task.map_x) && Number.isFinite(task.map_y)).map((task) => task.task_id));
+  const pinned = new Set(tasks.filter((task) => taskHasPersistedMindmapPin(task)).map((task) => task.task_id));
   for (let pass = 0; pass < 8; pass += 1) {
     for (const node of nodes) {
       if (node.shape === 'project' || pinned.has(node.id)) continue;

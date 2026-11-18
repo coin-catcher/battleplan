@@ -1,4 +1,10 @@
-import { placeTaskOnMindmapForTask, PROJECT_RADIUS, TASK_HEIGHT, TASK_WIDTH } from './mindmap';
+import {
+  hasPersistedMindmapPin,
+  placeTaskOnMindmapForTask,
+  PROJECT_RADIUS,
+  TASK_HEIGHT,
+  TASK_WIDTH,
+} from './mindmap';
 import { mindmapCanvasCenter } from './project-ui-state';
 import type { Project, ProjectTask } from './models';
 
@@ -27,8 +33,8 @@ function taskRect(task: ProjectTask, defaultW = TASK_WIDTH, defaultH = TASK_HEIG
 function projectCenter(project: Project): { x: number; y: number } {
   const center = mindmapCanvasCenter();
   return {
-    x: Number.isFinite(project.map_x) ? project.map_x! : center.x,
-    y: Number.isFinite(project.map_y) ? project.map_y! : center.y,
+    x: hasPersistedMindmapPin(project.map_x, project.map_y) ? project.map_x! : center.x,
+    y: hasPersistedMindmapPin(project.map_x, project.map_y) ? project.map_y! : center.y,
   };
 }
 
@@ -50,7 +56,7 @@ export function scaledRecoveryCoordinatesIfFar(
   projectX: number,
   projectY: number,
 ): { x: number; y: number } | null {
-  if (!Number.isFinite(task.map_x) || !Number.isFinite(task.map_y)) return null;
+  if (!hasPersistedMindmapPin(task.map_x, task.map_y)) return null;
   let x = task.map_x!;
   let y = task.map_y!;
   if (isNearProjectShape(x, y, projectX, projectY)) {
@@ -132,12 +138,9 @@ export function withRecoveryMapPositions(
   return tasks.map((task) => {
     if (!revealed.has(task.task_id)) return task;
 
-    const farStored = Number.isFinite(task.map_x)
-      && Number.isFinite(task.map_y)
+    const farStored = hasPersistedMindmapPin(task.map_x, task.map_y)
       && !isNearProjectShape(task.map_x!, task.map_y!, projectX, projectY);
-    const needsPlacement = !Number.isFinite(task.map_x)
-      || !Number.isFinite(task.map_y)
-      || farStored;
+    const needsPlacement = !hasPersistedMindmapPin(task.map_x, task.map_y) || farStored;
 
     if (!needsPlacement) {
       const centered = placeTaskOnMindmapForTask(task.map_x!, task.map_y!, task);
