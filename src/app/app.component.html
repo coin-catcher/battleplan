@@ -241,12 +241,13 @@
               />
             }
             @for (edge of displayMindmapEdges(); track mindmapLinkKey(edge)) {
+              @if (mindmapEdgeSvgAttributes(edge); as line) {
               <line
                 class="map-link-hit"
-                [attr.x1]="edge.x1"
-                [attr.y1]="edge.y1"
-                [attr.x2]="edge.x2"
-                [attr.y2]="edge.y2"
+                [attr.x1]="line.x1"
+                [attr.y1]="line.y1"
+                [attr.x2]="line.x2"
+                [attr.y2]="line.y2"
                 (pointerdown)="onMindmapLinkPointerDown(edge, $event)"
               />
               <line
@@ -254,15 +255,16 @@
                 [class.dashed]="edge.stroke === 'dashed'"
                 [class.dotted]="edge.stroke === 'dotted'"
                 [class.selected]="isMindmapLinkSelected(edge)"
-                [attr.x1]="edge.x1"
-                [attr.y1]="edge.y1"
-                [attr.x2]="edge.x2"
-                [attr.y2]="edge.y2"
+                [attr.x1]="line.x1"
+                [attr.y1]="line.y1"
+                [attr.x2]="line.x2"
+                [attr.y2]="line.y2"
                 [attr.marker-end]="edge.stroke === 'dashed'
                   ? 'url(#arrow-dashed)'
                   : (edge.stroke === 'dotted' ? 'url(#arrow-dotted)' : 'url(#arrow-solid)')"
                 pointer-events="none"
               />
+              }
             }
           </svg>
           @for (edge of displayMindmapEdges(); track 'handle-' + mindmapLinkKey(edge)) {

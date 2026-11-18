@@ -49,8 +49,9 @@ import { ProjectPortability } from './data/project-portability.service';
 import {
   cardinalAnchor,
   CONNECT_ARROW_LENGTH_PX,
-  hasPersistedMindmapPin,
   layoutMindmap,
+  mindmapEdgeSvgAttributes,
+  resolvePersistedMindmapPin,
   mindmapNodesInWorldRect,
   normalizeWorldRect,
   offsetFromCardinal,
@@ -193,9 +194,7 @@ export class AppComponent implements OnInit {
     }
     const projectDrag = pins['project'];
     const projectPin = projectDrag
-      ?? (project && hasPersistedMindmapPin(project.map_x, project.map_y)
-        ? { x: project.map_x as number, y: project.map_y as number }
-        : undefined);
+      ?? (project ? resolvePersistedMindmapPin(project.map_x, project.map_y) : undefined);
     return layoutMindmap(
       project?.title ?? 'Project',
       tasks,
@@ -282,6 +281,7 @@ export class AppComponent implements OnInit {
   readonly selectedMindmapLink = signal<MindmapLinkRef | null>(null);
   readonly linkEndpointDrag = signal<{ link: MindmapLinkRef; end: 'from' | 'to'; x: number; y: number } | null>(null);
   readonly mindmapLinkKey = linkKey;
+  readonly mindmapEdgeSvgAttributes = mindmapEdgeSvgAttributes;
   readonly displayMindmapEdges = computed(() => {
     const edges = this.map().edges;
     const drag = this.linkEndpointDrag();

@@ -4,6 +4,7 @@ import {
   applyMindmapCanvasFrame,
   cardinalAnchor,
   layoutMindmap,
+  mindmapEdgeSvgAttributes,
   MINDMAP_CANVAS_MARGIN_PX,
   mindmapCanvasWorldSpan,
   mindmapNodeCenterFitsCanvas,
@@ -226,6 +227,26 @@ describe('mindmap', () => {
     expect(mindmapNodesInWorldRect(taskNodes, box).sort()).toEqual(['alpha', 'beta']);
     const tiny = normalizeWorldRect(alpha.x, alpha.y, alpha.x + 1, alpha.y + 1);
     expect(mindmapNodesInWorldRect(taskNodes, tiny)).toEqual(['alpha']);
+  });
+
+  it('produces finite SVG line attributes when tasks share the same stored pin', () => {
+    const pin = { map_x: 120, map_y: 140 };
+    const tasks = [
+      task('a', pin),
+      task('b', pin, 1),
+      task('c', pin, 2),
+    ];
+    const layout = layoutMindmap('Plan', tasks);
+    for (const edge of layout.edges) {
+      const attrs = mindmapEdgeSvgAttributes(edge);
+      expect(attrs.x1).not.toBe('NaN');
+      expect(attrs.y1).not.toBe('NaN');
+      expect(attrs.x2).not.toBe('NaN');
+      expect(attrs.y2).not.toBe('NaN');
+      for (const value of Object.values(attrs)) {
+        expect(Number.isFinite(Number(value))).toBe(true);
+      }
+    }
   });
 
   it('treats (0,0) as unpinned so legacy tasks spread around the project', () => {
