@@ -50,6 +50,7 @@ import {
   cardinalAnchor,
   CONNECT_ARROW_LENGTH_PX,
   layoutMindmap,
+  layoutMindmapOptionsForProject,
   mindmapEdgeSvgAttributes,
   resolvePersistedMindmapPin,
   mindmapNodesInWorldRect,
@@ -195,12 +196,15 @@ export class AppComponent implements OnInit {
     const projectDrag = pins['project'];
     const projectPin = projectDrag
       ?? (project ? resolvePersistedMindmapPin(project.map_x, project.map_y) : undefined);
+    const layoutOptions = layoutMindmapOptionsForProject(project);
+    const useFramedCoordinates = layoutOptions.useFramedCoordinates || draggingMindmap;
     return layoutMindmap(
       project?.title ?? 'Project',
       tasks,
       projectPin,
       project?.status,
       graphEdgesForMindmap(project ?? null, tasks),
+      { useFramedCoordinates },
     );
   });
 
