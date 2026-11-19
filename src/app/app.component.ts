@@ -68,6 +68,7 @@ import {
 } from './core/mindmap';
 import { graphEdgesForMindmap } from './core/task-ready';
 import { withRecoveryMapPositions } from './core/graph-recovery-placement';
+import { shouldApplyFramedMindmapLayout } from './core/mindmap-drag-pipeline';
 import { linkKey, type MindmapLinkRef } from './core/link-relocation';
 import {
   clampMindmapZoom,
@@ -197,7 +198,7 @@ export class AppComponent implements OnInit {
     const projectPin = projectDrag
       ?? (project ? resolvePersistedMindmapPin(project.map_x, project.map_y) : undefined);
     const layoutOptions = layoutMindmapOptionsForProject(project, tasks);
-    const useFramedCoordinates = layoutOptions.useFramedCoordinates || draggingMindmap;
+    const useFramedCoordinates = shouldApplyFramedMindmapLayout(project, tasks, layoutOptions, draggingMindmap);
     return layoutMindmap(
       project?.title ?? 'Project',
       tasks,
