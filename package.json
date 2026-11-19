@@ -1,6 +1,6 @@
 {
   "name": "battleplan",
-  "version": "1.0.69",
+  "version": "1.0.70",
   "description": "Strategy, tactics, design, and agent orchestration management dashboard for Cursor Cloud Agents.",
   "author": {
     "name": "coin-catcher",
@@ -21,6 +21,7 @@
     "test:local": "vitest run --reporter=verbose",
     "test:coverage": "vitest run --coverage --reporter=verbose",
     "test:mindmap-e2e": "vitest run e2e/mindmap-drag.test.ts --reporter=verbose",
+    "test:angular-e2e": "vitest run --config vitest.angular-e2e.config.ts --reporter=verbose",
     "test:agent": "vitest run --reporter=junit --outputFile=test-results/agent.xml"
   },
   "private": true,
