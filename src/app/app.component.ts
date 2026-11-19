@@ -196,7 +196,7 @@ export class AppComponent implements OnInit {
     const projectDrag = pins['project'];
     const projectPin = projectDrag
       ?? (project ? resolvePersistedMindmapPin(project.map_x, project.map_y) : undefined);
-    const layoutOptions = layoutMindmapOptionsForProject(project);
+    const layoutOptions = layoutMindmapOptionsForProject(project, tasks);
     const useFramedCoordinates = layoutOptions.useFramedCoordinates || draggingMindmap;
     return layoutMindmap(
       project?.title ?? 'Project',
@@ -1797,7 +1797,10 @@ export class AppComponent implements OnInit {
       if (dragged) {
         for (const id of dragIds) {
           const pin = pins[id];
-          if (pin) void this.store.placeNode(id, pin.x, pin.y);
+          if (pin) {
+            this.store.commitMindmapPosition(id, pin.x, pin.y);
+            void this.store.placeNode(id, pin.x, pin.y);
+          }
         }
       } else {
         this.selectMapNode(node);

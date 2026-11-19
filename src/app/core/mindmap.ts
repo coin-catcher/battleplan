@@ -73,9 +73,22 @@ export function mindmapUsesFramedCoordinates(mindmapPlacementVersion: number | u
 }
 
 export function layoutMindmapOptionsForProject(
-  project: Pick<import('./models').Project, 'mindmap_placement_version'> | null | undefined,
+  project: Pick<import('./models').Project, 'mindmap_placement_version' | 'map_x' | 'map_y'> | null | undefined,
+  tasks: Pick<ProjectTask, 'map_x' | 'map_y'>[] = [],
 ): LayoutMindmapOptions {
-  return { useFramedCoordinates: mindmapUsesFramedCoordinates(project?.mindmap_placement_version) };
+  const version = project?.mindmap_placement_version ?? 0;
+  if (project && mindmapPinsUseLegacyPreFrameSpace(project, tasks)) {
+    return { useFramedCoordinates: false };
+  }
+  const taskPins = tasks
+    .map((task) => resolvePersistedMindmapPin(task.map_x, task.map_y))
+    .filter((pin): pin is { x: number; y: number } => pin !== undefined);
+  const framedTaskPins = taskPins.filter((pin) => pin.x > LEGACY_MINDMAP_PIN_MAX + 400).length;
+  const usesFramedTasks = framedTaskPins >= Math.max(1, Math.ceil(taskPins.length / 2));
+  // v3+ stored world pins; v4+ skips canvas reframe on every layout pass.
+  return {
+    useFramedCoordinates: usesFramedTasks || version >= MINDMAP_PLACEMENT_VERSION,
+  };
 }
 export const MINDMAP_CANVAS_MARGIN_PX = 80;
 
@@ -114,6 +127,42 @@ export function taskHasPersistedMindmapPin(task: Pick<ProjectTask, 'map_x' | 'ma
   return resolvePersistedMindmapPin(task.map_x, task.map_y) !== undefined;
 }
 
+const LEGACY_MINDMAP_PIN_MAX = 2_500;
+
+/** Pre–world-canvas pins sit in the top-left quadrant; v4+ framed pins are near canvas center. */
+export function mindmapPinsUseLegacyPreFrameSpace(
+  project: Pick<import('./models').Project, 'map_x' | 'map_y'>,
+  tasks: Pick<ProjectTask, 'map_x' | 'map_y'>[],
+): boolean {
+  const pins = [
+    resolvePersistedMindmapPin(project.map_x, project.map_y),
+    ...tasks.map((task) => resolvePersistedMindmapPin(task.map_x, task.map_y)),
+  ].filter((pin): pin is { x: number; y: number } => pin !== undefined);
+  if (pins.length === 0) return false;
+  const clustered = pins.filter((pin) => pin.x <= LEGACY_MINDMAP_PIN_MAX && pin.y <= LEGACY_MINDMAP_PIN_MAX);
+  return clustered.length >= Math.max(3, Math.ceil(pins.length * 0.6));
+}
+
+/** Project still in the legacy corner while tasks already use framed world coordinates. */
+export function projectAndTasksMindmapSpaceMismatch(
+  project: Pick<import('./models').Project, 'map_x' | 'map_y'>,
+  tasks: Pick<ProjectTask, 'map_x' | 'map_y'>[],
+): boolean {
+  const projectPin = resolvePersistedMindmapPin(project.map_x, project.map_y);
+  if (!projectPin || projectPin.x >= LEGACY_MINDMAP_PIN_MAX) return false;
+  return tasks.some((task) => {
+    const pin = resolvePersistedMindmapPin(task.map_x, task.map_y);
+    return pin !== undefined && pin.x > LEGACY_MINDMAP_PIN_MAX + 400;
+  });
+}
+
+export function mindmapPinsAreFramedWorldSpace(
+  project: Pick<import('./models').Project, 'map_x' | 'map_y'>,
+  tasks: Pick<ProjectTask, 'map_x' | 'map_y'>[],
+): boolean {
+  return !mindmapPinsUseLegacyPreFrameSpace(project, tasks);
+}
+
 export function tasksHaveCollidingMindmapPins(
   tasks: Pick<ProjectTask, 'map_x' | 'map_y'>[],
 ): boolean {
@@ -135,6 +184,8 @@ export function projectOrTasksNeedMindmapRelayout(
   if (isMindmapPinSentinel(project.map_x, project.map_y)) return true;
   if (tasks.some((task) => isMindmapPinSentinel(task.map_x, task.map_y))) return true;
   if (tasksHaveCollidingMindmapPins(tasks)) return true;
+  if (mindmapPinsUseLegacyPreFrameSpace(project, tasks)) return true;
+  if (projectAndTasksMindmapSpaceMismatch(project, tasks)) return true;
   return false;
 }
 
@@ -506,8 +557,18 @@ export function layoutMindmap(
   });
 
   const defaultCenter = mindmapCanvasCenter();
-  const projectX = normalizeMindmapCoordinate(projectPin?.x) ?? defaultCenter.x;
-  const projectY = normalizeMindmapCoordinate(projectPin?.y) ?? defaultCenter.y;
+  const resolvedProjectPin = resolvePersistedMindmapPin(projectPin?.x, projectPin?.y);
+  let projectX = resolvedProjectPin?.x ?? defaultCenter.x;
+  let projectY = resolvedProjectPin?.y ?? defaultCenter.y;
+  if (
+    options?.useFramedCoordinates
+    && resolvedProjectPin
+    && resolvedProjectPin.x < LEGACY_MINDMAP_PIN_MAX
+    && resolvedProjectPin.y < LEGACY_MINDMAP_PIN_MAX
+  ) {
+    projectX = defaultCenter.x;
+    projectY = defaultCenter.y;
+  }
   const minCanvasSpan = mindmapCanvasWorldSpan();
   const usedPinKeys = new Set<string>();
   const nodes: MindmapNode[] = [{

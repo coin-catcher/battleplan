@@ -53,7 +53,6 @@ describe('graph-recovery-placement', () => {
     const placed = withRecoveryMapPositions(project, [pile, pileB], revealed);
     const nodeA = placed.find((item) => item.task_id === 'a')!;
     const nodeB = placed.find((item) => item.task_id === 'b')!;
-    expect(isNearProjectShape(nodeA.map_x!, nodeA.map_y!, center.x, center.y)).toBe(true);
     expect(isNearProjectShape(nodeB.map_x!, nodeB.map_y!, center.x, center.y)).toBe(true);
     expect(Math.hypot(nodeA.map_x! - nodeB.map_x!, nodeA.map_y! - nodeB.map_y!)).toBeGreaterThan(40);
   });
@@ -61,9 +60,18 @@ describe('graph-recovery-placement', () => {
   it('applyRecoveryMapPositions patches only revealed tasks', () => {
     const hidden = task('hidden', { map_x: 1, map_y: 1 });
     const far = task('far', { map_x: center.x + 8000, map_y: center.y + 8000 });
-  const out = applyRecoveryMapPositions(project, [hidden, far], new Set(['far']));
+    const out = applyRecoveryMapPositions(project, [hidden, far], new Set(['far']));
     expect(out.find((item) => item.task_id === 'hidden')).toMatchObject({ map_x: 1, map_y: 1 });
     const moved = out.find((item) => item.task_id === 'far')!;
-    expect(isNearProjectShape(moved.map_x!, moved.map_y!, center.x, center.y)).toBe(true);
+    expect(moved.map_x).toBeGreaterThan(center.x + 4000);
+    expect(moved.map_y).toBeGreaterThan(center.y + 4000);
+  });
+
+  it('keeps a persisted pin after the user drags away from the project during staged recovery', () => {
+    const dragged = task('far', { map_x: center.x + 900, map_y: center.y - 400 });
+    const placed = withRecoveryMapPositions(project, [dragged], new Set(['far']));
+    const node = placed.find((item) => item.task_id === 'far')!;
+    expect(node.map_x).toBeCloseTo(dragged.map_x!, 0);
+    expect(node.map_y).toBeCloseTo(dragged.map_y!, 0);
   });
 });

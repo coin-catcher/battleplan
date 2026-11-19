@@ -21,6 +21,7 @@
     "test:local": "vitest run --reporter=verbose",
     "test:coverage": "vitest run --coverage --reporter=verbose",
     "test:mindmap-e2e": "vitest run e2e/mindmap-drag.test.ts --reporter=verbose",
+    "test:angular-e2e": "vitest run --config vitest.angular-e2e.config.ts --reporter=verbose",
     "test:agent": "vitest run --reporter=junit --outputFile=test-results/agent.xml"
   },
   "private": true,
