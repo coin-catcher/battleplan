@@ -17,6 +17,7 @@ import {
   MINDMAP_PLACEMENT_VERSION,
   mindmapUsesFramedCoordinates,
   mindmapEdgeSvgAttributes,
+  mindmapPinsUseLegacyPreFrameSpace,
   projectOrTasksNeedMindmapRelayout,
   tasksHaveCollidingMindmapPins,
 } from './mindmap';
@@ -71,6 +72,23 @@ describe('mindmap scenarios', () => {
       expect(a.x).toBeCloseTo(b.x, 0);
       expect(a.y).toBeCloseTo(b.y, 0);
     }
+  });
+
+  it('places framed layout nodes at the exact persisted pin', () => {
+    const center = mindmapCanvasCenter();
+    const pin = { map_x: center.x + 260, map_y: center.y - 180 };
+    const task = baseTask('placed', pin);
+    const layout = layoutMindmap(
+      'Plan',
+      [task],
+      { x: center.x, y: center.y },
+      undefined,
+      undefined,
+      { useFramedCoordinates: true },
+    );
+    const node = layout.nodes.find((item) => item.id === 'placed')!;
+    expect(node.x).toBeCloseTo(pin.map_x!, 0);
+    expect(node.y).toBeCloseTo(pin.map_y!, 0);
   });
 
   it('simulates drag by updating stored pin without collapsing to origin', () => {
@@ -138,6 +156,17 @@ describe('mindmap scenarios', () => {
         expect(Number.isFinite(Number(value))).toBe(true);
       }
     }
+  });
+
+  it('detects legacy top-left pin clusters for migration', () => {
+    const project = { map_x: 118, map_y: 136 };
+    const tasks = [
+      baseTask('a', { map_x: 120, map_y: 140 }),
+      baseTask('b', { map_x: 128, map_y: 148 }, 1),
+      baseTask('c', { map_x: 136, map_y: 156 }, 2),
+    ];
+    expect(mindmapPinsUseLegacyPreFrameSpace(project, tasks)).toBe(true);
+    expect(projectOrTasksNeedMindmapRelayout(project, tasks)).toBe(true);
   });
 
   it('detects colliding pins and sentinel relayout needs', () => {

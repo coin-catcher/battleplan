@@ -26,6 +26,7 @@ import {
   layoutMindmap,
   layoutMindmapOptionsForProject,
   MINDMAP_PLACEMENT_VERSION,
+  mindmapPinsAreFramedWorldSpace,
   projectOrTasksNeedMindmapRelayout,
   resolvePersistedMindmapPin,
   placeTaskOnMindmapForTask,
@@ -591,14 +592,14 @@ export class BattleplanStore {
   }
 
   private async ensureMindmapPlacementMigrated(projectId: string): Promise<boolean> {
-    const project = this.project();
+    const project = this.projects().find((item) => item.project_id === projectId) ?? this.project();
     if (!project || project.project_id !== projectId) return false;
     const tasks = this.tasks().filter((task) => task.project_id === projectId);
     const version = project.mindmap_placement_version ?? 0;
     const needsContentRelayout = projectOrTasksNeedMindmapRelayout(project, tasks);
     const needsVersionBump = version < MINDMAP_PLACEMENT_VERSION;
     if (!needsContentRelayout && !needsVersionBump) return false;
-    if (!needsContentRelayout && needsVersionBump) {
+    if (!needsContentRelayout && needsVersionBump && mindmapPinsAreFramedWorldSpace(project, tasks)) {
       await this.run(async () => {
         await this.api.updateProject(projectId, { mindmap_placement_version: MINDMAP_PLACEMENT_VERSION });
         await this.reloadProjects();
@@ -1015,29 +1016,49 @@ export class BattleplanStore {
     if (projectId && this.selection().kind === 'project') await this.selectProject(projectId);
   }
 
+  /** Synchronous in-memory pin used before drag affordance clears (prevents layout snap-back). */
+  commitMindmapPosition(id: string, x: number, y: number): boolean {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    if (id === 'project') {
+      const project = this.project();
+      if (!project) return false;
+      const map_x = Math.round(x);
+      const map_y = Math.round(y);
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === project.project_id ? { ...item, map_x, map_y } : item
+      )));
+      return true;
+    }
+    const task = this.tasks().find((item) => item.task_id === id);
+    if (!task) return false;
+    const placed = placeTaskOnMindmapForTask(x, y, task);
+    this.replaceTask({ ...task, map_x: placed.x, map_y: placed.y });
+    return true;
+  }
+
   async placeNode(id: string, x: number, y: number): Promise<void> {
-    if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      this.error.set('Could not save the node position (invalid coordinates).');
+    if (!this.commitMindmapPosition(id, x, y)) {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        this.error.set('Could not save the node position (invalid coordinates).');
+      }
       return;
     }
-    const map_x = Math.round(x);
-    const map_y = Math.round(y);
     try {
       if (id === 'project') {
         const project = this.project();
         if (!project) return;
-        this.projects.update((projects) => projects.map((item) => item.project_id === project.project_id ? { ...item, map_x, map_y } : item));
-        const updated = await this.api.updateProject(project.project_id, { map_x, map_y });
+        const updated = await this.api.updateProject(project.project_id, {
+          map_x: project.map_x,
+          map_y: project.map_y,
+        });
         this.projects.update((projects) => projects.map((item) => item.project_id === updated.project_id ? updated : item));
         return;
       }
       const task = this.tasks().find((item) => item.task_id === id);
       if (!task) return;
-      const placed = placeTaskOnMindmapForTask(x, y, task);
-      this.replaceTask({ ...task, map_x: placed.x, map_y: placed.y });
       const updated = await this.api.updateTask(task.project_id, task.task_id, {
-        map_x: placed.x,
-        map_y: placed.y,
+        map_x: task.map_x,
+        map_y: task.map_y,
       });
       this.replaceTask(updated);
     } catch (error) {
@@ -1694,7 +1715,7 @@ export class BattleplanStore {
       resolvePersistedMindmapPin(project.map_x, project.map_y),
       project.status,
       project.task_graph_edges,
-      layoutMindmapOptionsForProject(project),
+      layoutMindmapOptionsForProject(project, this.tasks()),
     );
     const source = layout.nodes.find((node) => node.id === input.sourceId);
     if (!source) return null;

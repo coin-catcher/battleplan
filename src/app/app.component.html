@@ -379,6 +379,7 @@
             }
             <div
               class="map-node"
+              [attr.data-node-id]="node.id"
               [class.circle]="node.shape === 'project' || node.shape === 'subproject'"
               [class.cloud]="node.shape === 'fog' || node.shape === 'brainstorm'"
               [class.research]="node.shape === 'research'"
