@@ -22,11 +22,11 @@ import { defaultOptionValues, getAgentTypeDefinition } from '../core/agent-types
 import { isAgentDraftId, newDraftAgentId } from '../core/agent-id';
 import type { AgentEditorSaveInput } from '../api/battleplan-api.service';
 import { fieldsFromTaskEditorKind } from '../core/task-editor-kind';
+import { computeMindmapPlacementPatch } from '../core/mindmap-drag-pipeline';
 import {
   layoutMindmap,
   layoutMindmapOptionsForProject,
   MINDMAP_PLACEMENT_VERSION,
-  mindmapPinsAreFramedWorldSpace,
   projectOrTasksNeedMindmapRelayout,
   resolvePersistedMindmapPin,
   placeTaskOnMindmapForTask,
@@ -595,45 +595,33 @@ export class BattleplanStore {
     const project = this.projects().find((item) => item.project_id === projectId) ?? this.project();
     if (!project || project.project_id !== projectId) return false;
     const tasks = this.tasks().filter((task) => task.project_id === projectId);
-    const version = project.mindmap_placement_version ?? 0;
-    const needsContentRelayout = projectOrTasksNeedMindmapRelayout(project, tasks);
-    const needsVersionBump = version < MINDMAP_PLACEMENT_VERSION;
-    if (!needsContentRelayout && !needsVersionBump) return false;
-    if (!needsContentRelayout && needsVersionBump && mindmapPinsAreFramedWorldSpace(project, tasks)) {
-      await this.run(async () => {
-        await this.api.updateProject(projectId, { mindmap_placement_version: MINDMAP_PLACEMENT_VERSION });
-        await this.reloadProjects();
+    const patch = computeMindmapPlacementPatch(project, tasks);
+    if (!patch) return false;
+    try {
+      const updatedProject = await this.api.updateProject(projectId, {
+        map_x: patch.project.map_x,
+        map_y: patch.project.map_y,
+        mindmap_placement_version: patch.project.mindmap_placement_version,
       });
-      return true;
-    }
-    const layout = layoutMindmap(
-      project.title,
-      tasks,
-      resolvePersistedMindmapPin(project.map_x, project.map_y),
-      project.status,
-      project.task_graph_edges,
-      { useFramedCoordinates: false },
-    );
-    const projectNode = layout.nodes.find((node) => node.id === 'project');
-    if (!projectNode) return false;
-    await this.run(async () => {
-      await this.api.updateProject(projectId, {
-        map_x: Math.round(projectNode.x),
-        map_y: Math.round(projectNode.y),
-        mindmap_placement_version: MINDMAP_PLACEMENT_VERSION,
-      });
-      for (const task of tasks) {
-        const node = layout.nodes.find((item) => item.id === task.task_id);
-        if (!node) continue;
-        const updated = await this.api.updateTask(projectId, task.task_id, {
-          map_x: Math.round(node.x),
-          map_y: Math.round(node.y),
+      this.projects.update((projects) => projects.map((item) => (
+        item.project_id === updatedProject.project_id ? updatedProject : item
+      )));
+      for (const row of patch.tasks) {
+        const task = tasks.find((item) => item.task_id === row.task_id);
+        if (!task) continue;
+        const updated = await this.api.updateTask(projectId, row.task_id, {
+          map_x: row.map_x,
+          map_y: row.map_y,
         });
         this.replaceTask(updated);
       }
       await this.reloadProjects();
-    });
-    return true;
+      await this.reloadTasks();
+      return true;
+    } catch (error) {
+      this.error.set(error instanceof Error ? error.message : 'Could not migrate mindmap placement.');
+      return false;
+    }
   }
 
   async refreshPendingChanges(): Promise<void> {
@@ -1061,6 +1049,10 @@ export class BattleplanStore {
         map_y: task.map_y,
       });
       this.replaceTask(updated);
+      const projectId = task.project_id;
+      if (projectOrTasksNeedMindmapRelayout(this.project() ?? { map_x: undefined, map_y: undefined }, this.tasks())) {
+        await this.ensureMindmapPlacementMigrated(projectId);
+      }
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : 'Could not save the node position.');
     }

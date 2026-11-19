@@ -8,6 +8,7 @@ export default defineConfig({
       provider: 'v8',
       include: [
         'src/app/core/mindmap.ts',
+        'src/app/core/mindmap-drag-pipeline.ts',
         'src/app/core/graph-recovery-placement.ts',
         'src/app/core/mindmap-shape.ts',
         'src/app/core/fixtures/mindmap-sample-project.ts',

@@ -77,7 +77,7 @@ export function layoutMindmapOptionsForProject(
   tasks: Pick<ProjectTask, 'map_x' | 'map_y'>[] = [],
 ): LayoutMindmapOptions {
   const version = project?.mindmap_placement_version ?? 0;
-  if (project && mindmapPinsUseLegacyPreFrameSpace(project, tasks)) {
+  if (project && mindmapPinsUseLegacyPreFrameSpace(project, tasks) && !hasAnyFramedWorldTaskPin(tasks)) {
     return { useFramedCoordinates: false };
   }
   const taskPins = tasks
@@ -127,7 +127,14 @@ export function taskHasPersistedMindmapPin(task: Pick<ProjectTask, 'map_x' | 'ma
   return resolvePersistedMindmapPin(task.map_x, task.map_y) !== undefined;
 }
 
-const LEGACY_MINDMAP_PIN_MAX = 2_500;
+export const LEGACY_MINDMAP_PIN_MAX = 2_500;
+
+export function hasAnyFramedWorldTaskPin(tasks: Pick<ProjectTask, 'map_x' | 'map_y'>[]): boolean {
+  return tasks.some((task) => {
+    const pin = resolvePersistedMindmapPin(task.map_x, task.map_y);
+    return pin !== undefined && pin.x > LEGACY_MINDMAP_PIN_MAX;
+  });
+}
 
 /** Pre–world-canvas pins sit in the top-left quadrant; v4+ framed pins are near canvas center. */
 export function mindmapPinsUseLegacyPreFrameSpace(
