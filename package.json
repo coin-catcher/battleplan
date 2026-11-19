@@ -1,6 +1,6 @@
 {
   "name": "battleplan",
-  "version": "1.0.68",
+  "version": "1.0.69",
   "description": "Strategy, tactics, design, and agent orchestration management dashboard for Cursor Cloud Agents.",
   "author": {
     "name": "coin-catcher",
@@ -19,6 +19,8 @@
     "watch": "ng build --watch --configuration development",
     "test": "npm run test:local",
     "test:local": "vitest run --reporter=verbose",
+    "test:coverage": "vitest run --coverage --reporter=verbose",
+    "test:mindmap-e2e": "vitest run e2e/mindmap-drag.test.ts --reporter=verbose",
     "test:agent": "vitest run --reporter=junit --outputFile=test-results/agent.xml"
   },
   "private": true,
@@ -47,6 +49,7 @@
     "@angular/compiler-cli": "^19.2.0",
     "@types/archiver": "^6.0.3",
     "@types/jasmine": "~5.1.0",
+    "@vitest/coverage-v8": "^3.2.7",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "concurrently": "^9.2.1",
@@ -60,6 +63,7 @@
     "karma-coverage": "~2.2.0",
     "karma-jasmine": "~5.1.0",
     "karma-jasmine-html-reporter": "~2.1.0",
+    "puppeteer": "^25.18.1",
     "typescript": "~5.7.2",
     "vitest": "^3.2.4",
     "wait-on": "^8.0.5"

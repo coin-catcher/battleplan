@@ -56,8 +56,27 @@ export interface MindmapLayout {
 export const PROJECT_RADIUS = 68;
 export const TASK_WIDTH = 156;
 export const TASK_HEIGHT = 64;
-/** Bumped when persisted map coordinates are re-centered on the world canvas. */
-export const MINDMAP_PLACEMENT_VERSION = 3;
+/** Bumped when persisted map coordinates are stored in framed world space (no per-layout reframe). */
+export const MINDMAP_PLACEMENT_VERSION = 4;
+
+export interface LayoutMindmapOptions {
+  /**
+   * When true, `map_x` / `map_y` are already in framed world coordinates.
+   * Skips {@link applyMindmapCanvasFrame} so drag and reload do not re-center the graph.
+   */
+  useFramedCoordinates?: boolean;
+}
+
+/** True once migration has stored coordinates in framed world space. */
+export function mindmapUsesFramedCoordinates(mindmapPlacementVersion: number | undefined): boolean {
+  return (mindmapPlacementVersion ?? 0) >= MINDMAP_PLACEMENT_VERSION;
+}
+
+export function layoutMindmapOptionsForProject(
+  project: Pick<import('./models').Project, 'mindmap_placement_version'> | null | undefined,
+): LayoutMindmapOptions {
+  return { useFramedCoordinates: mindmapUsesFramedCoordinates(project?.mindmap_placement_version) };
+}
 export const MINDMAP_CANVAS_MARGIN_PX = 80;
 
 /** Legacy rows used (0,0) before placement migration — not a real user pin. */
@@ -95,12 +114,28 @@ export function taskHasPersistedMindmapPin(task: Pick<ProjectTask, 'map_x' | 'ma
   return resolvePersistedMindmapPin(task.map_x, task.map_y) !== undefined;
 }
 
+export function tasksHaveCollidingMindmapPins(
+  tasks: Pick<ProjectTask, 'map_x' | 'map_y'>[],
+): boolean {
+  const seen = new Set<string>();
+  for (const task of tasks) {
+    const pin = resolvePersistedMindmapPin(task.map_x, task.map_y);
+    if (!pin) continue;
+    const key = `${pin.x},${pin.y}`;
+    if (seen.has(key)) return true;
+    seen.add(key);
+  }
+  return false;
+}
+
 export function projectOrTasksNeedMindmapRelayout(
   project: Pick<import('./models').Project, 'map_x' | 'map_y'>,
   tasks: Pick<ProjectTask, 'map_x' | 'map_y'>[],
 ): boolean {
   if (isMindmapPinSentinel(project.map_x, project.map_y)) return true;
-  return tasks.some((task) => isMindmapPinSentinel(task.map_x, task.map_y));
+  if (tasks.some((task) => isMindmapPinSentinel(task.map_x, task.map_y))) return true;
+  if (tasksHaveCollidingMindmapPins(tasks)) return true;
+  return false;
 }
 
 export type CardinalDirection = 'north' | 'south' | 'east' | 'west';
@@ -421,6 +456,7 @@ export function layoutMindmap(
   projectPin?: { x: number; y: number },
   projectStatus?: TaskStatus,
   graphEdges?: TaskGraphEdge[],
+  options?: LayoutMindmapOptions,
 ): MindmapLayout {
   const byId = new Map(tasks.map((task) => [task.task_id, task]));
   const depth = depthByNormalLinks(tasks);
@@ -518,7 +554,9 @@ export function layoutMindmap(
   }
   separateUnpinned(nodes, tasks);
   clampMindmapTaskNodesInPlace(nodes, minCanvasSpan);
-  applyMindmapCanvasFrame(nodes, minCanvasSpan);
+  if (!options?.useFramedCoordinates) {
+    applyMindmapCanvasFrame(nodes, minCanvasSpan);
+  }
   clampMindmapTaskNodesInPlace(nodes, minCanvasSpan);
 
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
