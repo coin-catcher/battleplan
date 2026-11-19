@@ -24,6 +24,7 @@ import type { AgentEditorSaveInput } from '../api/battleplan-api.service';
 import { fieldsFromTaskEditorKind } from '../core/task-editor-kind';
 import {
   layoutMindmap,
+  layoutMindmapOptionsForProject,
   MINDMAP_PLACEMENT_VERSION,
   projectOrTasksNeedMindmapRelayout,
   resolvePersistedMindmapPin,
@@ -593,15 +594,24 @@ export class BattleplanStore {
     const project = this.project();
     if (!project || project.project_id !== projectId) return false;
     const tasks = this.tasks().filter((task) => task.project_id === projectId);
-    const needsRelayout = (project.mindmap_placement_version ?? 0) < MINDMAP_PLACEMENT_VERSION
-      || projectOrTasksNeedMindmapRelayout(project, tasks);
-    if (!needsRelayout) return false;
+    const version = project.mindmap_placement_version ?? 0;
+    const needsContentRelayout = projectOrTasksNeedMindmapRelayout(project, tasks);
+    const needsVersionBump = version < MINDMAP_PLACEMENT_VERSION;
+    if (!needsContentRelayout && !needsVersionBump) return false;
+    if (!needsContentRelayout && needsVersionBump) {
+      await this.run(async () => {
+        await this.api.updateProject(projectId, { mindmap_placement_version: MINDMAP_PLACEMENT_VERSION });
+        await this.reloadProjects();
+      });
+      return true;
+    }
     const layout = layoutMindmap(
       project.title,
       tasks,
       resolvePersistedMindmapPin(project.map_x, project.map_y),
       project.status,
       project.task_graph_edges,
+      { useFramedCoordinates: false },
     );
     const projectNode = layout.nodes.find((node) => node.id === 'project');
     if (!projectNode) return false;
@@ -1681,11 +1691,10 @@ export class BattleplanStore {
     const layout = layoutMindmap(
       project.title,
       this.tasks(),
-      Number.isFinite(project.map_x) && Number.isFinite(project.map_y)
-        ? { x: project.map_x as number, y: project.map_y as number }
-        : undefined,
+      resolvePersistedMindmapPin(project.map_x, project.map_y),
       project.status,
       project.task_graph_edges,
+      layoutMindmapOptionsForProject(project),
     );
     const source = layout.nodes.find((node) => node.id === input.sourceId);
     if (!source) return null;
